@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 
 // ── Hằng số ────────────────────────────────────────────────────────────────────
-const GUN_DEFAULT_POS = new THREE.Vector3(0.25, -0.22, -0.5)
+const GUN_DEFAULT_POS = new THREE.Vector3(0.28, -0.30, -0.45)
 const GUN_HIDDEN_Y    = -0.55
 const ANIM_HALF       = 0.15   // 0.15 s mỗi chiều
 
@@ -64,6 +64,22 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
   const gunGroup = new THREE.Group()
   gunGroup.position.copy(GUN_DEFAULT_POS)
   scene.add(gunGroup)
+
+// ── Cánh tay trái (sleeve) ─────────────────────────────────────────────────
+  // Dựng cánh tay đi từ cạnh dưới màn hình vươn lên ôm lấy thân súng
+  // const armMesh = new THREE.Mesh(
+  //   new THREE.BoxGeometry(0.15, 0.7, 0.3), // [rộng, chiều dài, độ dày]
+  //   new THREE.MeshLambertMaterial({ color: 0x1e2840 }), // màu tay áo tối
+  // )
+  
+  // // Dịch sang phải và tiến lên phía trước (Z âm nhiều hơn) để khớp với ống lót tay của súng
+  // armMesh.position.set(-0.18, -0.28, -0.38)
+  
+  // // Xoay nhẹ để tay ôm tự nhiên vào thân súng
+  // armMesh.rotation.z = -0.25; 
+  // armMesh.rotation.x = 0.35;
+  
+  // gunGroup.add(armMesh)
 
   // Trạng thái
   let currentWeapon = 0
