@@ -103,6 +103,24 @@ def normalize(params_path, out_path):
     except Exception as ex:
         print("find_missing_files:", ex)
 
+    # 6b) Tái tạo materials: Blender 5.x glTF exporter bỏ qua pbrMetallicRoughness khi
+    # material tree có FRAME node cha, nhiều Material Output, hoặc blend_method=HASHED
+    # (legacy từ file .blend cũ). Cách chắc nhất: xoá sạch và rebuild với Principled BSDF.
+    for mat in bpy.data.materials:
+        if not mat.use_nodes:
+            continue
+        tree = mat.node_tree
+        pbsdf = next((n for n in tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        bc = list(pbsdf.inputs['Base Color'].default_value) if pbsdf else [0.8, 0.8, 0.8, 1.0]
+        tree.nodes.clear()
+        out_node = tree.nodes.new('ShaderNodeOutputMaterial')
+        out_node.location = (300, 0)
+        bsdf_node = tree.nodes.new('ShaderNodeBsdfPrincipled')
+        bsdf_node.location = (0, 0)
+        bsdf_node.inputs['Base Color'].default_value = bc
+        tree.links.new(bsdf_node.outputs['BSDF'], out_node.inputs['Surface'])
+        print(f"  rebuilt material '{mat.name}' base_color={[round(v, 3) for v in bc[:3]]}")
+
     # 7) Xuất GLB
     bpy.ops.export_scene.gltf(
         filepath=out_path,

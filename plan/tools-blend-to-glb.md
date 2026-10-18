@@ -247,6 +247,12 @@ blender -b --python-expr "import bpy; bpy.ops.wm.read_factory_settings(use_empty
 ```
 Sau khi import, trục của Blender lại về Z-up, nên phải thấy: nòng theo **+Y**, size đúng mét, có object `muzzle`, `total_tris` ≤ 20.000, image đều `packed` hoặc nhúng.
 
+```
+cd /Users/I762313/projects/personal/fps-web && \
+blender -b assets/source/guns/m16.blend --python tools/blender/gun_tool.py -- normalize assets/source/guns/m16.params.json client/public/models/m16.glb 2>&1 | grep -E "(rebuilt|EXPORTED|Error)" && \
+blender -b assets/source/guns/ak47.blend --python tools/blender/gun_tool.py -- normalize assets/source/guns/ak47.params.json client/public/models/ak47.glb 2>&1 | grep -E "(rebuilt|EXPORTED|Error)"
+```
+
 ### B5. Trang viewer trong dự án
 
 Tạo `client/viewer.html` (route dev `/viewer.html?model=rifle`):
@@ -257,16 +263,18 @@ Tạo `client/viewer.html` (route dev `/viewer.html?model=rifle`):
 - OrbitControls để xoay xem.
 
 Nghiệm thu:
-- [ ] Nòng chĩa theo trục **−Z** (cùng chiều thước đỏ).
-- [ ] Chiều dài đúng loại súng so với thước 1m.
-- [ ] Quả cầu vàng nằm đúng đầu nòng.
-- [ ] Gốc toạ độ (giao điểm AxesHelper) nằm ở tay cầm.
-- [ ] Texture hiện đúng màu, không trắng/không hồng.
+- [x] Nòng chĩa theo trục **−Z** (cùng chiều thước đỏ).
+- [x] Chiều dài đúng loại súng so với thước 1m.
+- [x] Quả cầu vàng nằm đúng đầu nòng.
+- [x] Gốc toạ độ (giao điểm AxesHelper) nằm ở tay cầm.
+- [x] Texture hiện đúng màu, không trắng/không hồng.
 
 ### B6. Nén (sau khi B5 đạt)
 
 ```bash
-npx @gltf-transform/cli optimize client/public/models/rifle.glb client/public/models/rifle.glb --texture-compress webp --texture-size 1024
+npx @gltf-transform/cli optimize client/public/models/ak47.glb client/public/models/ak47.glb --texture-compress webp --texture-size 1024
+
+npx @gltf-transform/cli optimize client/public/models/m16.glb client/public/models/m16.glb --texture-compress webp --texture-size 1024
 ```
 
 Nếu sau khi nén game báo lỗi decoder: thêm `MeshoptDecoder` (từ `three/examples/jsm/libs/meshopt_decoder.module.js`) vào `GLTFLoader` bằng `loader.setMeshoptDecoder(...)`. Mở lại viewer kiểm tra lần nữa.

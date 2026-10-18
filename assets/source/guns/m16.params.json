@@ -1,0 +1,9 @@
+{
+  "scale": 0.174,
+  "rotate_deg": [0, 0, 90],
+  "grip": [0.0, 0.0, 0.0],
+  "muzzle": [3.609, 0.0, 0.64],
+  "eject": [0.5, 0.17, 0.30],
+  "rename": {},
+  "decimate_ratio": null
+}

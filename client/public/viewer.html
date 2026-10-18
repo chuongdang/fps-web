@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gun Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a1a; overflow: hidden; }
+    canvas { display: block; }
+    #ui {
+      position: fixed; top: 12px; left: 12px;
+      color: #ccc; font: 13px/1.6 monospace;
+      background: rgba(0,0,0,.55); padding: 8px 12px; border-radius: 6px;
+      pointer-events: none;
+    }
+    #ui b { color: #fff; }
+    #checklist { margin-top: 6px; font-size: 12px; }
+    #checklist li { list-style: none; }
+    #checklist li.ok  { color: #6f6; }
+    #checklist li.bad { color: #f66; }
+    #checklist li.unk { color: #aaa; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.176.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+<div id="ui">
+  <b id="model-name">–</b>
+  <ul id="checklist">
+    <li id="ck-dir"  class="unk">[ ] Nòng chĩa −Z</li>
+    <li id="ck-len"  class="unk">[ ] Chiều dài đúng</li>
+    <li id="ck-muz"  class="unk">[ ] Muzzle node tồn tại</li>
+    <li id="ck-grip" class="unk">[ ] Gốc toạ độ ở tay cầm</li>
+    <li id="ck-mat"  class="unk">[ ] Màu hiện đúng</li>
+  </ul>
+  <div id="info" style="margin-top:6px;font-size:11px;color:#888"></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const params = new URLSearchParams(location.search);
+const modelName = params.get('model') || 'ak47';
+document.getElementById('model-name').textContent = modelName.toUpperCase();
+
+// --- renderer ---
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// --- scene ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+// lighting
+scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+sun.position.set(1, 2, 1);
+scene.add(sun);
+
+// grid: 4m total, 0.1m cell = 40 divisions
+scene.add(new THREE.GridHelper(4, 40, 0x444444, 0x2a2a2a));
+
+// axes 0.5m
+scene.add(new THREE.AxesHelper(0.5));
+
+// red ruler: 1m box along -Z (from z=0 to z=-1)
+const rulerGeo = new THREE.BoxGeometry(0.008, 0.008, 1.0);
+const rulerMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+const ruler = new THREE.Mesh(rulerGeo, rulerMat);
+ruler.position.set(0.05, 0.0, -0.5); // offset slightly in X so it sits beside gun
+scene.add(ruler);
+
+// ruler end cap labels via small spheres
+const capMat = new THREE.MeshBasicMaterial({ color: 0xff6666 });
+for (const z of [0, -1]) {
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), capMat);
+  cap.position.set(0.05, 0, z);
+  scene.add(cap);
+}
+
+// --- camera ---
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.01, 100);
+camera.position.set(0.6, 0.4, 0.8);
+
+// --- controls ---
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0.05, 0);
+controls.update();
+
+// --- load model ---
+const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);
+loader.load(
+  `models/${modelName}.glb`,
+  (gltf) => {
+    const model = gltf.scene;
+    scene.add(model);
+
+    // bounding box
+    const box = new THREE.Box3().setFromObject(model);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+
+    // check 1: barrel along -Z (longest axis should be Z)
+    const longest = Math.max(size.x, size.y, size.z);
+    const ckDir = document.getElementById('ck-dir');
+    if (size.z === longest) {
+      ckDir.className = 'ok'; ckDir.textContent = '[✓] Nòng chĩa −Z';
+    } else {
+      ckDir.className = 'bad';
+      ckDir.textContent = `[✗] Nòng chĩa −Z  (longest: ${['X','Y','Z'][['x','y','z'].indexOf(Object.keys({x:size.x,y:size.y,z:size.z}).sort((a,b)=>size[b]-size[a])[0])]})`;
+    }
+
+    // check 2: length
+    const ckLen = document.getElementById('ck-len');
+    const len = size.z.toFixed(3);
+    if (size.z >= 0.7 && size.z <= 1.1) {
+      ckLen.className = 'ok'; ckLen.textContent = `[✓] Dài ${len}m (0.7–1.1m)`;
+    } else {
+      ckLen.className = 'bad'; ckLen.textContent = `[✗] Dài ${len}m (ngoài 0.7–1.1m)`;
+    }
+
+    // check 3: muzzle node
+    const muzzleObj = model.getObjectByName('muzzle');
+    const ckMuz = document.getElementById('ck-muz');
+    if (muzzleObj) {
+      ckMuz.className = 'ok'; ckMuz.textContent = '[✓] Muzzle node tồn tại';
+
+      const muzzlePos = new THREE.Vector3();
+      muzzleObj.getWorldPosition(muzzlePos);
+
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.018, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffdd00 })
+      );
+      sphere.position.copy(muzzlePos);
+      scene.add(sphere);
+    } else {
+      ckMuz.className = 'bad'; ckMuz.textContent = '[✗] Muzzle node thiếu';
+    }
+
+    // check 4: origin at grip (GunRoot near 0,0,0)
+    const gunRoot = model.getObjectByName('GunRoot');
+    const ckGrip = document.getElementById('ck-grip');
+    if (gunRoot) {
+      const wp = new THREE.Vector3();
+      gunRoot.getWorldPosition(wp);
+      const dist = wp.length();
+      if (dist < 0.01) {
+        ckGrip.className = 'ok'; ckGrip.textContent = '[✓] Gốc tại origin';
+      } else {
+        ckGrip.className = 'bad'; ckGrip.textContent = `[✗] GunRoot offset ${dist.toFixed(3)}m`;
+      }
+    } else {
+      ckGrip.className = 'unk'; ckGrip.textContent = '[?] Không tìm thấy GunRoot';
+    }
+
+    // check 5: materials (not white)
+    const ckMat = document.getElementById('ck-mat');
+    let hasColor = false;
+    model.traverse(obj => {
+      if (!obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => {
+        if (m.color) {
+          const { r, g, b } = m.color;
+          if (!(r > 0.95 && g > 0.95 && b > 0.95)) hasColor = true;
+        }
+      });
+    });
+    ckMat.className = hasColor ? 'ok' : 'bad';
+    ckMat.textContent = hasColor ? '[✓] Màu hiện đúng (không trắng)' : '[✗] Màu toàn trắng';
+
+    // info
+    document.getElementById('info').textContent =
+      `tris: ${countTris(model)}  |  size: ${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}m`;
+
+    // orbit target to gun center
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    controls.target.copy(center);
+    controls.update();
+  },
+  undefined,
+  (err) => {
+    document.getElementById('info').textContent = 'Lỗi load: ' + err.message;
+  }
+);
+
+function countTris(obj) {
+  let n = 0;
+  obj.traverse(o => {
+    if (o.isMesh && o.geometry) {
+      const idx = o.geometry.index;
+      n += idx ? idx.count / 3 : o.geometry.attributes.position.count / 3;
+    }
+  });
+  return Math.round(n);
+}
+
+// --- render loop ---
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// --- resize ---
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
