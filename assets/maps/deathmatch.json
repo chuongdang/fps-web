@@ -34,8 +34,8 @@
     { "pos": [-14, 0.4, 0],   "size": [1, 1, 1],      "texture": "crate" },
     { "pos": [-10, 0.4, 8],   "size": [1, 1, 1],      "texture": "crate" },
 
-    { "pos": [-1, 1.5, -20],    "size": [0.4, 4, 8],      "texture": "wall" },
-    { "pos": [-1, 1.5, 20],    "size": [0.4, 4, 8],      "texture": "wall" }
+    { "pos": [-1.5, 1.5, -18],    "size": [0.4, 4, 4],      "texture": "wall" },
+    { "pos": [-1.5, 1.5, 18],    "size": [0.4, 4, 4],      "texture": "wall" }
   ],
   "ramps": [
     { "from": [-27, 0, 0],     "to": [-19.75, 4, 0],  "width": 4 },
