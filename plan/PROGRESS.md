@@ -17,7 +17,7 @@
 - [x] 1.6 Test determinism + debug overlay — movement.test.ts (2 world song song 600 tick bit-identical; chạy thẳng 2s → 8.4–8.6 m/s); F3 overlay (FPS, tốc độ, grounded, slideTimer, pos, yaw/pitch); F6 panel (sliders + Copy JSON)
 
 ## Phase 2 – Súng offline
-- [ ] 2.1 Viewmodel + render pass riêng
+- [x] 2.1 Viewmodel + render pass riêng — weapons.ts (WeaponDef, WEAPONS Rifle/Pistol, WeaponState); viewmodel.ts (viewScene FOV60 near0.01, gun placeholder box, switch anim 0.3s xuống/lên, phím 1/2); renderer.autoClear=false + clearDepth() giữa 2 pass
 - [ ] 2.2 Hitscan + bia
 - [ ] 2.3 Logic súng (đạn, reload, fire rate, spread, recoil)
 - [ ] 2.4 Hiệu ứng + âm thanh + HUD

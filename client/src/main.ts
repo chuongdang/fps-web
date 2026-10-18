@@ -7,6 +7,7 @@ import { initInput, applyCameraRotation } from './input'
 import { startLoop, initGameState, defaultMovement } from './loop'
 import { initDebugOverlay } from './debug'
 import { initTuningPanel } from './tuning'
+import { createViewmodel } from './render/viewmodel'
 import mapFileRaw from '@assets/maps/deathmatch.json'
 
 const mapFile   = mapFileRaw as unknown as MapFile
@@ -16,6 +17,7 @@ const loadedMap = loadMap(mapFile)
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
+renderer.autoClear = false   // manual clear để render viewmodel pass riêng
 document.body.style.margin = '0'
 document.body.appendChild(renderer.domElement)
 
@@ -62,6 +64,16 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
+  vm.updateAspect(camera.aspect)
+})
+
+// ── Viewmodel ─────────────────────────────────────────────────────────────────
+const vm = createViewmodel(window.innerWidth / window.innerHeight)
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Digit1') vm.switchWeapon(0)
+  if (e.code === 'Digit2') vm.switchWeapon(1)
+  if (e.code === 'F4' && debugLines) { debugLines.visible = !debugLines.visible; e.preventDefault() }
 })
 
 // ── Physics world + game loop ─────────────────────────────────────────────────
@@ -90,7 +102,8 @@ createWorld(loadedMap, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(world
 
   startLoop(world, cfg, state => {
     const now = performance.now()
-    const fps = 1000 / (now - lastMs)
+    const dt  = (now - lastMs) / 1000
+    const fps = 1 / dt
     lastMs    = now
 
     const targetEye = state.crouching ? cfg.eyeCrouch : cfg.eyeStand
@@ -98,15 +111,15 @@ createWorld(loadedMap, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(world
 
     camera.position.set(state.pos[0], state.pos[1] + eyeY, state.pos[2])
     applyCameraRotation(camera)
+
+    vm.update(dt)
+
+    // Render: world pass → clear depth → viewmodel pass
+    renderer.clear()
     renderer.render(scene, camera)
+    renderer.clearDepth()
+    renderer.render(vm.scene, vm.cam)
 
     updateDebug(state, fps)
   })
-})
-
-document.addEventListener('keydown', (e) => {
-  if (e.code === 'F4' && debugLines) {
-    debugLines.visible = !debugLines.visible
-    e.preventDefault()
-  }
 })
