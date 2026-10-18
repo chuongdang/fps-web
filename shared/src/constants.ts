@@ -1,0 +1,10 @@
+export const TICK_RATE = 60;
+export const DT = 1 / TICK_RATE;
+export const SNAPSHOT_EVERY_TICKS = 3;   // 20 snapshot/giây
+export const INTERP_DELAY_MS = 100;
+export const MAX_REWIND_MS = 250;
+export const HITBOX_HISTORY_MS = 1000;
+export const MAX_INPUT_QUEUE = 10;
+export const MAX_INPUTS_PER_TICK = 2;
+export const RESPAWN_DELAY_MS = 3000;
+export const SPAWN_INVULN_MS = 2000;

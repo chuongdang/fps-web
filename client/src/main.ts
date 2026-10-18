@@ -1,6 +1,6 @@
-import { VERSION } from '@fps/shared'
+import { TICK_RATE } from '@fps/shared'
 
 const app = document.getElementById('app')
 if (app != null) {
-  app.textContent = `FPS Web v${VERSION}`
+  app.textContent = `FPS Web (${TICK_RATE} tick/s)`
 }

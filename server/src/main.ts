@@ -1,13 +1,13 @@
-import { createServer } from 'http';
-import { VERSION } from '@fps/shared';
+import { createServer } from 'http'
+import { TICK_RATE } from '@fps/shared'
 
-const PORT = 8080;
+const PORT = 8080
 
 const server = createServer((_req, res) => {
-  res.writeHead(200);
-  res.end(`FPS Server v${VERSION}`);
-});
+  res.writeHead(200)
+  res.end(`FPS Server tick=${TICK_RATE}`)
+})
 
 server.listen(PORT, () => {
-  console.log(`listening ${PORT}`);
-});
+  console.log(`listening ${PORT}`)
+})

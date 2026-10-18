@@ -11,6 +11,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@msgpack/msgpack": "3.0.0"
+  },
   "devDependencies": {
     "typescript": "5.6.3"
   }
