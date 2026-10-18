@@ -33,7 +33,14 @@ export function initInput(canvas: HTMLElement): void {
   document.addEventListener('pointerlockchange', () => {
     const isLocked = document.pointerLockElement === canvas
     _setLocked(isLocked)
-    if (isLocked) _skipFirstMove = true
+    if (isLocked) {
+      _skipFirstMove = true
+    } else {
+      // Xóa key state khi thoát pointer lock — tránh phím bị "kẹt"
+      // vì browser không gửi keyup sau khi thoát lock
+      for (const k in _keys) _keys[k] = false
+      _mouseLeft = false
+    }
   })
 
   document.addEventListener('mousemove', (e) => {

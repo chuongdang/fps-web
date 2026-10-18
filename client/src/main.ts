@@ -3,10 +3,11 @@ import { loadMap } from '@fps/shared'
 import type { MapFile } from '@fps/shared'
 import { createWorld } from '@fps/shared/physics/world'
 import { buildMapMesh } from './render/mapMesh'
-import { initInput, applyCameraRotation, isKeyDown, yaw, pitch } from './input'
+import { initInput, applyCameraRotation } from './input'
+import { startLoop, initGameState, defaultMovement } from './loop'
 import mapFileRaw from '@assets/maps/deathmatch.json'
 
-const mapFile = mapFileRaw as unknown as MapFile
+const mapFile   = mapFileRaw as unknown as MapFile
 const loadedMap = loadMap(mapFile)
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
@@ -38,7 +39,6 @@ scene.add(sun)
 
 // ── Camera ────────────────────────────────────────────────────────────────────
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300)
-camera.position.set(0, 30, 0)
 camera.rotation.order = 'YXZ'
 
 initInput(renderer.domElement)
@@ -56,20 +56,44 @@ for (const sp of loadedMap.spawns.B) {
   scene.add(new THREE.ArrowHelper(dir, new THREE.Vector3(sp.pos[0], sp.pos[1], sp.pos[2]), 2, 0xff4422, 0.6, 0.4))
 }
 
-// ── Debug wireframe (F4) ──────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(window.innerWidth, window.innerHeight)
+})
+
+// ── Physics world + game loop ─────────────────────────────────────────────────
+const cfg = { ...defaultMovement }
+const spawn = loadedMap.spawns.A[0] ?? { pos: [0, 2, 0] as [number,number,number], yaw: 0 }
+
 let debugLines: THREE.LineSegments | null = null
 
-async function initDebug() {
-  const world = await createWorld(loadedMap)
+createWorld(loadedMap, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(world => {
+  // Debug wireframe (F4)
   const { vertices, colors } = world.debugRender()
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3))
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 4))
+  geo.setAttribute('color',    new THREE.BufferAttribute(colors, 4))
   debugLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }))
   debugLines.visible = false
   scene.add(debugLines)
-}
-initDebug()
+
+  // Spawn player at first A spawn
+  initGameState(spawn.pos, spawn.yaw)
+
+  // Eye height interpolation for camera (smooth crouch)
+  let eyeY = cfg.eyeStand
+
+  startLoop(world, cfg, state => {
+    // Interpolate eye height
+    const targetEye = state.crouching ? cfg.eyeCrouch : cfg.eyeStand
+    eyeY += (targetEye - eyeY) * Math.min(1, (1 / 0.1) * (1 / 60))  // ~0.1s lerp
+
+    camera.position.set(state.pos[0], state.pos[1] + eyeY, state.pos[2])
+    applyCameraRotation(camera)
+    renderer.render(scene, camera)
+  })
+})
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'F4' && debugLines) {
@@ -77,39 +101,3 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault()
   }
 })
-
-// ── Fly camera (tạm thời, thay bằng stepMovement ở task 1.2–1.3) ─────────────
-const _fwd   = new THREE.Vector3()
-const _right = new THREE.Vector3()
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(window.innerWidth, window.innerHeight)
-})
-
-// ── Render loop ───────────────────────────────────────────────────────────────
-const SPEED = 12
-let prev = performance.now()
-
-function frame(now: number) {
-  const dt = Math.min((now - prev) / 1000, 0.1)
-  prev = now
-
-  _fwd.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch))
-  _right.set(Math.cos(yaw), 0, -Math.sin(yaw))
-
-  if (isKeyDown('KeyW')) camera.position.addScaledVector(_fwd,   SPEED * dt)
-  if (isKeyDown('KeyS')) camera.position.addScaledVector(_fwd,  -SPEED * dt)
-  if (isKeyDown('KeyA')) camera.position.addScaledVector(_right, -SPEED * dt)
-  if (isKeyDown('KeyD')) camera.position.addScaledVector(_right,  SPEED * dt)
-  if (isKeyDown('KeyQ')) camera.position.y -= SPEED * dt
-  if (isKeyDown('KeyE')) camera.position.y += SPEED * dt
-
-  applyCameraRotation(camera)
-
-  renderer.render(scene, camera)
-  requestAnimationFrame(frame)
-}
-
-requestAnimationFrame(frame)

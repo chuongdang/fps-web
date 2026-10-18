@@ -10,8 +10,8 @@
 
 ## Phase 1 – Di chuyển offline
 - [x] 1.1 Pointer lock + nhìn chuột — input.ts (overlay, sens localStorage, ±89° clamp, skip spike đầu); movement.ts types (Btn, InputCmd, PlayerState, MovementConfig)
-- [ ] 1.2 Fixed timestep loop
-- [ ] 1.3 stepMovement: đi, ma sát, trọng lực, nhảy
+- [x] 1.2 Fixed timestep loop — loop.ts (acc clamp 0.25s, buildCmd, lerpState interpolation); eye height lerp ~0.1s
+- [x] 1.3 stepMovement: đi, ma sát, trọng lực, nhảy — CollisionWorld (capsule kinematic, controller 50°, snap 0.3m, collision groups map/player); Quake accelerate; applyFriction; crouching+canStand; hitCeiling; slideTimer/slideCooldown đã decrement (logic task 1.5)
 - [ ] 1.4 Không trung, bunny hop
 - [ ] 1.5 Ngồi + trượt
 - [ ] 1.6 Test determinism + debug overlay
