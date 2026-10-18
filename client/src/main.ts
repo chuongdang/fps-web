@@ -3,6 +3,7 @@ import { loadMap } from '@fps/shared'
 import type { MapFile } from '@fps/shared'
 import { createWorld } from '@fps/shared/physics/world'
 import { buildMapMesh } from './render/mapMesh'
+import { initInput, applyCameraRotation, isKeyDown, yaw, pitch } from './input'
 import mapFileRaw from '@assets/maps/deathmatch.json'
 
 const mapFile = mapFileRaw as unknown as MapFile
@@ -38,6 +39,9 @@ scene.add(sun)
 // ── Camera ────────────────────────────────────────────────────────────────────
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300)
 camera.position.set(0, 30, 0)
+camera.rotation.order = 'YXZ'
+
+initInput(renderer.domElement)
 
 // ── Map mesh ──────────────────────────────────────────────────────────────────
 scene.add(buildMapMesh(loadedMap))
@@ -74,30 +78,9 @@ document.addEventListener('keydown', (e) => {
   }
 })
 
-// ── Fly camera ────────────────────────────────────────────────────────────────
-let yaw = 0
-let pitch = -0.8
-let locked = false
-const keys: Record<string, boolean> = {}
-
-const _fwd = new THREE.Vector3()
+// ── Fly camera (tạm thời, thay bằng stepMovement ở task 1.2–1.3) ─────────────
+const _fwd   = new THREE.Vector3()
 const _right = new THREE.Vector3()
-
-document.addEventListener('keydown', e => { keys[e.code] = true })
-document.addEventListener('keyup',   e => { keys[e.code] = false })
-
-renderer.domElement.addEventListener('click', () => {
-  renderer.domElement.requestPointerLock()
-})
-document.addEventListener('pointerlockchange', () => {
-  locked = document.pointerLockElement === renderer.domElement
-})
-document.addEventListener('mousemove', (e) => {
-  if (!locked) return
-  yaw   -= e.movementX * 0.002
-  pitch -= e.movementY * 0.002
-  pitch  = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch))
-})
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
@@ -116,25 +99,17 @@ function frame(now: number) {
   _fwd.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch))
   _right.set(Math.cos(yaw), 0, -Math.sin(yaw))
 
-  if (keys['KeyW']) camera.position.addScaledVector(_fwd, SPEED * dt)
-  if (keys['KeyS']) camera.position.addScaledVector(_fwd, -SPEED * dt)
-  if (keys['KeyA']) camera.position.addScaledVector(_right, -SPEED * dt)
-  if (keys['KeyD']) camera.position.addScaledVector(_right, SPEED * dt)
-  if (keys['KeyQ']) camera.position.y -= SPEED * dt
-  if (keys['KeyE']) camera.position.y += SPEED * dt
+  if (isKeyDown('KeyW')) camera.position.addScaledVector(_fwd,   SPEED * dt)
+  if (isKeyDown('KeyS')) camera.position.addScaledVector(_fwd,  -SPEED * dt)
+  if (isKeyDown('KeyA')) camera.position.addScaledVector(_right, -SPEED * dt)
+  if (isKeyDown('KeyD')) camera.position.addScaledVector(_right,  SPEED * dt)
+  if (isKeyDown('KeyQ')) camera.position.y -= SPEED * dt
+  if (isKeyDown('KeyE')) camera.position.y += SPEED * dt
 
-  camera.rotation.order = 'YXZ'
-  camera.rotation.y = yaw
-  camera.rotation.x = pitch
+  applyCameraRotation(camera)
 
   renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }
 
 requestAnimationFrame(frame)
-
-// HUD hint
-const hint = document.createElement('div')
-hint.style.cssText = 'position:fixed;bottom:12px;left:12px;color:#fff;font:14px monospace;opacity:0.7;pointer-events:none'
-hint.textContent = 'Click để bắt chuột | WASD di chuyển | Q/E lên xuống | F4 debug collider'
-document.body.appendChild(hint)

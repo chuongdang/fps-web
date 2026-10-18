@@ -9,7 +9,7 @@
 - [x] 0.4 Map "Hai thành" + render tĩnh — hai-thanh.json (tường thành + lỗ bắn, ramp, tháp, khu giữa), physics/world.ts (Rapier static colliders + ramp rotation), client fly camera WASD, F4 debug wireframe, spawn arrows
 
 ## Phase 1 – Di chuyển offline
-- [ ] 1.1 Pointer lock + nhìn chuột
+- [x] 1.1 Pointer lock + nhìn chuột — input.ts (overlay, sens localStorage, ±89° clamp, skip spike đầu); movement.ts types (Btn, InputCmd, PlayerState, MovementConfig)
 - [ ] 1.2 Fixed timestep loop
 - [ ] 1.3 stepMovement: đi, ma sát, trọng lực, nhảy
 - [ ] 1.4 Không trung, bunny hop
