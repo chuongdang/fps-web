@@ -3,7 +3,7 @@
 Đánh dấu `[x]` khi task xong và đã qua tiêu chí nghiệm thu. Ghi chú ngắn nếu có quyết định quan trọng.
 
 ## Phase 0 – Khung dự án
-- [ ] 0.1 Monorepo + scripts
+- [x] 0.1 Monorepo + scripts — npm workspaces (shared/server/client), tsx watch + vite dev, typecheck + vitest pass
 - [ ] 0.2 Hằng số, quy ước, protocol rỗng
 - [ ] 0.3 Map format + loader + mirror
 - [ ] 0.4 Dựng map "Hai thành" + render tĩnh

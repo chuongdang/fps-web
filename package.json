@@ -1,0 +1,22 @@
+{
+  "name": "fps-web",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "node dev.mjs",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "vitest": "2.1.8"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "esbuild@0.23.1": true
+  }
+}
