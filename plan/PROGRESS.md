@@ -5,7 +5,7 @@
 ## Phase 0 – Khung dự án
 - [x] 0.1 Monorepo + scripts — npm workspaces (shared/server/client), tsx watch + vite dev, typecheck + vitest pass
 - [x] 0.2 Hằng số, quy ước, protocol rỗng — constants.ts, math.ts (Vec3, forward/right, lerp, lerpAngle, mulberry32, hashSeed), protocol.ts (msgpack encode/decode, MsgType)
-- [ ] 0.3 Map format + loader + mirror
+- [x] 0.3 Map format + loader + mirror — map/types.ts (MapBox, MapRamp, MapSpawn, MapFile, LoadedMap), map/loadMap.ts (mirror X, validate cross x=0)
 - [ ] 0.4 Dựng map "Hai thành" + render tĩnh
 
 ## Phase 1 – Di chuyển offline
