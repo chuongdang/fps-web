@@ -3,11 +3,14 @@ import { loadMap } from '@fps/shared'
 import type { MapFile } from '@fps/shared'
 import { createWorld } from '@fps/shared/physics/world'
 import { buildMapMesh } from './render/mapMesh'
-import { initInput, applyCameraRotation } from './input'
+import { initInput, applyCameraRotation, isLocked, yaw, pitch } from './input'
 import { startLoop, initGameState, defaultMovement } from './loop'
 import { initDebugOverlay } from './debug'
 import { initTuningPanel } from './tuning'
 import { createViewmodel } from './render/viewmodel'
+import { createTargets, updateTargets, flashTarget } from './targets'
+import { fireHitscan } from './hitscan'
+import { initHUD } from './hud'
 import mapFileRaw from '@assets/maps/deathmatch.json'
 
 const mapFile   = mapFileRaw as unknown as MapFile
@@ -97,24 +100,45 @@ createWorld(loadedMap, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(world
 
   initGameState(spawn.pos, spawn.yaw)
 
-  let eyeY    = cfg.eyeStand
-  let lastMs  = performance.now()
+  // Bia + HUD
+  const targets = createTargets(scene)
+  const hud     = initHUD(scene)
+
+  // Vị trí mắt mới nhất (để mousedown handler dùng)
+  let latestEyePos: [number, number, number] = [spawn.pos[0], spawn.pos[1] + cfg.eyeStand, spawn.pos[2]]
+
+  renderer.domElement.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !isLocked()) return
+    const result = fireHitscan(latestEyePos, yaw, pitch, 300, world, cfg, targets)
+    if (!result) return
+    if (result.kind === 'target') {
+      flashTarget(targets[result.idx]!)
+      hud.showHitmarker(result.part === 'head')
+    } else {
+      hud.addBulletHole(result.hitPos, result.normal)
+    }
+  })
+
+  let eyeY   = cfg.eyeStand
+  let lastMs = performance.now()
 
   startLoop(world, cfg, state => {
-    const now = performance.now()
-    const dt  = (now - lastMs) / 1000
-    const fps = 1 / dt
-    lastMs    = now
+    const now  = performance.now()
+    const dt   = (now - lastMs) / 1000
+    const fps  = 1 / dt
+    lastMs     = now
 
     const targetEye = state.crouching ? cfg.eyeCrouch : cfg.eyeStand
-    eyeY += (targetEye - eyeY) * Math.min(1, 10 / 60)  // ~0.1 s lerp
+    eyeY += (targetEye - eyeY) * Math.min(1, 10 / 60)
 
     camera.position.set(state.pos[0], state.pos[1] + eyeY, state.pos[2])
+    latestEyePos = [camera.position.x, camera.position.y, camera.position.z]
     applyCameraRotation(camera)
 
+    updateTargets(targets, dt)
     vm.update(dt)
+    hud.tick(dt * 1000)
 
-    // Render: world pass → clear depth → viewmodel pass
     renderer.clear()
     renderer.render(scene, camera)
     renderer.clearDepth()

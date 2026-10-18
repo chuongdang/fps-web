@@ -13,6 +13,11 @@ export interface CollisionWorld {
     crouching: boolean,
   ): { pos: [number, number, number]; grounded: boolean; hitCeiling: boolean }
   canStand(pos: [number, number, number]): boolean
+  castRay(
+    origin: [number, number, number],
+    dir: [number, number, number],
+    maxDist: number,
+  ): { dist: number; normal: [number, number, number] } | null
   debugRender(): { vertices: Float32Array; colors: Float32Array }
 }
 
@@ -98,6 +103,28 @@ class PhysicsWorld implements CollisionWorld {
       this._col,
     )
     return hit === null
+  }
+
+  castRay(
+    origin: [number, number, number],
+    dir: [number, number, number],
+    maxDist: number,
+  ): { dist: number; normal: [number, number, number] } | null {
+    const ray = new RAPIER.Ray(
+      { x: origin[0], y: origin[1], z: origin[2] },
+      { x: dir[0],    y: dir[1],    z: dir[2] },
+    )
+    const hit = this._w.castRayAndGetNormal(
+      ray, maxDist, false,
+      RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+      PLAYER_FILTER,
+      this._col,
+    )
+    if (!hit) return null
+    return {
+      dist:   hit.toi,
+      normal: [hit.normal.x, hit.normal.y, hit.normal.z],
+    }
   }
 
   debugRender(): { vertices: Float32Array; colors: Float32Array } {

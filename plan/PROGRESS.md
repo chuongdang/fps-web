@@ -18,7 +18,7 @@
 
 ## Phase 2 – Súng offline
 - [x] 2.1 Viewmodel + render pass riêng — weapons.ts (WeaponDef, WEAPONS Rifle/Pistol, WeaponState); viewmodel.ts (viewScene FOV60 near0.01, gun placeholder box, switch anim 0.3s xuống/lên, phím 1/2); renderer.autoClear=false + clearDepth() giữa 2 pass
-- [ ] 2.2 Hitscan + bia
+- [x] 2.2 Hitscan + bia — hitbox.ts (HitBox AABB, hitboxesFor, rayAabb, shootDir + 8 test); castRay trong CollisionWorld (castRayAndGetNormal Rapier); 5 bia dummy 3 phần đầu/thân/chân; fireHitscan wall-occlusion; hitmarker X trắng/đỏ 150ms; bullet hole decal tối đa 50
 - [ ] 2.3 Logic súng (đạn, reload, fire rate, spread, recoil)
 - [ ] 2.4 Hiệu ứng + âm thanh + HUD
 
