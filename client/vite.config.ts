@@ -7,7 +7,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@fps/shared/physics/world': resolve(__dirname, '../shared/src/physics/world.ts'),
       '@fps/shared': resolve(__dirname, '../shared/src/index.ts'),
+      '@assets': resolve(__dirname, '../assets'),
     },
   },
 })

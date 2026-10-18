@@ -3,8 +3,11 @@
   "include": ["src"],
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true,
     "paths": {
-      "@fps/shared": ["../shared/src/index.ts"]
+      "@fps/shared": ["../shared/src/index.ts"],
+      "@fps/shared/physics/world": ["../shared/src/physics/world.ts"],
+      "@assets/*": ["../assets/*"]
     }
   }
 }
