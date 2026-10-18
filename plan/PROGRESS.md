@@ -12,9 +12,9 @@
 - [x] 1.1 Pointer lock + nhìn chuột — input.ts (overlay, sens localStorage, ±89° clamp, skip spike đầu); movement.ts types (Btn, InputCmd, PlayerState, MovementConfig)
 - [x] 1.2 Fixed timestep loop — loop.ts (acc clamp 0.25s, buildCmd, lerpState interpolation); eye height lerp ~0.1s
 - [x] 1.3 stepMovement: đi, ma sát, trọng lực, nhảy — CollisionWorld (capsule kinematic, controller 50°, snap 0.3m, collision groups map/player); Quake accelerate; applyFriction; crouching+canStand; hitCeiling; slideTimer/slideCooldown đã decrement (logic task 1.5)
-- [ ] 1.4 Không trung, bunny hop
+- [x] 1.4 Không trung, bunny hop
 - [ ] 1.5 Ngồi + trượt
-- [ ] 1.6 Test determinism + debug overlay
+- [x] 1.6 Test determinism + debug overlay — movement.test.ts (2 world song song 600 tick bit-identical; chạy thẳng 2s → 8.4–8.6 m/s); F3 overlay (FPS, tốc độ, grounded, slideTimer, pos, yaw/pitch); F6 panel (sliders + Copy JSON)
 
 ## Phase 2 – Súng offline
 - [ ] 2.1 Viewmodel + render pass riêng

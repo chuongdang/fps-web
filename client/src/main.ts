@@ -5,6 +5,8 @@ import { createWorld } from '@fps/shared/physics/world'
 import { buildMapMesh } from './render/mapMesh'
 import { initInput, applyCameraRotation } from './input'
 import { startLoop, initGameState, defaultMovement } from './loop'
+import { initDebugOverlay } from './debug'
+import { initTuningPanel } from './tuning'
 import mapFileRaw from '@assets/maps/deathmatch.json'
 
 const mapFile   = mapFileRaw as unknown as MapFile
@@ -66,6 +68,9 @@ window.addEventListener('resize', () => {
 const cfg = { ...defaultMovement }
 const spawn = loadedMap.spawns.A[0] ?? { pos: [0, 2, 0] as [number,number,number], yaw: 0 }
 
+const updateDebug = initDebugOverlay()
+initTuningPanel(cfg)
+
 let debugLines: THREE.LineSegments | null = null
 
 createWorld(loadedMap, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(world => {
@@ -78,20 +83,24 @@ createWorld(loadedMap, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(world
   debugLines.visible = false
   scene.add(debugLines)
 
-  // Spawn player at first A spawn
   initGameState(spawn.pos, spawn.yaw)
 
-  // Eye height interpolation for camera (smooth crouch)
-  let eyeY = cfg.eyeStand
+  let eyeY    = cfg.eyeStand
+  let lastMs  = performance.now()
 
   startLoop(world, cfg, state => {
-    // Interpolate eye height
+    const now = performance.now()
+    const fps = 1000 / (now - lastMs)
+    lastMs    = now
+
     const targetEye = state.crouching ? cfg.eyeCrouch : cfg.eyeStand
-    eyeY += (targetEye - eyeY) * Math.min(1, (1 / 0.1) * (1 / 60))  // ~0.1s lerp
+    eyeY += (targetEye - eyeY) * Math.min(1, 10 / 60)  // ~0.1 s lerp
 
     camera.position.set(state.pos[0], state.pos[1] + eyeY, state.pos[2])
     applyCameraRotation(camera)
     renderer.render(scene, camera)
+
+    updateDebug(state, fps)
   })
 })
 
