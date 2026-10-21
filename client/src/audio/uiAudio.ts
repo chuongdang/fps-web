@@ -1,6 +1,19 @@
 // Âm giao diện cửa hàng (tổng hợp): "ka-ching" khi mua được, "bíp" thấp khi bị từ chối.
 import { getGraph } from './context'
 import { tone } from './synth'
+import { getBuffer, commonKey } from './loader'
+import { dbToGain } from './audioMath'
+
+function playFileBuf(key: string, gainDb = 0): void {
+  const g = getGraph()
+  if (!g) return
+  const buf = getBuffer(key)
+  if (!buf) return
+  const src = g.ctx.createBufferSource(), gn = g.ctx.createGain()
+  src.buffer = buf; gn.gain.value = dbToGain(gainDb)
+  src.connect(gn).connect(g.master); src.start()
+  src.onended = () => { src.disconnect(); gn.disconnect() }
+}
 
 /** 2 tone triangle 1320Hz rồi 1760Hz cách 60ms, decay 150ms, −12dB */
 export function playBuyOk(): void {
@@ -49,3 +62,12 @@ export function playTick(): void {
   if (!g) return
   tone(g.ctx, g.master, { type: 'square', freq: 1200, gainDb: -22, decayMs: 40, when: g.ctx.currentTime })
 }
+
+/** Bắt đầu ván TDM: phát file match_start */
+export function playMatchStart(): void { playFileBuf(commonKey('match_start')) }
+
+/** Hỗn Chiến còn đúng 10 mạng để thắng */
+export function playTenKillRemain(): void { playFileBuf(commonKey('ten_kill_remain')) }
+
+/** Bắt đầu đợt sóng đầu tiên trong Thủ Thành */
+export function playZombieDefendStart(): void { playFileBuf(commonKey('zombie_defend_start')) }

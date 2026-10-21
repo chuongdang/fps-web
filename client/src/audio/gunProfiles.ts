@@ -56,6 +56,14 @@ const rifleReload = (boltFile: string): ReloadSoundDef => ({
   ],
 })
 
+const smgReload = (): ReloadSoundDef => ({
+  kind: 'mag',
+  steps: [
+    { file: 'reload_magout', at: 0.18, synth: 'magout' },
+    { file: 'reload_magin',  at: 0.62, synth: 'magin' },
+  ],
+})
+
 /**
  * Âm vỏ đạn tổng hợp (khi thiếu file shell_*): chuỗi n cú "keng" nảy, n = gainsDb.length.
  * Khoảng cách cú 1→2 là firstGapMs, các khoảng sau nhân gapMul (nảy dồn dần); độ vang
@@ -173,8 +181,12 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     thump: { gainDb: -16, startHz: 190, endHz: 110, durationMs: 30 },
     eq: { lowShelfHz: 180, lowShelfDb: -3, highShelfHz: 3000, highShelfDb: 5 },
     shell: 'pistol', shellDelayMs: 380,
-    reload: rifleReload('reload_bolt'),
-    dryfire: { kind: 'pistol' },
+    reload: { kind: 'mag', whole: { file: 'reload_mag', gainDb: -3, startFrac: 0.14, boltFile: 'reload_bolt', boltAtFrac: 0.8 }, steps: [
+      { file: 'reload_magout', at: 0.15, synth: 'magout' },
+      { file: 'reload_magin',  at: 0.55, synth: 'magin' },
+      { file: 'reload_bolt',   at: 0.85, synth: 'bolt', emptyOnly: true },
+    ] },
+    dryfire: { kind: 'rifle' },
     draw: 'draw', maxVoices: 8, lowAmmoWarning: false,
   },
   5: { // Shotgun – nổ to, thô, vang ngắn; kéo ống đẩy giữa hai phát (chưa có file riêng: dùng âm tổng hợp)

@@ -38,7 +38,7 @@ export const MUZZLE_FALLBACK: THREE.Vector3[] = [
   new THREE.Vector3(0, 0, -0.3), // DAO (không có lửa nòng, chỉ để đủ phần tử)
   new THREE.Vector3(0, 0.07, -0.35), // SMG (đầu nòng theo bbox glb)
 ];
-const FLASH_SIZE = 0.14;
+const FLASH_SIZE = 0.18;
 
 // ── Ngắm (ADS) ─────────────────────────────────────────────────────────────────
 const ADS_DIST = 0.45; // đầu ruồi cách mắt bấy nhiêu mét: xa hơn = súng/đầu ngắm nhỏ hơn
@@ -367,7 +367,7 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
   flash.renderOrder = 10;
   flash.visible = false;
   gunGroup.add(flash);
-  let flashShown = false;
+  let flashEndMs = 0;   // performance.now() khi flash tắt; 0 = tắt
   const _tmp = new THREE.Vector3();
 
   // Animation
@@ -456,7 +456,7 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
     }
     flash.material.rotation = Math.random() * Math.PI * 2;
     flash.visible = true;
-    flashShown = false;
+    flashEndMs = performance.now() + 50;
   }
 
   function setMotion(speed: number, grounded: boolean) {
@@ -627,11 +627,8 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
     armR.setReachedColor(dbg.showReach);
     armL.setReachedColor(dbg.showReach);
 
-    // Flash hiện đúng 1 frame render
-    if (flash.visible) {
-      if (flashShown) flash.visible = false;
-      else flashShown = true;
-    }
+    // Flash tắt sau 50ms (timestamp-based, ổn định hơn frame-count)
+    if (flash.visible && performance.now() >= flashEndMs) flash.visible = false;
   }
 
   function updateAspect(a: number) {

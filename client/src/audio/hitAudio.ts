@@ -21,14 +21,25 @@ const WEIGHT: Record<HitKind, number> = { body: 1, head: 2, kill: 3, killHead: 4
 const FILES: Record<HitKind, string[]> = {
   body: ['hit_body_01', 'hit_body_02', 'hit_body_03'],
   head: ['hit_head_01', 'hit_head_02'],
-  kill: ['kill'],
+  kill: [],
   killHead: ['kill_head'],
 }
-export const HIT_FILE_NAMES: string[] = [...Object.values(FILES).flat(), 'hurt_01', 'hurt_02', 'hurt_03']
+export const HIT_FILE_NAMES: string[] = [...Object.values(FILES).flat(), 'hurt_01', 'hurt_02', 'hurt_03', 'kill']
 
 const combo = new ComboTracker()
 const dedupe = new HitDeduper()
 const lastFile = new Map<string, string>()
+
+export function playMonsterKill(): void {
+  const g = getGraph()
+  if (!g) return
+  const buf = getBuffer(commonKey('kill'))
+  if (!buf) return
+  const src = g.ctx.createBufferSource(), gn = g.ctx.createGain()
+  src.buffer = buf; gn.gain.value = 1
+  src.connect(gn).connect(g.master); src.start()
+  src.onended = () => { src.disconnect(); gn.disconnect() }
+}
 
 function playFile(g: AudioGraph, key: string, rate: number, db: number, dest: AudioNode, when: number): void {
   const src = g.ctx.createBufferSource()

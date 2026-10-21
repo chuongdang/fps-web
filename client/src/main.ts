@@ -50,8 +50,9 @@ import { initHUD } from './hud'
 import {
   initAudio, updateListener, settings as audioSettings, playShot, playDry, playDraw, startReload, cancelReload,
   playScream, playInfectSting, playZombieHurt, startNightAmbient, stopNightAmbient, updateZombieAudio,
-  playHit, playHurt, setHealthForAudio, playShotOther, playFootstep, playLanding, StepTracker, FOOTSTEPS, playBuyOk, playBuyFail,
+  playHit, playHurt, setHealthForAudio, playMonsterKill, playShotOther, playFootstep, playLanding, StepTracker, FOOTSTEPS, playBuyOk, playBuyFail,
   playPin, playSpoon, playThrowSwish, playBounce, playExplode, playRoundStart, playRoundWin, playRoundLose, playTick,
+  playMatchStart, playTenKillRemain, playZombieDefendStart,
 } from './audio'
 import { initAudioTuning } from './audio/tuning'
 import mapFileRaw from '@assets/maps/deathmatch.json'
@@ -198,6 +199,7 @@ const spawn = loadedMap.spawns.A[0] ?? { pos: [0, 2, 0] as [number,number,number
 const netStats: PingStats = { rttMs: 0, outOfOrder: 0 }
 let snapStore: SnapshotStore | null = null
 let sessionRef: Session | null = null
+let prevMyStreak = 0
 const playersRenderer = createPlayersRenderer(scene, {
   teamOf: id => sessionRef?.teams.get(id),
   nameOf: id => sessionRef?.names.get(id),
@@ -264,7 +266,7 @@ const zombieHud = createZombieHud()
 const zoverlay = createZombieOverlay(scene)
 const sniffFx = createSniffFx(scene)
 let sniffedUntil = 0   // đã bị zombie đánh hơi: icon mũi 2s
-const matchHud = createMatchHud({ start: playRoundStart, win: playRoundWin, lose: playRoundLose, tick: playTick })
+const matchHud = createMatchHud({ start: playRoundStart, win: playRoundWin, lose: playRoundLose, tick: playTick, tdmStart: playMatchStart, tenKillRemain: playTenKillRemain })
 const spectator = createSpectator(() => (worldRef ? (o, d, m) => worldRef!.castRay(o, d, m) : null))
 let spectatingId = -2   // -2 = không xem; -1 = camera bay trên cao; ≥0 = đang xem người đó
 const specBuf: SpecCandidate[] = []
@@ -555,6 +557,7 @@ sessionP.then(session => {
       if (msg.phase !== defPhase || msg.phaseEndsAt !== defEndsAt) { if (msg.phase !== defPhase) defCuePlayed = false; defPhase = msg.phase; defEndsAt = msg.phaseEndsAt }
     } else if (msg.t === MsgType.WaveStart) {
       zombieHud.onWaveStart(msg)
+      if (msg.wave === 1) playZombieDefendStart()
     } else if (msg.t === MsgType.WaveClear) {
       zombieHud.onWaveClear(msg)
     } else if (msg.t === MsgType.DefenseEnd) {
@@ -590,6 +593,9 @@ sessionP.then(session => {
     if (s.hp !== lastHp) { lastHp = s.hp; hudRef?.setHealth(s.hp); setHealthForAudio(s.hp) }
     hudRef?.bottom.setInfiniteMoney(infiniteMoney)
     hudRef?.bottom.setMoney(s.money)
+    const myStreak = s.me?.killStreak ?? 0
+    if (myStreak === 3 && prevMyStreak < 3) playMonsterKill()
+    prevMyStreak = myStreak
     if (matchHud.mode === 'elimination') {   // Sinh Tử: server là nguồn chân lý về sống/chết (cờ Dead trong snapshot)
       const srvDead = (s.flags & NetFlag.Dead) !== 0
       if (srvDead && !dead) { dead = true; deadAt = performance.now() - 2000; setDead(true) }   // vào giữa ván: chỉ xem

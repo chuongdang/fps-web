@@ -47,7 +47,7 @@ function el(css: string): HTMLDivElement {
 
 function setText(e: HTMLElement, text: string): void { if (e.textContent !== text) e.textContent = text }
 
-export interface MatchSounds { start(): void; win(): void; lose(): void; tick(): void }
+export interface MatchSounds { start(): void; win(): void; lose(): void; tick(): void; tdmStart?(): void; tenKillRemain?(): void }
 
 export function createMatchHud(sounds?: MatchSounds) {
   const top = el('position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#fff;font:bold 20px monospace;' +
@@ -133,6 +133,15 @@ export function createMatchHud(sounds?: MatchSounds) {
   return {
     setMatch(m: MatchStateMsg): void {
       if (st && m.mode === 'elimination' && st.phase !== MatchPhase.Playing && m.phase === MatchPhase.Playing) sounds?.start()
+      if (st && m.mode === 'tdm' && st.phase !== MatchPhase.Playing && m.phase === MatchPhase.Playing) sounds?.tdmStart?.()
+      if (st && m.mode === 'tdm' && m.phase === MatchPhase.Playing && config?.settings.mode === 'tdm' && !unlimited) {
+        const limit = config.settings.killLimit
+        if (limit != null && limit > 10) {
+          const rem = limit - Math.max(m.scoreA, m.scoreB)
+          const was = limit - Math.max(st.scoreA, st.scoreB)
+          if (rem <= 10 && was > 10) sounds?.tenKillRemain?.()
+        }
+      }
       if (m.phase === MatchPhase.Freeze) { lastEnd = null; roundMoney = 0 }
       if (m.phase !== MatchPhase.Ended) matchEnd = null
       st = m; online = true

@@ -8,11 +8,11 @@ import { GRENADE_SOUND_FILES } from './grenadeAudio'
 import { ZOMBIE_SOUND_FILES } from './zombieAudio'
 
 export { updateListener, settings, saveSettings } from './context'
-export { playBuyOk, playBuyFail, playRoundStart, playRoundWin, playRoundLose, playTick } from './uiAudio'
+export { playBuyOk, playBuyFail, playRoundStart, playRoundWin, playRoundLose, playTick, playMatchStart, playTenKillRemain, playZombieDefendStart } from './uiAudio'
 export { playShot, playShotOther, playSwing, playDry, playDraw, startReload, cancelReload } from './gunAudio'
 export { playFootstep, playLanding, playFootstepOther, FOOTSTEPS } from './footsteps'
 export { StepTracker } from './audioMath'
-export { playHit, playHurt, setHealthForAudio } from './hitAudio'
+export { playHit, playHurt, setHealthForAudio, playMonsterKill } from './hitAudio'
 export { playPin, playSpoon, playThrowSwish, playBounce, playExplode, tinnitus } from './grenadeAudio'
 export { playGrowl, playScream, playClawHit, playZombieStep, playZombieHurt, playZombieDeath, playInfectSting, startNightAmbient, stopNightAmbient, setNearbyZombieHeartbeat, updateZombieAudio } from './zombieAudio'
 export type { HitKind } from './hitAudio'
@@ -21,7 +21,8 @@ export type { HitKind } from './hitAudio'
 export function initAudio(onLoaded?: () => void): void {
   initAudioContext()
   onAudioReady((g) => {
-    const keys = [...allGunSoundKeys(gunKey, commonKey), ...HIT_FILE_NAMES.map(commonKey), ...FOOTSTEP_FILES, ...GRENADE_SOUND_FILES, ...ZOMBIE_SOUND_FILES]
+    const GAME_EVENT_FILES = ['match_start', 'ten_kill_remain', 'zombie_defend_start'].map(commonKey)
+    const keys = [...allGunSoundKeys(gunKey, commonKey), ...HIT_FILE_NAMES.map(commonKey), ...FOOTSTEP_FILES, ...GRENADE_SOUND_FILES, ...ZOMBIE_SOUND_FILES, ...GAME_EVENT_FILES]
     void preload(g.ctx, keys).then(() => onLoaded?.())
   })
 }

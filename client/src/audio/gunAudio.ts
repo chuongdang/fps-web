@@ -189,7 +189,7 @@ export function playShot(id: number, ammoLeft: number): void {
   registerVoice(g, id, shot, p.maxVoices)
   playShotLayers(g, p, shot, now, true)
 
-  // if (p.shell) playShell(g, p.shell, g.gunGroup, now + p.shellDelayMs / 1000)
+  if (p.shell) playShell(g, p.shell, g.gunGroup, now + p.shellDelayMs / 1000)
   if (p.cockFile) playCock(g, p, bus.low, now + 0.6 * def.fireIntervalMs / 1000)
   if (settings.lowAmmoWarning && p.lowAmmoWarning !== false && lowAmmoActive(ammoLeft, def.magSize)) playLowAmmo(g, ammoLeft, def.magSize, now)
 }
@@ -327,7 +327,7 @@ function synthReload(g: AudioGraph, kind: ReloadSynth, dest: AudioNode, t: numbe
 
 function playReloadStep(g: AudioGraph, p: GunSoundProfile, file: string, synth: ReloadSynth, dest: AudioNode, rate = 1): void {
   const now = g.ctx.currentTime
-  const buf = getBuffer(gunKey(p.folder, file))
+  const buf = getBuffer(gunKey(p.folder, file)) ?? getBuffer(commonKey(file))
   if (buf) playBuffer(g, buf, dest, rate, 0, now)
   else synthReload(g, synth, dest, now)
 }
