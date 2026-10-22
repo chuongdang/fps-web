@@ -3,7 +3,7 @@ import { BOT_TAG } from '@fps/shared'
 
 export const BOT_NAMES = ['Tèo', 'Tí', 'Tủn', 'Bin', 'Bon', 'Mít', 'Xoài', 'Bơ', 'Sữa', 'Cốm', 'Bắp', 'Gạo'] as const
 
-/** Tên hiển thị `[BOT] Tèo TB`: lấy ngẫu nhiên không trùng với tên đang dùng (thiếu tên thì thêm số) */
+/** Display name `[BOT] Tèo MED`: picked at random, not clashing with names in use (when names run out, a number is appended) */
 export function pickBotName(taken: Iterable<string>, difficulty: BotDifficulty, rng: () => number = Math.random): string {
   const used = new Set<string>()
   for (const n of taken) used.add(n)

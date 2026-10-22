@@ -1,5 +1,5 @@
-// Zombie NPC của Thủ Thành (plan 17, T.4/T.5): một Player không có kết nối, input do ZombieNpc sinh mỗi tick qua ZombieBrain,
-// rồi đi đúng stepPlayer (stepMovement của zombie, vuốt, hitbox) như người. Boss "Đại Ca Zombie" có thêm slam / summon / charge.
+// Defense zombie NPC (plan 17, T.4/T.5): a Player without a connection, whose input is produced by ZombieNpc each tick via ZombieBrain,
+// then goes through the very same stepPlayer (the zombie's stepMovement, claw, hitbox) as a human. The boss zombie additionally has slam / summon / charge.
 import { BOSS, Btn, DEFENSE, DT, MsgType, ZOMBIE_TYPES, zombieStatsFor, type DefenseDifficulty, type InputCmd, type Vec3, type ZombieStats } from '@fps/shared'
 import { createWorld } from '@fps/shared/physics/world'
 import { defaultMovement } from '@fps/shared'
@@ -8,8 +8,8 @@ import { ZombieBrain, ZOMBIE_AI } from './brain'
 
 export interface NpcCtx {
   difficulty: DefenseDifficulty
-  humans(room: Room): Player[]                       // người chơi còn sống (bao gồm đang gục)
-  spawn(typeId: string, x: number, y: number, z: number, free?: boolean): Player | null   // sinh thêm zombie (boss gọi đàn)
+  humans(room: Room): Player[]                       // players still alive (including downed ones)
+  spawn(typeId: string, x: number, y: number, z: number, free?: boolean): Player | null   // spawn extra zombies (the boss summons a horde)
   players(room: Room): number
 }
 
@@ -55,9 +55,9 @@ export class ZombieNpc implements NpcDriver {
     this.alwaysCrawl = def.abilities.includes('crawl_holes')
   }
   private readonly hasRally: boolean
-  private readonly alwaysCrawl: boolean   // zombie bò: luôn ngồi (bò sát đất, thấp 0,85m), không chỉ lúc chui khe
+  private readonly alwaysCrawl: boolean   // crawler zombie: always crouched (crawls along the ground, 0.85m tall), not only when squeezing through a gap
 
-  // ── Mỗi tick, trước stepPlayer
+  // ── Every tick, before stepPlayer
   drive(room: Room, p: Player, now: number): void {
     const cmd = (this.flip = !this.flip) ? this.cmdA : this.cmdB
     cmd.seq = this.seq++
@@ -71,7 +71,7 @@ export class ZombieNpc implements NpcDriver {
 
     if (this.isBoss && this.bossTick(room, p, cmd, now)) { cmd.yaw = this.act && this.act.kind === 'charge' ? this.act.yaw : s.yaw; p.inputQueue.push(cmd); return }
 
-    // chọn mục tiêu (staggered theo id) rồi đi/ tấn công
+    // pick a target (staggered by id), then move / attack
     if (now >= this.nextTargetAt) { this.nextTargetAt = now + TARGET_EVERY_MS + (p.id % 7) * 20; this.targetId = this.pickTarget(room, p) }
     const tgt = room.players.get(this.targetId)
     if (!tgt || !tgt.alive || tgt.downed) { this.targetId = -1; this.nextTargetAt = 0 }
@@ -90,18 +90,18 @@ export class ZombieNpc implements NpcDriver {
     p.inputQueue.push(cmd)
   }
 
-  /** Người chơi gần nhất theo ĐƯỜNG ĐI (A*), chưa có đường thì theo khoảng cách thẳng */
+  /** The nearest player by WALKING PATH (A*); with no path yet, by straight-line distance */
   private pickTarget(room: Room, p: Player): number {
     let humans = this.ctx.humans(room)
     if (humans.length === 0) return -1
-    const standing = humans.filter(h => !h.downed)   // người đang gục không bị nhắm (còn người đứng thì bỏ qua họ)
+    const standing = humans.filter(h => !h.downed)   // downed players are not targeted (while anyone is still standing they are ignored)
     if (standing.length > 0) humans = standing
     if (humans.length === 1) return humans[0]!.id
     const nav = room.nav
     let best = -1, bestCost = Infinity
     const from = nav ? nav.nearest(p.state.pos[0], p.state.pos[1], p.state.pos[2]) : -1
     for (const h of humans) {
-      let cost = Math.hypot(h.state.pos[0] - p.state.pos[0], h.state.pos[2] - p.state.pos[2]) * 3   // dự phòng: ước lượng thô
+      let cost = Math.hypot(h.state.pos[0] - p.state.pos[0], h.state.pos[2] - p.state.pos[2]) * 3   // fallback: rough estimate
       if (nav && from >= 0) {
         const to = nav.nearest(h.state.pos[0], h.state.pos[1], h.state.pos[2])
         const path = to >= 0 ? nav.findNodePath(from, to, undefined, this.brain.ability) : null
@@ -112,7 +112,7 @@ export class ZombieNpc implements NpcDriver {
     return best
   }
 
-  /** Zombie đang ở trong DEFENSE.down.clearRadiusM quanh người gục (và chưa tới tầm cào mục tiêu): bỏ đường đi, lùi ra xa người gục để đồng đội vào cứu được */
+  /** A zombie inside DEFENSE.down.clearRadiusM around a downed player (and not yet within claw range of its target): drop the path and back away from the downed player so teammates can revive them */
   private clearDowned(room: Room, p: Player, cmd: InputCmd): void {
     let best: Player | null = null, bestD: number = DEFENSE.down.clearRadiusM
     for (const h of this.ctx.humans(room)) {
@@ -122,11 +122,11 @@ export class ZombieNpc implements NpcDriver {
     }
     if (!best) return
     const dx = p.state.pos[0] - best.state.pos[0], dz = p.state.pos[2] - best.state.pos[2]
-    cmd.yaw = Math.atan2(-dx, -dz)   // hướng đi = (−sin yaw, −cos yaw) = từ người gục ra xa
+    cmd.yaw = Math.atan2(-dx, -dz)   // walking direction = (−sin yaw, −cos yaw) = away from the downed player
     cmd.buttons = (cmd.buttons & ~(Btn.Forward | Btn.Back | Btn.Left | Btn.Right | Btn.Jump | Btn.Ability)) | Btn.Forward
   }
 
-  // Tách đám: lệch hướng đi ra xa các zombie khác trong SEP_RADIUS (chỉ khi đang đi bộ thường)
+  // Separation: steer away from other zombies within SEP_RADIUS (only while on a normal walk)
   private separate(room: Room, p: Player, cmd: InputCmd): void {
     const wp = this.brain.waypoint
     if (wp && wp.kind >= 3) return
@@ -138,12 +138,12 @@ export class ZombieNpc implements NpcDriver {
       if (d < SEP_RADIUS && d > 1e-3 && Math.abs(p.state.pos[1] - o.state.pos[1]) < 1.5) { const w = (SEP_RADIUS - d) / SEP_RADIUS; rx += dx / d * w; rz += dz / d * w }
     }
     if (rx === 0 && rz === 0) return
-    // hướng đi hiện tại (−sin yaw, −cos yaw) cộng lực đẩy
+    // current walking direction (−sin yaw, −cos yaw) plus the push force
     const fx = -Math.sin(cmd.yaw) + rx * SEP_WEIGHT, fz = -Math.cos(cmd.yaw) + rz * SEP_WEIGHT
     cmd.yaw = Math.atan2(-fx, -fz)
   }
 
-  // Kẹt lâu: nếu không người chơi nào nhìn thấy thì đặt lại về node hợp lệ gần nhất
+  // Stuck for long: if no player can see it, reset it to the nearest valid node
   private unstick(room: Room, p: Player, now: number): void {
     const nav = room.nav
     this.brain.reset()
@@ -155,14 +155,14 @@ export class ZombieNpc implements NpcDriver {
       const len = Math.hypot(dx, dy, dz)
       if (len > 40) continue
       const hit = h.world.castRay(eye, [dx / len, dy / len, dz / len], len)
-      if (!hit || hit.dist >= len - 0.3) return   // có người nhìn thấy: không dịch chuyển
+      if (!hit || hit.dist >= len - 0.3) return   // a player can see it: do not teleport
     }
     const n = nav.nearest(p.state.pos[0], p.state.pos[1], p.state.pos[2], 6)
     if (n >= 0) { p.state.pos[0] = nav.x[n]!; p.state.pos[1] = nav.y[n]! + 0.05; p.state.pos[2] = nav.z[n]!; p.state.vel[0] = p.state.vel[1] = p.state.vel[2] = 0 }
     void now
   }
 
-  // Zombie gào: mỗi 10s tăng tốc zombie quanh đó 25% trong 5s (có hiệu ứng mắt sáng ở client qua cờ tốc độ)
+  // Zombie roar: every 10s speeds up nearby zombies by 25% for 5s (the client shows glowing eyes via the speed flag)
   private rally(room: Room, p: Player, now: number): void {
     if (now < this.nextRallyAt) return
     this.nextRallyAt = now + DEFENSE.rally.everyMs
@@ -174,11 +174,11 @@ export class ZombieNpc implements NpcDriver {
     }
   }
 
-  // ── Boss. Trả true nếu chiêu đang chiếm quyền điều khiển tick này (đã tự ghi cmd).
+  // ── Boss. Returns true if an ability is taking over control this tick (it has already written cmd).
   private bossTick(room: Room, p: Player, cmd: InputCmd, now: number): boolean {
     const st = p.zstats!
     const frac = st.hpMax > 0 ? p.hp / st.hpMax : 1
-    // gọi đàn khi máu qua mốc 75% / 50% / 25%
+    // summon a horde when health crosses 75% / 50% / 25%
     while (this.summoned < BOSS.summon.thresholds.length && frac < BOSS.summon.thresholds[this.summoned]!) {
       this.summoned++
       for (let i = 0; i < BOSS.summon.count; i++) {
@@ -205,7 +205,7 @@ export class ZombieNpc implements NpcDriver {
           act.phase = 'run'; act.until = now + BOSS.charge.durationMs; act.startedAt = now
           p.speedMult = BOSS.charge.speed / st.runSpeed
         }
-        // đang lao
+        // charging
         cmd.buttons |= Btn.Forward
         const sp = Math.hypot(p.state.vel[0], p.state.vel[2])
         for (const h of humans) {
@@ -215,7 +215,7 @@ export class ZombieNpc implements NpcDriver {
             this.hurtHuman(room, p, h, BOSS.charge.damage, BOSS.charge.knockHoriz, BOSS.charge.knockUp)
           }
         }
-        if (now - act.startedAt > 250 && sp < BOSS.charge.speed * CHARGE_WALL_SPEED_FRAC) {   // đâm tường: choáng 2s, nhận thêm sát thương
+        if (now - act.startedAt > 250 && sp < BOSS.charge.speed * CHARGE_WALL_SPEED_FRAC) {   // hit a wall: stunned for 2s, takes extra damage
           p.speedMult = 1
           this.act = { kind: 'stun', until: now + BOSS.charge.stunMs }
           p.takenMult = BOSS.charge.stunDamageMult
@@ -226,7 +226,7 @@ export class ZombieNpc implements NpcDriver {
         return true
       }
     }
-    // chọn chiêu mới
+    // pick a new ability
     let near: Player | null = null, nearD = Infinity
     for (const h of humans) { const d = Math.hypot(h.state.pos[0] - p.state.pos[0], h.state.pos[2] - p.state.pos[2]); if (d < nearD) { nearD = d; near = h } }
     if (!near) return false
@@ -274,7 +274,7 @@ export class ZombieNpc implements NpcDriver {
 }
 interface Telegraph { kind: 'slam' | 'charge' | 'summon'; pos: [number, number, number]; dir?: [number, number, number]; radius: number; endsAt: number }
 
-/** Gắn world va chạm cho zombie NPC khi nạp xong (bất đồng bộ, như bot). Test có thể đặt room.npcWorld để dùng world giả. */
+/** Attach a collision world to the zombie NPC once it has loaded (asynchronous, like bots). Tests may set room.npcWorld to use a fake world. */
 export function attachNpcWorld(room: Room, p: Player): void {
   const make = room.npcWorld
   if (make) { Promise.resolve(make()).then(w => { if (room.players.get(p.id) === p) p.world = w; else w.dispose() }); return }

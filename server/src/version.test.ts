@@ -17,8 +17,8 @@ function connect(version: string | undefined) {
   return { got, rooms, send: onMsg }
 }
 
-describe('kiểm tra phiên bản client/server', () => {
-  it('khác hoặc thiếu phiên bản → JoinRejected(version), không tạo phòng, bỏ qua tin sau đó', () => {
+describe('client/server version check', () => {
+  it('different or missing version -> JoinRejected(version), no room created, later messages ignored', () => {
     for (const v of ['1.2.0', undefined]) {
       const c = connect('1.3.0')
       c.send({ t: MsgType.Join, name: 'A', room: 'r', version: v })
@@ -28,13 +28,13 @@ describe('kiểm tra phiên bản client/server', () => {
       expect(c.got).toHaveLength(1)
     }
   })
-  it('ListRooms sai phiên bản cũng bị từ chối; đúng thì trả danh sách', () => {
+  it('ListRooms with a wrong version is also rejected; a correct one returns the list', () => {
     const bad = connect('1.3.0'); bad.send({ t: MsgType.ListRooms })
     expect(bad.got[0]).toEqual({ t: MsgType.JoinRejected, reason: 'version' })
     const ok = connect('1.3.0'); ok.send({ t: MsgType.ListRooms, version: '1.3.0' })
     expect(ok.got[0]?.t).toBe(MsgType.RoomList)
   })
-  it('server không đặt version (offline) thì không kiểm tra', () => {
+  it('a server without a version (offline) does not check', () => {
     const c = connect(undefined); c.send({ t: MsgType.ListRooms })
     expect(c.got[0]?.t).toBe(MsgType.RoomList)
   })

@@ -1,16 +1,16 @@
-# Task riêng – Bộ súng mới + âm thanh theo từng súng
+# Standalone task – New gun set + per-gun audio
 
-Làm sau khi xong Phase 2 (task 2.4). Có thể làm trước hoặc sau Phase 3, không đụng tới netcode.
+Do this after Phase 2 is finished (task 2.4). It can be done before or after Phase 3 and does not touch netcode.
 
-Bộ súng: **AK47**, **M16**, **Colt** (súng lục bán tự động), **Rulô** (revolver).
+Gun set: **AK47**, **M16**, **Colt** (semi-automatic pistol), **Rulo** (revolver).
 
-Thứ tự làm: A.1 → A.2 → A.3 → A.4 → A.5 (bảng chỉnh) → A.6 (nạp đạn) → A.7 (hết đạn) → A.8 (tiếng bắn trúng). A.6–A.8 dùng chung bộ âm tổng hợp ở A.4, nên phải xong A.4 trước.
+Order of work: A.1 → A.2 → A.3 → A.4 → A.5 (tuning panel) → A.6 (reload) → A.7 (out of ammo) → A.8 (hit sounds). A.6–A.8 share the synth module from A.4, so A.4 must be done first.
 
 ---
 
-## Task A.1 – Thay bộ súng trong `shared/src/weapons.ts`
+## Task A.1 – Replace the gun set in `shared/src/weapons.ts`
 
-Thay `WEAPONS` (Rifle/Pistol cũ) bằng 4 súng dưới. Thêm trường `slot`: 1 = súng chính, 2 = súng phụ. Phím 1–4 chọn súng theo thứ tự id (tạm thời, chưa có hệ thống chọn loadout).
+Replace `WEAPONS` (the old Rifle/Pistol) with the 4 guns below. Add a `slot` field: 1 = primary weapon, 2 = secondary weapon. Keys 1–4 select a gun in id order (temporary, there is no loadout selection system yet).
 
 ```ts
 export const WEAPONS: WeaponDef[] = [
@@ -32,7 +32,7 @@ export const WEAPONS: WeaponDef[] = [
     spreadDeg: { stand: 0.3, move: 1.0, air: 3, crouch: 0.2 },
     recoilPitchDeg: 1.4, recoilYawDeg: 0.25, recoilRecoverDegPerSec: 10 },
 
-  { id: 3, name: 'Rulô', slot: 2, auto: false,
+  { id: 3, name: 'Rulo', slot: 2, auto: false,
     damage: 55, headMult: 2, legMult: 0.8,
     fireIntervalMs: 450, magSize: 6, reloadMs: 2600, range: 140,
     spreadDeg: { stand: 0.2, move: 1.6, air: 4, crouch: 0.15 },
@@ -40,44 +40,44 @@ export const WEAPONS: WeaponDef[] = [
 ];
 ```
 
-Tính cách từng súng (để chỉnh thông số sau này không lệch hướng):
-- **AK47:** mạnh, giật nặng, 4 phát thân là chết, headshot 1 phát. Thưởng người kiểm soát được độ giật.
-- **M16:** bắn nhanh, giật nhẹ, chính xác, nhưng cần 5 phát thân. Dễ dùng.
-- **Colt:** súng phụ chuẩn, bắn nhanh vừa, băng ít đạn.
-- **Rulô:** chậm, 2 phát thân chết, headshot 1 phát, giật rất mạnh, nạp đạn lâu. Súng "chơi trội".
+Character of each gun (so later tuning of the numbers does not drift off course):
+- **AK47:** powerful, heavy recoil, 4 body shots to kill, one-shot headshot. Rewards the player who can control recoil.
+- **M16:** fast fire rate, light recoil, accurate, but needs 5 body shots. Easy to use.
+- **Colt:** standard secondary weapon, moderate fire rate, small magazine.
+- **Rulo:** slow, 2 body shots to kill, one-shot headshot, very heavy recoil, long reload. A "showoff" gun.
 
-Nghiệm thu:
-- [ ] `npm test` các test cũ của weaponLogic vẫn pass (sửa test nếu nó gắn với tên/thông số cũ, không sửa logic).
-- [ ] Phím 1–4 đổi đúng súng, HUD hiện đúng tên và số đạn.
-
----
-
-## Âm thanh: nguyên tắc
-
-Một phát bắn = **nhiều lớp âm phát cùng lúc**, mỗi lớp có cao độ, âm lượng, độ trễ riêng, đi qua một **EQ riêng của từng súng**, rồi vào **compressor tổng**.
-
-| Lớp | Vai trò | Nguồn |
-|---|---|---|
-| `mech` | tiếng "cạch" cơ khí, khoá nòng | file |
-| `body` | tiếng nổ chính | file (3–4 biến thể) |
-| `thump` | lực trầm "thụp" | **tổng hợp bằng code** (không cần file) |
-| `tail` | tiếng vang sau phát bắn | file |
-| `shell` | vỏ đạn rơi leng keng, trễ ~300ms | file dùng chung |
-
-Tính cách âm thanh mong muốn:
-
-| Súng | Cảm giác | Hướng chỉnh |
-|---|---|---|
-| AK47 | nặng, đục, "rền" | cao độ hơi thấp, tăng bass, thump mạnh, tail vừa |
-| M16 | gọn, sắc, "chát" | cao độ hơi cao, tăng treble, thump nhẹ, tail ngắn |
-| Colt | chắc, "bốp" | cao độ trung bình, mid đầy, thump vừa |
-| Rulô | nổ to, "đoàng", vang dài | cao độ thấp, thump rất mạnh, tail dài nhất |
+Acceptance:
+- [ ] The old `weaponLogic` tests in `npm test` still pass (fix a test if it is tied to the old names/stats; do not change the logic).
+- [ ] Keys 1–4 switch to the correct gun, the HUD shows the right name and ammo count.
 
 ---
 
-## Task A.2 – Cấu trúc file âm thanh
+## Audio: principles
 
-Người dùng chuẩn bị file theo quy ước sau (`.ogg`, kèm `.mp3` cùng tên nếu cần hỗ trợ Safari):
+One shot = **multiple sound layers played at the same time**, each layer with its own pitch, volume and delay, passing through a **per-gun EQ**, then into a **master compressor**.
+
+| Layer | Role | Source |
+|---|---|---|
+| `mech` | mechanical "click", bolt/slide | file |
+| `body` | main bang | file (3–4 variants) |
+| `thump` | low-end "thump" punch | **synthesized in code** (no file needed) |
+| `tail` | echo after the shot | file |
+| `shell` | shell casing clinking on the ground, ~300ms delay | shared file |
+
+Desired sound character:
+
+| Gun | Feel | Tuning direction |
+|---|---|---|
+| AK47 | heavy, dull, "rumbling" | slightly low pitch, more bass, strong thump, medium tail |
+| M16 | tight, sharp, "crisp" | slightly high pitch, more treble, light thump, short tail |
+| Colt | solid, "pop" | medium pitch, full mids, medium thump |
+| Rulo | loud bang, "boom", longest echo | low pitch, very strong thump, longest tail |
+
+---
+
+## Task A.2 – Audio file structure
+
+The user prepares files following this convention (`.ogg`, with a same-named `.mp3` if Safari support is needed):
 
 ```
 client/public/sounds/
@@ -86,42 +86,42 @@ client/public/sounds/
     m16/    shot_01..04.ogg  mech_01.ogg  tail_01.ogg  reload_magout.ogg  reload_magin.ogg  reload_bolt.ogg  draw.ogg
     colt/   shot_01..03.ogg  mech_01.ogg  tail_01.ogg  reload_magout.ogg  reload_magin.ogg  reload_slide.ogg draw.ogg
     rulo/   shot_01..03.ogg  tail_01.ogg  cock.ogg     reload_open.ogg    reload_eject.ogg  reload_insert.ogg reload_close.ogg draw.ogg
-    (mỗi súng có thể thêm dryfire.ogg riêng; không có thì dùng common/dryfire_rifle hoặc dryfire_pistol)
+    (each gun may have its own dryfire.ogg; if absent, use common/dryfire_rifle or dryfire_pistol)
   common/
     dryfire_rifle.ogg  dryfire_pistol.ogg  lowammo.ogg
     shell_rifle_01..03.ogg  shell_pistol_01..03.ogg
     hit_body_01..03.ogg  hit_head_01..02.ogg  kill.ogg  kill_head.ogg  hurt_01..03.ogg
 ```
 
-**Mọi âm trong danh sách đều có bản tổng hợp dự phòng bằng code** (A.6–A.8), nên thiếu file vẫn có tiếng. Có file thì dùng file, hoặc trộn cả hai (xem từng task).
+**Every sound in the list has a synthesized fallback in code** (A.6–A.8), so missing files still produce sound. If a file exists, use it, or mix both (see each task).
 
-Làm:
-- Loader đọc danh sách file từ profile (task A.3), **file nào thiếu thì bỏ qua lớp đó và log cảnh báo một lần**, không crash. (Để người dùng có thể thử dần từng file.)
-- Kiểm tra trình duyệt hỗ trợ ogg bằng `new Audio().canPlayType('audio/ogg; codecs="vorbis"')`; không hỗ trợ thì dùng `.mp3`.
+Do:
+- The loader reads the file list from the profile (task A.3); **for any missing file, skip that layer and log a warning once**, do not crash. (So the user can try files one at a time.)
+- Check browser ogg support with `new Audio().canPlayType('audio/ogg; codecs="vorbis"')`; if unsupported, use `.mp3`.
 
-Nghiệm thu:
-- [ ] Xoá tạm một file `shot_02.ogg`: game vẫn chạy, console cảnh báo đúng một lần, súng dùng các biến thể còn lại.
+Acceptance:
+- [ ] Temporarily delete one `shot_02.ogg` file: the game still runs, the console warns exactly once, the gun uses the remaining variants.
 
 ---
 
-## Task A.3 – Profile âm thanh từng súng
+## Task A.3 – Per-gun audio profile
 
-Tạo `client/src/audio/gunProfiles.ts` (chỉ client, không đặt trong `shared/`):
+Create `client/src/audio/gunProfiles.ts` (client only, not in `shared/`):
 
 ```ts
 export interface LayerDef {
-  files: string[];        // chọn ngẫu nhiên, không lặp lại file vừa phát nếu có ≥ 2
+  files: string[];        // pick at random, do not repeat the file just played if there are ≥ 2
   gainDb: number;
-  pitch: number;          // playbackRate gốc
-  pitchRand: number;      // ± ngẫu nhiên
-  gainRandDb: number;     // ± ngẫu nhiên
+  pitch: number;          // base playbackRate
+  pitchRand: number;      // ± random
+  gainRandDb: number;     // ± random
   delayMs: number;
 }
 
-export interface ThumpDef {   // lớp bass tổng hợp
+export interface ThumpDef {   // synthesized bass layer
   gainDb: number;
-  startHz: number;        // tần số đầu
-  endHz: number;          // tần số cuối
+  startHz: number;        // start frequency
+  endHz: number;          // end frequency
   durationMs: number;
 }
 
@@ -130,16 +130,16 @@ export interface GunSoundProfile {
   layers: { body: LayerDef; mech?: LayerDef; tail?: LayerDef };
   thump: ThumpDef;
   eq: { lowShelfHz: number; lowShelfDb: number; highShelfHz: number; highShelfDb: number };
-  shell: 'rifle' | 'pistol' | null;    // rulô không văng vỏ khi bắn
+  shell: 'rifle' | 'pistol' | null;    // the revolver does not eject casings when firing
   shellDelayMs: number;
-  reload: ReloadSoundDef;                 // xem A.6
-  dryfire: { file?: string; kind: 'rifle' | 'pistol' };  // xem A.7
+  reload: ReloadSoundDef;                 // see A.6
+  dryfire: { file?: string; kind: 'rifle' | 'pistol' };  // see A.7
   draw: string;
   maxVoices: number;
 }
 ```
 
-Giá trị khởi điểm (chỉnh tai sau ở task A.5):
+Starting values (tune by ear later in task A.5):
 
 ```ts
 export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
@@ -197,7 +197,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'pistol' },
     draw: 'draw', maxVoices: 4,
   },
-  3: { // Rulô
+  3: { // Rulo (revolver)
     folder: 'rulo',
     layers: {
       body: { files: ['shot_01','shot_02','shot_03'], gainDb: 1,  pitch: 0.92, pitchRand: 0.03, gainRandDb: 1, delayMs: 0 },
@@ -209,7 +209,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     reload: { kind: 'perRound',
       open:   { file: 'reload_open',   at: 0.08, synth: 'magout' },
       eject:  { file: 'reload_eject',  at: 0.22, synth: 'shells' },
-      insert: { file: 'reload_insert', from: 0.35, to: 0.8, synth: 'insert' },  // lặp theo số viên đã bắn
+      insert: { file: 'reload_insert', from: 0.35, to: 0.8, synth: 'insert' },  // repeats per round fired
       close:  { file: 'reload_close',  at: 0.88, synth: 'magin' },
     },
     dryfire: { kind: 'pistol' },
@@ -218,25 +218,25 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
 };
 ```
 
-Thêm cho Rulô: phát `cock.ogg` ở **giữa hai phát bắn** (khoảng 60% `fireIntervalMs` sau mỗi phát) cho cảm giác lên cò.
+Extra for the Rulo: play `cock.ogg` **between two shots** (about 60% of `fireIntervalMs` after each shot) for the feel of cocking the hammer.
 
 ---
 
-## Task A.4 – Đồ thị âm thanh (Web Audio)
+## Task A.4 – Audio graph (Web Audio)
 
 ```
-mỗi lớp: AudioBufferSource ─► Gain(lớp) ─┐
-thump (Oscillator)  ─► Gain(envelope) ───┼─► [bus súng] LowShelf ─► HighShelf ─► ┬─► (súng mình) ─────────────► Master
-                                         │                                       └─► (người khác) Lowpass ─► Panner ─► Master
+each layer: AudioBufferSource ─► Gain(layer) ─┐
+thump (Oscillator)  ─► Gain(envelope) ────────┼─► [gun bus] LowShelf ─► HighShelf ─► ┬─► (own gun) ─────────────► Master
+                                              │                                      └─► (others) Lowpass ─► Panner ─► Master
 Master: Gain ─► DynamicsCompressor ─► destination
 ```
 
-Làm (`client/src/audio/gunAudio.ts`):
+Do (`client/src/audio/gunAudio.ts`):
 
-1. **Master** (tạo một lần): `DynamicsCompressorNode` với `threshold −18dB`, `knee 6`, `ratio 4`, `attack 0.003`, `release 0.15`. Gain tổng theo setting âm lượng.
-2. **Bus súng**: mỗi súng một chuỗi `BiquadFilter lowshelf` → `highshelf` tạo **một lần** theo `eq` của profile, dùng chung cho mọi phát của súng đó (của mình). Người khác: mỗi lần bắn tạo chuỗi riêng có thêm `lowpass` + `PannerNode`.
-3. **Phát một lớp**: chọn file ngẫu nhiên (tránh lặp file vừa dùng), `playbackRate = pitch + rand(±pitchRand)`, gain = `dbToGain(gainDb + rand(±gainRandDb))`, `start(ctx.currentTime + delayMs/1000)`.
-4. **Thump tổng hợp**:
+1. **Master** (created once): `DynamicsCompressorNode` with `threshold −18dB`, `knee 6`, `ratio 4`, `attack 0.003`, `release 0.15`. Overall gain follows the volume setting.
+2. **Gun bus**: each gun gets one `BiquadFilter lowshelf` → `highshelf` chain created **once** from the profile's `eq`, shared by every shot of that gun (own shots). For other players: each shot creates its own chain with an extra `lowpass` + `PannerNode`.
+3. **Playing a layer**: pick a random file (avoid repeating the file just used), `playbackRate = pitch + rand(±pitchRand)`, gain = `dbToGain(gainDb + rand(±gainRandDb))`, `start(ctx.currentTime + delayMs/1000)`.
+4. **Synthesized thump**:
    ```ts
    function playThump(ctx: AudioContext, dest: AudioNode, t: ThumpDef, when: number) {
      const osc = ctx.createOscillator();
@@ -253,71 +253,71 @@ Làm (`client/src/audio/gunAudio.ts`):
      osc.stop(when + t.durationMs / 1000 + 0.02);
    }
    ```
-5. **Giới hạn số tiếng**: mỗi súng giữ danh sách source đang phát; vượt `maxVoices` thì dừng source cũ nhất (fade 10ms, không cắt cụt).
-6. **Vỏ đạn**: sau `shellDelayMs`, phát file `shell_rifle_*`/`shell_pistol_*` ngẫu nhiên, gain −14dB, chỉ cho súng của mình và người khác trong 15m.
-7. **Reload**: làm ở task A.6.
-8. **Hết đạn**: làm ở task A.7.
-9. **Súng người khác (từ ShotFx, phase 4)**:
-   - `PannerNode`: `panningModel 'equalpower'`, `distanceModel 'inverse'`, `refDistance 4`, `rolloffFactor 1.2`, vị trí = `origin` của phát bắn. Listener cập nhật theo camera mỗi frame.
-   - `lowpass` cutoff theo khoảng cách `d`: `cutoff = 18000 * Math.pow(0.5, d / 15)`, kẹp tối thiểu 1500Hz (càng xa càng đục).
-   - Không phát lớp `mech` cho người khác (tiếng cơ khí chỉ nghe được ở gần tay).
-   - `tail` của người khác to hơn 3dB so với của mình (ở xa nghe vang nhiều hơn tiếng nổ).
+5. **Voice limit**: each gun keeps a list of currently playing sources; when `maxVoices` is exceeded, stop the oldest source (10ms fade, no hard cut).
+6. **Shell casings**: after `shellDelayMs`, play a random `shell_rifle_*`/`shell_pistol_*` file at −14dB gain, only for your own gun and for other players within 15m.
+7. **Reload**: done in task A.6.
+8. **Out of ammo**: done in task A.7.
+9. **Other players' guns (from ShotFx, phase 4)**:
+   - `PannerNode`: `panningModel 'equalpower'`, `distanceModel 'inverse'`, `refDistance 4`, `rolloffFactor 1.2`, position = the shot's `origin`. The listener is updated from the camera every frame.
+   - `lowpass` cutoff by distance `d`: `cutoff = 18000 * Math.pow(0.5, d / 15)`, clamped to a minimum of 1500Hz (the farther away, the duller).
+   - Do not play the `mech` layer for other players (the mechanical sound is only audible close to the hands).
+   - Other players' `tail` is 3dB louder than your own (at a distance the echo is heard more than the bang).
 
-10. **Bộ âm tổng hợp** `client/src/audio/synth.ts`, dùng cho thump và các âm dự phòng ở A.6–A.8:
-    - Tạo **một lần** một `AudioBuffer` tiếng ồn trắng dài 1 giây; mọi âm "noise burst" dùng lại buffer này (đặt `offset` ngẫu nhiên khi `start`).
-    - Hàm chung:
+10. **Synth module** `client/src/audio/synth.ts`, used for the thump and the fallback sounds in A.6–A.8:
+    - Create **once** a 1-second white-noise `AudioBuffer`; every "noise burst" sound reuses this buffer (set a random `offset` on `start`).
+    - Common functions:
       ```ts
       tone(dest, { type, freq, freqEnd?, gainDb, attackMs, decayMs, when })
       noise(dest, { filter: 'bandpass' | 'highpass' | 'lowpass', freq, q, gainDb, attackMs, decayMs, when })
       ```
-    - Mọi envelope dùng `exponentialRampToValueAtTime` từ/đến 0.0001.
+    - All envelopes use `exponentialRampToValueAtTime` from/to 0.0001.
 
-Nghiệm thu:
-- [ ] Nhắm mắt nghe, phân biệt được 4 súng.
-- [ ] Xả AK47 hết băng: không rè, không vỡ tiếng, không bị cắt tiếng giữa chừng.
-- [ ] Mở 8 bot/tab cùng xả súng: không méo tiếng (compressor hoạt động), FPS không tụt.
-- [ ] Tiếng súng người khác ở xa 50m nghe đục và nhỏ, ở gần 3m nghe rõ; quay đầu nghe được hướng trái/phải.
-- [ ] Đổi súng giữa lúc reload: tiếng reload dừng ngay.
-- [ ] Rulô có tiếng lên cò giữa 2 phát.
+Acceptance:
+- [ ] With eyes closed, you can tell the 4 guns apart.
+- [ ] Empty a full AK47 magazine: no crackle, no distortion, no sound cut off midway.
+- [ ] Open 8 bots/tabs all firing at once: no distortion (the compressor works), FPS does not drop.
+- [ ] Another player's gunfire from 50m away sounds dull and quiet, from 3m sounds clear; turning your head you can hear the left/right direction.
+- [ ] Switching guns mid-reload: the reload sound stops immediately.
+- [ ] The Rulo has a hammer-cock sound between 2 shots.
 
-Pitfall:
-- `exponentialRampToValueAtTime` **không chấp nhận giá trị 0**, dùng 0.0001.
-- Không tạo mới `BiquadFilter` cho mỗi phát của chính mình (dùng bus chung), chỉ tạo mới cho súng người khác vì mỗi phát có vị trí khác nhau.
-- `AudioBufferSourceNode` dùng xong một lần là bỏ, nhớ `disconnect()` trong `onended` để không rò bộ nhớ.
-- Thời điểm phát dùng `ctx.currentTime`, không dùng `setTimeout` cho các lớp trong cùng một phát (lệch nhịp nghe ra ngay). `setTimeout` chỉ được dùng để lên lịch vỏ đạn và reload.
+Pitfalls:
+- `exponentialRampToValueAtTime` **does not accept the value 0**, use 0.0001.
+- Do not create a new `BiquadFilter` for each of your own shots (use the shared bus); only create new ones for other players' guns because each shot has a different position.
+- An `AudioBufferSourceNode` is single-use, remember to `disconnect()` in `onended` so memory does not leak.
+- Use `ctx.currentTime` for timing, not `setTimeout`, for layers within the same shot (a timing offset is immediately audible). `setTimeout` may only be used to schedule shell casings and reload.
 
 ---
 
-## Task A.5 – Bảng chỉnh tiếng (F8)
+## Task A.5 – Sound tuning panel (F8)
 
-Làm:
-- Phím F8 mở panel: chọn súng, slider cho mọi trường trong profile (gain, pitch, rand từng lớp; thump; EQ; tail delay).
-- Nút **"Bắn thử"** (phát 1 phát) và **"Xả 1 giây"** (phát theo `fireIntervalMs` trong 1 giây) để nghe ngay khi chỉnh, không cần vào game bắn.
-- Nút **"Copy JSON"** xuất profile hiện tại để dán vào `gunProfiles.ts`.
-- Thanh đo mức âm (peak meter) ở đầu ra master: dùng `AnalyserNode`, hiện đỏ nếu vượt −1dBFS.
+Do:
+- The F8 key opens a panel: choose a gun, sliders for every field in the profile (gain, pitch, rand per layer; thump; EQ; tail delay).
+- A **"Test shot"** button (plays 1 shot) and a **"Fire for 1 second"** button (plays at `fireIntervalMs` for 1 second) so you can hear changes immediately without going into the game to shoot.
+- A **"Copy JSON"** button exports the current profile to paste into `gunProfiles.ts`.
+- A level (peak) meter at the master output: use an `AnalyserNode`, show red if it exceeds −1dBFS.
 
-Nghiệm thu:
-- [ ] Kéo slider thump của AK47 lên, bấm "Bắn thử": nghe khác ngay.
-- [ ] Copy JSON dán vào code, reload trang: âm thanh giữ đúng như lúc chỉnh.
+Acceptance:
+- [ ] Drag the AK47 thump slider up, press "Test shot": it sounds different right away.
+- [ ] Copy JSON, paste into the code, reload the page: the sound stays exactly as tuned.
 
 
-## Task A.6 – Tiếng nạp đạn
+## Task A.6 – Reload sounds
 
-### A.6.1 Nạp đạn nhanh vs nạp đạn rỗng (đổi logic trong `shared/`)
+### A.6.1 Quick reload vs empty reload (logic change in `shared/`)
 
-Thêm vào `WeaponDef`: `reloadEmptyMs` (nạp khi đã bắn hết, phải kéo khoá nòng nên lâu hơn). `reloadMs` hiện tại thành nạp nhanh (còn đạn trong băng).
+Add to `WeaponDef`: `reloadEmptyMs` (reload after the magazine is fully emptied; the bolt must be pulled so it takes longer). The current `reloadMs` becomes the quick reload (rounds still in the magazine).
 
-| Súng | reloadMs (còn đạn) | reloadEmptyMs (hết đạn) |
+| Gun | reloadMs (rounds left) | reloadEmptyMs (empty) |
 |---|---|---|
 | AK47 | 2000 | 2600 |
 | M16 | 1800 | 2300 |
 | Colt | 1300 | 1700 |
-| Rulô | 2600 | 2600 (nạp theo viên, xem dưới) |
+| Rulo | 2600 | 2600 (reloads per round, see below) |
 
-- `WeaponState` thêm `reloadEmpty: boolean` (ghi lại lúc bắt đầu nạp là loại nào).
-- Đây là logic **shared**, client và server dùng chung. Cập nhật test của `weaponLogic`: nạp khi còn 5 viên mất `reloadMs`, nạp khi 0 viên mất `reloadEmptyMs`.
+- Add `reloadEmpty: boolean` to `WeaponState` (records which type of reload it was when the reload started).
+- This is **shared** logic, used by both client and server. Update the `weaponLogic` tests: reloading with 5 rounds left takes `reloadMs`, reloading at 0 rounds takes `reloadEmptyMs`.
 
-### A.6.2 Âm thanh
+### A.6.2 Audio
 
 ```ts
 type ReloadSynth = 'magout' | 'magin' | 'bolt' | 'shells' | 'insert';
@@ -329,110 +329,110 @@ type ReloadSoundDef =
       insert: { file: string; from: number; to: number; synth: ReloadSynth } };
 ```
 
-- `at` là tỉ lệ 0..1 của **thời gian nạp thực tế** (`reloadMs` hoặc `reloadEmptyMs` tuỳ loại).
-- Bước có `emptyOnly: true` (kéo khoá nòng) chỉ phát khi nạp rỗng.
-- **Rulô** (`perRound`): số viên cần nạp `n = magSize − ammo`. Phát `insert` đúng `n` lần, rải đều trong khoảng `from..to`. Mỗi lần lệch cao độ ±4% để không giống tiếng máy. Bắn 1 viên rồi nạp → nghe 1 tiếng nhét đạn; bắn hết 6 → nghe 6 tiếng.
-- Lên lịch bằng `setTimeout` lúc bắt đầu nạp, giữ danh sách id; reload bị huỷ (đổi súng, chết) → `clearTimeout` hết và dừng mọi source reload đang phát (fade 20ms).
-- Âm reload của **chính mình**: −4dB, không qua EQ của súng (đi thẳng vào master). Của **người khác**: chỉ phát nếu trong 12m, qua panner, −10dB (để nghe được "thằng kia đang nạp đạn" khi đứng gần).
+- `at` is a 0..1 ratio of the **actual reload time** (`reloadMs` or `reloadEmptyMs` depending on the type).
+- A step with `emptyOnly: true` (pulling the bolt) only plays on an empty reload.
+- **Rulo** (`perRound`): the number of rounds to load is `n = magSize − ammo`. Play `insert` exactly `n` times, spread evenly over `from..to`. Each time, vary the pitch by ±4% so it does not sound like a machine. Fire 1 round then reload -> hear 1 round-insert sound; fire all 6 -> hear 6.
+- Schedule with `setTimeout` when the reload starts, keep the list of ids; if the reload is cancelled (weapon switch, death) -> `clearTimeout` all of them and stop every reload source that is playing (20ms fade).
+- **Your own** reload sound: −4dB, bypasses the gun's EQ (goes straight into master). **Other players'**: only played within 12m, through the panner, −10dB (so you can hear "that guy is reloading" when standing near).
 
-Âm tổng hợp dự phòng (khi thiếu file):
+Synthesized fallback sounds (when files are missing):
 
-| synth | Cách tạo |
+| synth | How to create it |
 |---|---|
 | `magout` | noise bandpass 1800Hz q=3, decay 40ms, −10dB + tone sine 320→220Hz decay 60ms, −14dB |
-| `magin` | hai cú "cạch": noise bandpass 2500Hz q=4 decay 25ms −8dB tại t và t+45ms; thêm tone sine 180Hz decay 70ms −12dB tại t+45ms |
-| `bolt` | noise bandpass quét 1200→3500Hz trong 90ms (kéo) −12dB, rồi noise bandpass 3000Hz q=5 decay 30ms −6dB tại t+120ms (thả) |
-| `shells` | 6 cú tone sine ngẫu nhiên 3500–5200Hz, decay 80ms, −18dB, rải ngẫu nhiên trong 250ms (vỏ đạn rơi) |
+| `magin` | two "clicks": noise bandpass 2500Hz q=4 decay 25ms −8dB at t and t+45ms; plus tone sine 180Hz decay 70ms −12dB at t+45ms |
+| `bolt` | noise bandpass sweeping 1200→3500Hz over 90ms (pull) −12dB, then noise bandpass 3000Hz q=5 decay 30ms −6dB at t+120ms (release) |
+| `shells` | 6 random tone sine hits 3500–5200Hz, decay 80ms, −18dB, scattered randomly within 250ms (casings falling) |
 | `insert` | noise bandpass 2800Hz q=6 decay 20ms −10dB + tone sine 1400Hz decay 35ms −16dB |
 
-Nghiệm thu:
-- [ ] AK47 bắn 10 viên rồi R: nghe tháo băng, lắp băng, **không** có kéo khoá nòng; HUD đầy đạn đúng lúc 2,0s.
-- [ ] AK47 bắn hết băng: tự nạp, có kéo khoá nòng, mất 2,6s.
-- [ ] Rulô bắn 2 viên rồi R: nghe đúng 2 tiếng nhét đạn. Bắn hết 6: nghe 6 tiếng.
-- [ ] Đang nạp thì đổi súng: im ngay, không còn tiếng sót.
-- [ ] Xoá hết file reload: vẫn nghe tiếng tổng hợp, phân biệt được các bước.
+Acceptance:
+- [ ] AK47 fires 10 rounds then R: hear the magazine drop, magazine insert, **no** bolt pull; HUD is full exactly at 2.0s.
+- [ ] AK47 fires the entire magazine: reloads automatically, has the bolt pull, takes 2.6s.
+- [ ] Rulo fires 2 rounds then R: hear exactly 2 round-insert sounds. Fire all 6: hear 6.
+- [ ] Switching guns while reloading: silent immediately, no leftover sounds.
+- [ ] Delete all reload files: you still hear the synthesized sounds, and can tell the steps apart.
 
 ---
 
-## Task A.7 – Tiếng "cạch" hết đạn + cảnh báo sắp hết
+## Task A.7 – Out-of-ammo "click" + low-ammo warning
 
-### Hết đạn (dry fire)
+### Out of ammo (dry fire)
 
-- Phát khi **bấm cò** lúc băng rỗng (cạnh lên của chuột trái), một lần mỗi lần bấm. Giữ chuột không phát lặp.
-- Ngay sau đó tự động nạp đạn (logic sẵn có ở task 2.3) — nghĩa là người chơi nghe "cạch" rồi tới tiếng tháo băng, đúng như ngoài đời.
-- Nếu không còn tự nạp (ví dụ sau này có chế độ hết đạn dự trữ) thì mỗi lần bấm đều "cạch".
-- File: `guns/<súng>/dryfire.ogg` nếu có, không thì `common/dryfire_rifle|pistol.ogg`, không có nữa thì tổng hợp:
-  - Rifle: noise highpass 2500Hz decay 15ms −6dB + tone square 1100Hz decay 25ms −18dB (cạch khô, kim loại nặng).
-  - Pistol: noise highpass 3500Hz decay 10ms −6dB + tone square 1700Hz decay 18ms −18dB (tách nhỏ, gọn hơn).
-- Chỉ phát cho chính mình, không gửi lên mạng.
+- Play on **trigger pull** when the magazine is empty (rising edge of left mouse button), once per press. Holding the mouse does not repeat it.
+- Right after that, reload automatically (existing logic from task 2.3) — meaning the player hears the "click" and then the magazine-drop sound, just like real life.
+- If auto-reload no longer exists (for example a future mode with no reserve ammo) then every press makes the "click".
+- File: `guns/<gun>/dryfire.ogg` if present, otherwise `common/dryfire_rifle|pistol.ogg`, and if that is also missing, synthesize:
+  - Rifle: noise highpass 2500Hz decay 15ms −6dB + tone square 1100Hz decay 25ms −18dB (dry click, heavy metal).
+  - Pistol: noise highpass 3500Hz decay 10ms −6dB + tone square 1700Hz decay 18ms −18dB (a smaller, tighter tick).
+- Only played for yourself, not sent over the network.
 
-### Cảnh báo sắp hết đạn
+### Low-ammo warning
 
-- Khi bắn mà số đạn còn lại ≤ 25% băng: phát thêm một tiếng "tink" nhỏ **cùng lúc** với phát bắn, cao độ tăng dần khi đạn càng ít:
+- When firing with remaining ammo ≤ 25% of the magazine: play an extra small "tink" **at the same time** as the shot, with pitch rising as ammo gets lower:
   `pitchFactor = 1 + 0.6 * (1 − ammoLeft / (magSize * 0.25))`
-- File `common/lowammo.ogg`, không có thì tổng hợp: tone sine 2600Hz × `pitchFactor`, decay 60ms, −20dB.
-- Viên cuối cùng: tiếng "tink" to hơn 4dB (báo sắp nghe "cạch").
-- Rulô (6 viên): bật cảnh báo từ viên thứ 5.
-- Có setting bật/tắt (mặc định bật).
+- File `common/lowammo.ogg`, otherwise synthesize: tone sine 2600Hz × `pitchFactor`, decay 60ms, −20dB.
+- Last round: the "tink" is 4dB louder (signals the "click" is coming).
+- Rulo (6 rounds): the warning turns on from the 5th round.
+- Has an on/off setting (default on).
 
-Nghiệm thu:
-- [ ] Giữ chuột xả AK47 tới hết: 8 viên cuối nghe "tink" cao dần, viên cuối rõ hơn, rồi "cạch", rồi tiếng nạp đạn.
-- [ ] Bấm chuột liên tục khi đang nạp đạn: không phát "cạch" (đang nạp không phải băng rỗng).
-- [ ] Rifle và pistol "cạch" nghe khác nhau.
+Acceptance:
+- [ ] Hold the mouse and empty the AK47: the last 8 rounds play a rising "tink", the last round clearer, then the "click", then the reload sound.
+- [ ] Click the mouse repeatedly while reloading: no "click" plays (reloading is not an empty magazine).
+- [ ] Rifle and pistol "clicks" sound different.
 
 ---
 
-## Task A.8 – Tiếng bắn trúng (hitmarker), hạ gục, bị trúng
+## Task A.8 – Hit sound (hitmarker), kill, being hit
 
-Mục tiêu: trúng đạn phải nghe **giòn, rõ, có độ "ngọt"**, headshot nghe khác hẳn, hạ gục có tiếng "chốt" riêng. Tất cả phát từ `HitConfirm`/`Kill` của server (task 4.5), không đoán trước.
+Goal: a hit must sound **crisp, clear, and "sweet"**, a headshot must sound completely different, and a kill has its own "finisher" sound. All are played from the server's `HitConfirm`/`Kill` (task 4.5), never predicted ahead.
 
-### Cấu tạo âm (tổng hợp, dùng làm mặc định)
+### Sound construction (synthesized, used as the default)
 
-| Sự kiện | Lớp | Thông số |
+| Event | Layer | Parameters |
 |---|---|---|
-| **Trúng thân** | "tách" giòn | noise bandpass 3200Hz q=2, attack 1ms, decay 30ms, −6dB |
-|  | thân âm | tone triangle 1250Hz, decay 70ms, −12dB |
-|  | độ dày | tone sine 220→120Hz, decay 60ms, −14dB |
-| **Trúng đầu** | như trúng thân, cộng thêm: | |
-|  | "ting" kim loại | 3 tone sine 2100Hz, 2100×2,76Hz, 2100×5,4Hz (tỉ lệ chuông), gain −10/−16/−22dB, decay 380/250/150ms |
-|  | "tách" sắc hơn | noise bandpass tăng lên 4500Hz |
-| **Hạ gục** | "thụp" chốt | tone sine 160→55Hz, decay 180ms, −6dB |
-|  | 2 nốt đi lên | tone triangle 880Hz decay 120ms −12dB tại t; 1320Hz decay 220ms −12dB tại t+70ms |
-| **Hạ gục bằng headshot** | hạ gục + "ting" của trúng đầu, nốt thứ hai đổi thành 1760Hz | |
+| **Body hit** | crisp "tick" | noise bandpass 3200Hz q=2, attack 1ms, decay 30ms, −6dB |
+|  | tonal body | tone triangle 1250Hz, decay 70ms, −12dB |
+|  | thickness | tone sine 220→120Hz, decay 60ms, −14dB |
+| **Head hit** | same as body hit, plus: | |
+|  | metallic "ting" | 3 tone sines at 2100Hz, 2100×2.76Hz, 2100×5.4Hz (bell ratios), gain −10/−16/−22dB, decay 380/250/150ms |
+|  | sharper "tick" | noise bandpass raised to 4500Hz |
+| **Kill** | finisher "thump" | tone sine 160→55Hz, decay 180ms, −6dB |
+|  | 2 rising notes | tone triangle 880Hz decay 120ms −12dB at t; 1320Hz decay 220ms −12dB at t+70ms |
+| **Headshot kill** | kill + the head-hit "ting", the second note changed to 1760Hz | |
 
-Nếu có file (`hit_body_*`, `hit_head_*`, `kill`, `kill_head`): profile có tuỳ chọn `mode: 'file' | 'synth' | 'both'` cho từng sự kiện. Mặc định `'both'` khi có file: phát file + lớp "độ dày" tổng hợp (file trên mạng thường mỏng, thiếu bass — đó là lý do nghe "tịt tịt").
+If files exist (`hit_body_*`, `hit_head_*`, `kill`, `kill_head`): the profile has a `mode: 'file' | 'synth' | 'both'` option per event. The default is `'both'` when files exist: play the file + the synthesized "thickness" layer (downloaded files are usually thin and lack bass — that is why they sound "flat").
 
-### Làm cho "ngọt"
+### Making it "sweet"
 
-- **Combo cao độ:** trúng liên tiếp trong vòng 400ms thì mỗi lần cao độ tăng 3% (tối đa +15%), quá 400ms không trúng thì về lại. Xả AK trúng liên tục nghe "tách tách tách" leo dần, rất sướng tai.
-- **Không chồng tiếng:** nhiều HitConfirm đến trong cùng 30ms (bắn trúng nhiều người, hoặc gói mạng dồn) → chỉ phát 1 lần, lấy sự kiện "nặng" nhất (kill > head > body).
-- **Ngẫu nhiên nhẹ:** cao độ ±2%, gain ±1dB mỗi lần.
-- **Đi thẳng vào master**, không qua EQ súng, không qua panner (là âm giao diện, luôn nghe rõ ở giữa).
-- **Ducking:** lúc phát tiếng hạ gục, hạ âm lượng tiếng súng của chính mình −4dB trong 150ms rồi trả lại (dùng một `GainNode` riêng cho nhóm tiếng súng), để tiếng "chốt" nổi bật.
-- Hitmarker hình và tiếng phải cùng một khung hình.
+- **Pitch combo:** consecutive hits within 400ms raise the pitch 3% each time (max +15%); if no hit lands for more than 400ms it resets. Spraying an AK with continuous hits gives a climbing "tick tick tick", very satisfying.
+- **No stacked sounds:** multiple HitConfirms arriving within the same 30ms (hitting several people, or bunched-up network packets) -> play only once, taking the "heaviest" event (kill > head > body).
+- **Slight randomness:** pitch ±2%, gain ±1dB each time.
+- **Straight into master**, not through the gun EQ, not through the panner (it is a UI sound, always heard clearly in the center).
+- **Ducking:** while the kill sound plays, lower your own gunfire volume by −4dB for 150ms then restore it (use a dedicated `GainNode` for the gunfire group) so the "finisher" stands out.
+- The visual hitmarker and the sound must land on the same frame.
 
-### Bị trúng (phía nạn nhân)
+### Being hit (victim side)
 
-- Nạn nhân nghe tiếng "phập" trầm: noise lowpass 900Hz decay 80ms −8dB + tone sine 140→70Hz decay 120ms −10dB, phát từ hướng đạn đến (panner đặt cách người chơi 1m theo hướng người bắn).
-- File `hurt_*` nếu có thì thay lớp noise.
-- Máu dưới 30: thêm tiếng tim đập nhỏ lặp (tone sine 55Hz, 2 nhịp mỗi 0,9s, −20dB) đến khi hồi sinh. Có setting tắt.
+- The victim hears a deep "thud": noise lowpass 900Hz decay 80ms −8dB + tone sine 140→70Hz decay 120ms −10dB, played from the direction the shot came from (panner placed 1m from the player toward the shooter).
+- File `hurt_*` if present replaces the noise layer.
+- Health below 30: add a small looping heartbeat sound (tone sine 55Hz, 2 beats every 0.9s, −20dB) until respawn. Has a setting to turn it off.
 
-### Bảng chỉnh F8 (bổ sung vào A.5)
+### F8 tuning panel (addition to A.5)
 
-- Tab "Hit": slider cho từng lớp của trúng thân, trúng đầu, hạ gục; nút "Thử trúng thân", "Thử trúng đầu", "Thử combo 6 phát", "Thử hạ gục", "Thử hạ gục headshot"; chọn `mode` file/synth/both.
+- "Hit" tab: sliders for each layer of body hit, head hit, kill; buttons "Test body hit", "Test head hit", "Test 6-hit combo", "Test kill", "Test headshot kill"; choose `mode` file/synth/both.
 
-Nghiệm thu:
-- [ ] Nhắm mắt nghe phân biệt được: trúng thân, trúng đầu, hạ gục, hạ gục headshot.
-- [ ] Xả AK trúng liên tục vào bia: tiếng leo cao dần, dừng 0,5s rồi bắn lại thì về cao độ gốc.
-- [ ] Bắn 1 viên trúng 2 người đứng thẳng hàng (nếu đạn xuyên) hoặc trúng dồn: chỉ nghe 1 tiếng.
-- [ ] Không có file nào: vẫn nghe giòn, có bass, không "tịt tịt".
-- [ ] Nạn nhân nghe tiếng bị trúng từ đúng hướng người bắn.
+Acceptance:
+- [ ] With eyes closed you can tell apart: body hit, head hit, kill, headshot kill.
+- [ ] Spray an AK with continuous hits on a target: the sound climbs in pitch; stop for 0.5s then fire again and it returns to the base pitch.
+- [ ] One shot hitting 2 people standing in a line (if bullets penetrate) or bunched-up hits: only 1 sound is heard.
+- [ ] With no files at all: it still sounds crisp, with bass, not "flat".
+- [ ] The victim hears the hit sound from exactly the shooter's direction.
 
 ---
 
-## Ghi chú cho người dùng
+## Notes for the user
 
-- Chưa có file nào cũng chạy được: thump là âm tổng hợp, nên chỉ cần mỗi file `shot_01` là đã nghe có lực.
-- Ưu tiên tìm file theo thứ tự: `shot` (quan trọng nhất) → `tail` → `reload` → `mech` → `shell`. Tiếng trúng, hết đạn, cảnh báo sắp hết thì bản tổng hợp đã khá ổn, có file đẹp mới thay.
-- Từ khoá tìm trên freesound/OpenGameArt: `rifle magazine reload`, `pistol slide`, `revolver cylinder`, `bullet insert`, `gun dry fire click`, `hitmarker`, `bullet impact flesh`, `metal ping`.
-- Chỉnh tai bằng F8 khi đeo tai nghe **và** khi nghe loa laptop, vì bass nghe tai nghe thấy đã nhưng loa laptop có thể mất hết.
+- It works even with no files: the thump is synthesized, so just a single `shot_01` file already gives a sound with punch.
+- Prioritize finding files in this order: `shot` (most important) → `tail` → `reload` → `mech` → `shell`. For hit, out-of-ammo and low-ammo warning sounds the synthesized versions are already decent; replace them only when you have nice files.
+- Search keywords for freesound/OpenGameArt: `rifle magazine reload`, `pistol slide`, `revolver cylinder`, `bullet insert`, `gun dry fire click`, `hitmarker`, `bullet impact flesh`, `metal ping`.
+- Tune by ear with F8 both with headphones **and** with laptop speakers, because bass that sounds great on headphones can disappear completely on laptop speakers.

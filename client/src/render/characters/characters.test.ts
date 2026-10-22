@@ -7,14 +7,14 @@ import { makeAnimState, updateAnim, type AnimInput } from './animate'
 const TEAMS_: TeamId[] = ['A', 'B']
 const feet = { pos: [0, 0, 0] as [number, number, number], crouching: false } as never
 
-describe('bộ nhân vật (module)', () => {
-  it('mọi id trong shared đều có module; id lạ rơi về mặc định', () => {
+describe('character sets (module)', () => {
+  it('every id in shared has a module; an unknown id falls back to the default', () => {
     expect(characterSetList.map(s => s.id)).toEqual([...CHARACTER_SETS])
-    expect(getCharacterSet('khong-co').id).toBe(CHARACTER_SETS[0])
+    expect(getCharacterSet('missing').id).toBe(CHARACTER_SETS[0])
   })
 
   for (const set of characterSetList) for (const team of TEAMS_) {
-    it(`${set.id}/${team}: đầu khớp vùng head của hitbox, thân không vượt hitbox`, () => {
+    it(`${set.id}/${team}: head matches the hitbox head region, torso does not exceed the hitbox`, () => {
       const rig = set.build(team)
       rig.root.updateWorldMatrix(true, true)
       const head = new THREE.Box3().setFromObject(rig.headMesh)
@@ -28,7 +28,7 @@ describe('bộ nhân vật (module)', () => {
     })
   }
 
-  it('hai đội của cùng một bộ nhìn khác nhau (màu thân)', () => {
+  it('the two teams of one set look different (torso colour)', () => {
     for (const set of characterSetList) {
       const col = (t: 'A' | 'B') => (set.build(t).mats[2] as unknown as { color: { getHex(): number } }).color.getHex()
       const a = col('A'), b = col('B')
@@ -37,7 +37,7 @@ describe('bộ nhân vật (module)', () => {
   })
 })
 
-describe('animation thủ tục', () => {
+describe('procedural animation', () => {
   const base: AnimInput = { x: 0, z: 0, dt: 1 / 60, grounded: true, crouching: false, sliding: false, pitch: 0, crouchDrop: 0.6 }
   const run = (rig: ReturnType<typeof getCharacterSet>['build'] extends (t: TeamId) => infer R ? R : never, speed: number, frames: number, extra: Partial<AnimInput> = {}) => {
     const st = makeAnimState()
@@ -46,7 +46,7 @@ describe('animation thủ tục', () => {
     return st
   }
 
-  it('đứng yên: chân không đung đưa; chạy: chân đung đưa chéo nhau, theo quãng đường', () => {
+  it('standing still: legs do not swing; running: legs swing in opposition, following distance travelled', () => {
     const idle = getCharacterSet('copRobber').build('A')
     run(idle, 0, 60)
     expect(Math.abs(idle.legL.rotation.x)).toBeLessThan(1e-6)
@@ -58,13 +58,13 @@ describe('animation thủ tục', () => {
       z -= 8.5 / 60
       updateAnim(moving, st, { ...base, z })
       peak = Math.max(peak, Math.abs(moving.legL.rotation.x))
-      expect(moving.legL.rotation.x + moving.legR.rotation.x).toBeCloseTo(0, 5)   // đối xứng ngược pha
+      expect(moving.legL.rotation.x + moving.legR.rotation.x).toBeCloseTo(0, 5)   // symmetric, in antiphase
     }
     expect(peak).toBeGreaterThan(0.5)
     expect(st.phase).toBeGreaterThan(10)
   })
 
-  it('chạy nhanh đung đưa mạnh hơn chạy chậm; robot đung đưa ít hơn blocky', () => {
+  it('running fast swings more than running slowly; robot swings less than blocky', () => {
     const peakOf = (id: string, speed: number) => {
       const rig = getCharacterSet(id).build('A'); const st = makeAnimState(); let z = 0, peak = 0
       for (let i = 0; i < 240; i++) { z -= speed / 60; updateAnim(rig, st, { ...base, z }); peak = Math.max(peak, Math.abs(rig.legL.rotation.x)) }
@@ -74,14 +74,14 @@ describe('animation thủ tục', () => {
     expect(peakOf('robot', 8.5)).toBeLessThan(peakOf('copRobber', 8.5))
   })
 
-  it('teleport (hồi sinh) không bị tính là chạy', () => {
+  it('teleport (respawn) does not count as running', () => {
     const rig = getCharacterSet('copRobber').build('A'); const st = makeAnimState()
     updateAnim(rig, st, base)
     updateAnim(rig, st, { ...base, x: 40 })
     expect(st.phase).toBe(0)
   })
 
-  it('trượt: ngả ra sau, chân duỗi trước; nhảy: co chân; ngồi: cúi về trước', () => {
+  it('slide: leans back, legs stretched forward; jump: legs tucked; crouch: leans forward', () => {
     const settle = (extra: Partial<AnimInput>) => { const rig = getCharacterSet('copRobber').build('A'); const st = makeAnimState(); for (let i = 0; i < 60; i++) updateAnim(rig, st, { ...base, ...extra }); return rig }
     const slide = settle({ sliding: true })
     expect(slide.upper.rotation.x).toBeGreaterThan(0.4)
@@ -89,7 +89,7 @@ describe('animation thủ tục', () => {
     const air = settle({ grounded: false })
     expect(air.legL.rotation.x).toBeGreaterThan(0.5)
     expect(settle({ crouching: true }).upper.rotation.x).toBeLessThan(-0.1)
-    // ngồi: chỉ chân ngắn lại + hông hạ, thân/đầu không bị scale
+    // crouch: only the legs shorten + hips drop, torso/head are not scaled
     const cr = settle({ crouching: true })
     expect(cr.legL.scale.y).toBeCloseTo(0.2 / 0.8, 2)
     expect(cr.upper.position.y).toBeCloseTo(0.2, 2)
@@ -97,10 +97,10 @@ describe('animation thủ tục', () => {
     expect(cr.upper.scale.y).toBe(1)
   })
 
-  it('pitch: đầu và súng xoay theo, tổng nghiêng bằng pitch', () => {
+  it('pitch: head and gun rotate with it, total tilt equals pitch', () => {
     const rig = settle2(0.5)
     expect(rig.headPivot.rotation.x + rig.upper.rotation.x).toBeCloseTo(0.5, 2)
-    // súng là con của tay: tổng xoay = upper + armR + gunAnchor = pitch (tay nghỉ đã bị gunAnchor bù)
+    // the gun is a child of the arm: total rotation = upper + armR + gunAnchor = pitch (the resting arm angle is compensated by gunAnchor)
     expect(rig.upper.rotation.x + rig.armR.rotation.x + rig.gunAnchor.rotation.x).toBeCloseTo(0.5, 2)
     function settle2(pitch: number) { const r = getCharacterSet('robot').build('B'); const st = makeAnimState(); for (let i = 0; i < 60; i++) updateAnim(r, st, { ...base, pitch }); return r }
   })

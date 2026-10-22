@@ -1,8 +1,8 @@
 {
   "spawnPoints": {
-    "baseB": "toàn bộ node mặt đất trong căn cứ B",
-    "laneLeft": "node mặt đất ở mép trái map, phía x > 0",
-    "laneRight": "node mặt đất ở mép phải map, phía x > 0"
+    "baseB": "all ground nodes inside base B",
+    "laneLeft": "ground nodes at the left edge of the map, on the x > 0 side",
+    "laneRight": "ground nodes at the right edge of the map, on the x > 0 side"
   },
   "scaling": {
     "countPerExtraPlayer": 0.6,
@@ -28,8 +28,8 @@
   "maxAlive": 18,
   "waves": [
     {
-      "title": "ĐỢT 1",
-      "hint": "Làm quen nào",
+      "title": "WAVE 1",
+      "hint": "Let's get acquainted",
       "groups": [
         {
           "type": "walker",
@@ -40,8 +40,8 @@
       ]
     },
     {
-      "title": "ĐỢT 2",
-      "hint": "Chúng chạy nhanh đấy",
+      "title": "WAVE 2",
+      "hint": "They run fast",
       "groups": [
         {
           "type": "walker",
@@ -66,8 +66,8 @@
       ]
     },
     {
-      "title": "ĐỢT 3",
-      "hint": "Canh các lỗ bắn!",
+      "title": "WAVE 3",
+      "hint": "Watch the bullet holes!",
       "groups": [
         {
           "type": "walker",
@@ -85,8 +85,8 @@
       ]
     },
     {
-      "title": "ĐỢT 4",
-      "hint": "Cẩn thận zombie nhảy lên gờ",
+      "title": "WAVE 4",
+      "hint": "Watch out for zombies leaping onto ledges",
       "groups": [
         {
           "type": "walker",
@@ -111,8 +111,8 @@
       ]
     },
     {
-      "title": "ĐỢT 5",
-      "hint": "Một con trâu đang tới",
+      "title": "WAVE 5",
+      "hint": "A brute is coming",
       "groups": [
         {
           "type": "walker",
@@ -142,8 +142,8 @@
       ]
     },
     {
-      "title": "ĐỢT 6",
-      "hint": "Hạ con gào trước!",
+      "title": "WAVE 6",
+      "hint": "Take down the screamer first!",
       "groups": [
         {
           "type": "walker",
@@ -167,8 +167,8 @@
       ]
     },
     {
-      "title": "ĐỢT 7",
-      "hint": "Chúng tới từ mọi phía",
+      "title": "WAVE 7",
+      "hint": "They come from every side",
       "groups": [
         {
           "type": "runner",
@@ -199,8 +199,8 @@
       ]
     },
     {
-      "title": "ĐỢT 8",
-      "hint": "Giữ vững!",
+      "title": "WAVE 8",
+      "hint": "Hold the line!",
       "groups": [
         {
           "type": "walker",
@@ -223,8 +223,8 @@
       ]
     },
     {
-      "title": "ĐỢT 9",
-      "hint": "Đợt cuối trước khi đại ca tới",
+      "title": "WAVE 9",
+      "hint": "The last wave before the boss arrives",
       "groups": [
         {
           "type": "runner",
@@ -254,8 +254,8 @@
       ]
     },
     {
-      "title": "ĐỢT 10",
-      "hint": "ĐẠI CA ZOMBIE",
+      "title": "WAVE 10",
+      "hint": "ZOMBIE BOSS",
       "groups": [
         {
           "type": "boss",

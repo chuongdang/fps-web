@@ -1,23 +1,23 @@
-// Bộ não zombie (plan 17, T.4): chọn đường tới mục tiêu trên nav, sinh phím + yaw mỗi tick. Dùng chung cho zombie-thực-thể (Thủ Thành)
-// và bot đóng vai zombie (Lây Nhiễm). Không đụng vào state: chỉ đọc vị trí rồi ghi vào `InputCmd`.
+// Zombie brain (plan 17, T.4): picks a path to the target on the nav grid, produces keys + yaw each tick. Shared by entity zombies (Defense)
+// and bots playing a zombie (Infection). Does not touch state: it only reads the position and writes into `InputCmd`.
 //
-//  - Đi theo waypoint, nhìn thẳng hướng đi (zombie luôn nhìn trước mặt).
-//  - Cạnh Hole: chạy thẳng tới mặt tường, còn ~HOLE_JUMP_DIST thì ngồi + nhảy.
-//  - Cạnh Leap: tới đúng quãng bay (leapFlight) bằng cách nhích từng tick tới khi đứng yên, rồi bấm E.
-//  - Chống kẹt: không tiến được thì nhảy rồi tìm đường lại; kẹt lâu → báo `stuckMs` cho nơi gọi quyết định (dịch chuyển, bỏ đích).
+//  - Follows waypoints, looking straight along the walking direction (a zombie always looks ahead).
+//  - Hole edge: run straight to the wall face, then crouch + jump at ~HOLE_JUMP_DIST.
+//  - Leap edge: reach the exact flight distance (leapFlight) by nudging tick by tick until standing still, then press E.
+//  - Anti-stuck: when no progress, jump and repath; stuck for long → report `stuckMs` so the caller decides (teleport, drop the target).
 import { Btn, DT, ZOMBIE, leapFlight, type InputCmd, type PlayerState, type Vec3 } from '@fps/shared'
 import { EdgeKind, type NavAbility, type NavGrid, type Waypoint } from '../bots/nav'
 
 export const ZOMBIE_AI = {
-  arriveM: 0.6,            // tới waypoint đi bộ
-  repathMs: 400,           // tìm lại đường tối đa mỗi chừng này
-  retargetM: 3,            // mục tiêu đi xa đường cũ hơn ngần này thì tìm lại
-  holeJumpDist: 1.7,       // còn ngần này tới mặt tường thì ngồi + nhảy (đo bằng mô phỏng: cửa sổ nhảy ≈ 0,2s)
-  leapTolM: 0.18,          // sai số quãng đứng bật chấp nhận
-  leapRestSpeed: 0.45,     // phải gần như đứng yên mới bật (đà ngang cộng vào quãng bay)
-  leapNudgeSpeed: 1.1,     // nhích từng tick chừng nào tốc độ còn dưới mức này
-  leapFarM: 3.0,           // cách điểm bật hơn ngần này thì cứ chạy bình thường
-  stuckProgressM: 0.5,     // 2s mà tiến được ít hơn ngần này = kẹt
+  arriveM: 0.6,            // reached a walking waypoint
+  repathMs: 400,           // repath at most this often
+  retargetM: 3,            // repath when the target is farther than this from the old path
+  holeJumpDist: 1.7,       // crouch + jump when this far from the wall face (measured in simulation: the jump window ≈ 0.2s)
+  leapTolM: 0.18,          // accepted error in the take-off distance
+  leapRestSpeed: 0.45,     // must be nearly still to leap (horizontal momentum adds to the flight distance)
+  leapNudgeSpeed: 1.1,     // nudge tick by tick while the speed stays below this
+  leapFarM: 3.0,           // farther than this from the take-off point: just run normally
+  stuckProgressM: 0.5,     // moving less than this in 2s = stuck
   stuckCheckMs: 2000,
   attackRange: 1.6,
 }
@@ -37,9 +37,9 @@ export class ZombieBrain {
   private progressPos: Vec3 = [0, 0, 0]
   private progressAt = 0
   private stuckSince = -1
-  private leaping = false          // đã bấm E, đang bay
+  private leaping = false          // pressed E, now airborne
   private leapT = 0
-  private holePhase = 0            // 0 = chạy tới, 1 = đã ngồi + nhảy
+  private holePhase = 0            // 0 = running up, 1 = already crouched + jumped
   private holeT = 0
   private wasGrounded = true
   private tick = 0
@@ -51,8 +51,8 @@ export class ZombieBrain {
   get waypoint(): Waypoint | null { return this.path?.[this.idx] ?? null }
 
   /**
-   * Sinh phím cho tick này. `target` = vị trí mục tiêu (null: đứng yên). `leapReady` = hồi chiêu E đã xong.
-   * Ghi buttons/yaw/pitch vào `cmd` (không đụng seq/weapon). Trả thông tin tấn công/kẹt.
+   * Produce the keys for this tick. `target` = target position (null: stand still). `leapReady` = the E cooldown is over.
+   * Writes buttons/yaw/pitch into `cmd` (does not touch seq/weapon). Returns attack/stuck info.
    */
   step(cmd: InputCmd, s: PlayerState, target: Vec3 | null, nowMs: number, leapReady: boolean): BrainStep {
     const out = this.out
@@ -64,7 +64,7 @@ export class ZombieBrain {
     const px = s.pos[0], py = s.pos[1], pz = s.pos[2]
     const hd = Math.hypot(target[0] - px, target[2] - pz)
 
-    // tấn công khi tới gần: quay mặt vào mục tiêu, dừng lại (nơi gọi quyết định có nhìn thấy không)
+    // attack when close: face the target and stop (the caller decides whether it is actually visible)
     if (hd <= ZOMBIE_AI.attackRange && Math.abs(target[1] - py) < 1.6) {
       cmd.yaw = Math.atan2(-(target[0] - px), -(target[2] - pz))
       out.attack = true
@@ -73,13 +73,13 @@ export class ZombieBrain {
       return out
     }
 
-    // tìm đường
+    // pathfinding
     const far = Math.hypot(target[0] - this.pathEnd[0], target[2] - this.pathEnd[2]) > ZOMBIE_AI.retargetM
     if (!this.path || far || (nowMs >= this.nextRepathAt && this.idx >= this.path.length)) {
       if (nowMs >= this.nextRepathAt || !this.path) this.repath(s, target, nowMs)
     }
 
-    // kẹt
+    // stuck
     if (this.progressAt === 0) { this.progressPos[0] = px; this.progressPos[1] = py; this.progressPos[2] = pz; this.progressAt = nowMs }
     else if (nowMs - this.progressAt >= ZOMBIE_AI.stuckCheckMs) {
       const moved = Math.hypot(px - this.progressPos[0], pz - this.progressPos[2])
@@ -90,7 +90,7 @@ export class ZombieBrain {
     out.stuckMs = this.stuckSince < 0 ? 0 : nowMs - this.stuckSince
 
     const wp = this.path?.[this.idx]
-    if (!wp) {   // không có đường: lao thẳng vào mục tiêu
+    if (!wp) {   // no path: charge straight at the target
       cmd.yaw = Math.atan2(-(target[0] - px), -(target[2] - pz))
       cmd.buttons |= Btn.Forward
       return out
@@ -124,7 +124,7 @@ export class ZombieBrain {
       cmd.buttons |= Btn.Forward
       if (this.holePhase === 0 && fd <= ZOMBIE_AI.holeJumpDist && s.grounded) { this.holePhase = 1; this.holeT = nowMs; cmd.buttons |= Btn.Crouch | Btn.Jump }
       else if (this.holePhase === 1) {
-        cmd.buttons |= Btn.Crouch                                     // giữ ngồi cho tới khi qua khỏi tường
+        cmd.buttons |= Btn.Crouch                                     // stay crouched until past the wall
         if (s.grounded && nowMs - this.holeT > 200 && d < 2.5) cmd.buttons &= ~Btn.Crouch
       }
       if (d < ZOMBIE_AI.arriveM + 0.3 || (this.holePhase === 1 && s.grounded && nowMs - this.holeT > 400 && fd > 0.3 && this.passedFace(wp, px, pz))) this.advance()
@@ -136,33 +136,33 @@ export class ZombieBrain {
       const dy = wp.y - py
       const fl = leapFlight(dy)
       if (this.leaping) {
-        // đang bay: không bấm gì (đà ngang đã định sẵn). Hạ cánh → xong hoặc hỏng
+        // airborne: press nothing (horizontal momentum is already set). Landing → success or failure
         this.leapT += DT
         if (s.grounded && this.leapT > 0.15) {
           this.leaping = false
           if (Math.hypot(wp.x - px, wp.z - pz) < 1.3 && Math.abs(wp.y - py) < 1.0) this.advance()
-          else this.nextRepathAt = 0   // hỏng: tìm đường lại
+          else this.nextRepathAt = 0   // failed: repath
         }
         return
       }
       if (!fl) { this.advance(); return }
       const L = fl.dist
       if (d > L + ZOMBIE_AI.leapFarM) { cmd.buttons |= Btn.Forward; if (d < 2.5 && wp.jump) cmd.buttons |= Btn.Jump; return }
-      // đứng tại quãng bay: nhích tới/lui từng tick tới khi đúng quãng và đứng yên
+      // stand at the flight distance: nudge forward/back tick by tick until at the exact distance and standing still
       const err = d - L
       if (Math.abs(err) <= ZOMBIE_AI.leapTolM && speed <= ZOMBIE_AI.leapRestSpeed && s.grounded && leapReady) {
         cmd.buttons |= Btn.Ability; this.leaping = true; this.leapT = 0
         return
       }
       if (speed < ZOMBIE_AI.leapNudgeSpeed) {
-        if (err > ZOMBIE_AI.leapTolM && d > L + 0.9) cmd.buttons |= Btn.Forward            // còn xa: chạy tiếp (sẽ trượt phanh)
-        else if (err > ZOMBIE_AI.leapTolM && this.tick % 6 === 0) cmd.buttons |= Btn.Forward   // gần: chạm nhẹ từng nhịp
+        if (err > ZOMBIE_AI.leapTolM && d > L + 0.9) cmd.buttons |= Btn.Forward            // still far: keep running (will slide to a stop)
+        else if (err > ZOMBIE_AI.leapTolM && this.tick % 6 === 0) cmd.buttons |= Btn.Forward   // close: tap lightly every few ticks
         else if (err < -ZOMBIE_AI.leapTolM && this.tick % 6 === 0) cmd.buttons |= Btn.Back
       }
       return
     }
 
-    // đi bộ / nhảy gờ / nhảy xuống
+    // walk / jump onto a ledge / drop down
     cmd.yaw = yawTo(wp.x, wp.z)
     cmd.buttons |= Btn.Forward
     if (wp.jump && d < 1.6 && s.grounded) cmd.buttons |= Btn.Jump
@@ -172,7 +172,7 @@ export class ZombieBrain {
 
   private passedFace(wp: Waypoint, px: number, pz: number): boolean {
     const f = wp.face!
-    // đã qua mặt tường: mặt tường nằm sau lưng so với hướng tới waypoint
+    // past the wall face: the wall face is behind us relative to the direction to the waypoint
     return (wp.x - f[0]) * (wp.x - px) + (wp.z - f[1]) * (wp.z - pz) < (wp.x - f[0]) ** 2 + (wp.z - f[1]) ** 2 - 1.6
   }
 

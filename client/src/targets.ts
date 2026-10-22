@@ -4,7 +4,7 @@ import type { HitBox } from '@fps/shared'
 import type { MovementConfig } from '@fps/shared'
 import type { PlayerState } from '@fps/shared'
 
-// ── Vị trí bia đặt khu giữa map ───────────────────────────────────────────────
+// ── Target positions in the middle of the map ───────────────────────────────────────
 const TARGET_POSITIONS: [number, number, number][] = [
   [-4, 0, -12],
   [ 0, 0, -8 ],
@@ -13,7 +13,7 @@ const TARGET_POSITIONS: [number, number, number][] = [
   [ 6, 0, -4 ],
 ]
 
-// Màu mặc định mỗi phần
+// Default color of each part
 const COLOR_LEGS  = 0x5a6a7a
 const COLOR_BODY  = 0x8a7060
 const COLOR_HEAD  = 0xddccaa
@@ -78,7 +78,7 @@ export function updateTargets(targets: Target[], dt: number): void {
   }
 }
 
-// Xây fake PlayerState để dùng với hitboxesFor
+// Build a fake PlayerState to use with hitboxesFor
 function targetState(t: Target): PlayerState {
   return {
     pos: t.pos, vel: [0,0,0], yaw: 0, pitch: 0,
@@ -90,7 +90,7 @@ export function targetHitboxes(t: Target, cfg: MovementConfig): HitBox[] {
   return hitboxesFor(targetState(t), cfg)
 }
 
-// ── Bảng tập bắn (?dummies=1): tấm 2×2m có vòng tròn đồng tâm ở 10 / 20 / 40m tính từ chỗ đứng (-28, 0, 0) nhìn về +X ──
+// ── Shooting-range board (?dummies=1): a 2×2m panel with concentric rings at 10 / 20 / 40m from the standing spot (-28, 0, 0) looking toward +X ──
 export interface Board { pos: [number, number, number]; label: string }
 const BOARDS: Board[] = [
   { pos: [-18, 1.5, -3], label: '10m' },
@@ -104,7 +104,7 @@ function boardTexture(label: string): THREE.CanvasTexture {
   const g = c.getContext('2d')!
   g.fillStyle = '#e8e4d8'; g.fillRect(0, 0, 256, 256)
   g.strokeStyle = '#222'; g.lineWidth = 2; g.fillStyle = '#222'
-  for (let i = 1; i <= 5; i++) { g.beginPath(); g.arc(128, 128, i * 24, 0, Math.PI * 2); g.stroke() }   // mỗi vòng = 0,2m
+  for (let i = 1; i <= 5; i++) { g.beginPath(); g.arc(128, 128, i * 24, 0, Math.PI * 2); g.stroke() }   // each ring = 0.2m
   g.beginPath(); g.moveTo(0, 128); g.lineTo(256, 128); g.moveTo(128, 0); g.lineTo(128, 256); g.stroke()
   g.font = 'bold 22px monospace'; g.fillText(label, 8, 24)
   g.strokeRect(1, 1, 254, 254)
@@ -115,13 +115,13 @@ export function createBoards(scene: THREE.Scene): Board[] {
   for (const b of BOARDS) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(BOARD_HALF * 2, BOARD_HALF * 2), new THREE.MeshBasicMaterial({ map: boardTexture(b.label), side: THREE.DoubleSide }))
     m.position.set(b.pos[0], b.pos[1], b.pos[2])
-    m.rotation.y = Math.PI / 2   // mặt phẳng vuông góc trục X
+    m.rotation.y = Math.PI / 2   // plane perpendicular to the X axis
     scene.add(m)
   }
   return BOARDS
 }
 
-/** Tia trúng tấm bảng nào (gần hơn maxDist) → điểm trúng + pháp tuyến hướng về phía người bắn */
+/** Which board the ray hits (closer than maxDist) → hit point + normal pointing toward the shooter */
 export function rayBoards(origin: readonly number[], dir: readonly number[], boards: readonly Board[], maxDist: number):
   { dist: number; point: [number, number, number]; normal: [number, number, number] } | null {
   let best: { dist: number; point: [number, number, number]; normal: [number, number, number] } | null = null

@@ -1,13 +1,13 @@
 import type { GrenadeFirst, GrenadePullKey, Vec3 } from './poses'
 
-// Hoạt hình lựu đạn góc 1 (plan 12, G.5). Thuần số học: logic ném (ws.nade) cho biết pha + tiến độ rút chốt, file này
-// ra vị trí/xoay quả trong tay phải, điểm đích tay trái trên đường rút chốt, chốt đã sang tay trái chưa, quả còn hiện không.
+// First-person grenade animation (plan 12, G.5). Pure maths: the throw logic (ws.nade) provides the phase + pin-pull progress, and this file
+// outputs the grenade position/rotation in the right hand, the left-hand target along the pin-pull path, whether the pin has moved to the left hand, and whether the grenade is still visible.
 export type NadePhase = 'idle' | 'pull' | 'ready' | 'windup' | 'throw' | 'recover' | 'raise' | 'cancel'
 export type LogicPhase = 'idle' | 'pulling' | 'ready'
 
 const CANCEL_MS = 150
-const WINDUP_BACK: Vec3 = [0, 0.02, 0.05]    // kéo tay về sau 5cm (z + = về phía camera)
-const HIDE_DROP = 0.55                        // hạ tay xuống khỏi màn hình (m)
+const WINDUP_BACK: Vec3 = [0, 0.02, 0.05]    // pull the hand back 5 cm (z + = toward the camera)
+const HIDE_DROP = 0.55                        // lower the hand off-screen (m)
 const BREATH_AMP = 0.004, BREATH_PERIOD_S = 3.5
 
 const smooth = (x: number) => { const t = x < 0 ? 0 : x > 1 ? 1 : x; return t * t * (3 - 2 * t) }
@@ -15,12 +15,12 @@ const lerp3 = (a: Vec3, b: Vec3, t: number, out: Vec3) => { out[0] = a[0] + (b[0
 
 export interface NadePose {
   pos: Vec3; rotDeg: Vec3
-  show: boolean              // quả trong tay phải còn hiện không (ẩn từ lúc rời tay tới lúc đưa quả mới lên)
-  leftS: number              // vị trí trên đường tay trái 0..1; −1 = ở leftRest (ngoài màn hình)
+  show: boolean              // whether the grenade in the right hand is visible (hidden from release until a new one is brought up)
+  leftS: number              // position along the left-hand path 0..1; −1 = at leftRest (off-screen)
   pin: 'onGrenade' | 'onLeftHand' | 'hidden'
 }
 
-/** Điểm trên đường rút chốt tại s (0..1): trả khoá + hệ số nội suy giữa hai khoá liền kề */
+/** Point on the pin-pull path at s (0..1): returns the key + interpolation factor between two adjacent keys */
 export function pathSegment(keys: GrenadePullKey[], s: number): { a: GrenadePullKey; b: GrenadePullKey; u: number } {
   let i = 0
   while (i < keys.length - 2 && s >= keys[i + 1]!.t) i++
@@ -30,13 +30,13 @@ export function pathSegment(keys: GrenadePullKey[], s: number): { a: GrenadePull
 
 export class GrenadeAnim {
   phase: NadePhase = 'idle'
-  private t = 0                  // ms trong pha hiện tại
+  private t = 0                  // ms in the current phase
   private mode: 'strong' | 'lob' = 'strong'
   private pull = 0
   private hasMore = false
-  private emptyHand = false         // đã ném quả cuối: tay không
-  private clock = 0              // giây, cho nhịp thở
-  private from: Vec3 = [0, 0, 0] // pose lúc bắt đầu cancel
+  private emptyHand = false         // last grenade thrown: empty hand
+  private clock = 0              // seconds, for the breathing rhythm
+  private from: Vec3 = [0, 0, 0] // pose at the start of the cancel
   private fromRot: Vec3 = [0, 0, 0]
   private pending: { phase: LogicPhase; pull: number } | null = null
   readonly out: NadePose = { pos: [0, 0, 0], rotDeg: [0, 0, 0], show: true, leftS: -1, pin: 'onGrenade' }
@@ -45,7 +45,7 @@ export class GrenadeAnim {
 
   reset(): void { this.phase = 'idle'; this.t = 0; this.pending = null; this.emptyHand = false }
 
-  /** Gọi mỗi frame với trạng thái logic (ws.nade): pha, chế độ, tiến độ rút chốt 0..1, còn quả sau khi ném không */
+  /** Call every frame with the logic state (ws.nade): phase, mode, pin-pull progress 0..1, whether any grenades remain after the throw */
   setLogic(phase: LogicPhase, mode: 'strong' | 'lob', pullFrac: number, hasMore: boolean): void {
     this.mode = mode
     this.pull = pullFrac < 0 ? 0 : pullFrac > 1 ? 1 : pullFrac
@@ -62,12 +62,12 @@ export class GrenadeAnim {
         if (phase === 'idle') this.cancel()
         break
       case 'raise': case 'recover': case 'windup': case 'throw': case 'cancel':
-        this.pending = { phase, pull: this.pull }   // sau khi xong động tác hiện tại sẽ nhận pha logic này
+        this.pending = { phase, pull: this.pull }   // this logic phase is taken once the current motion finishes
         break
     }
   }
 
-  /** Logic vừa ném (ready + thả): vung tay, quả trong tay biến mất ngay (quả thật bay từ G.4) */
+  /** Logic just threw (ready + release): swing the arm, the held grenade disappears at once (the real grenade flies from G.4) */
   onThrow(): void { this.go('windup'); this.emptyHand = false }
 
   private go(p: NadePhase): void { this.phase = p; this.t = 0 }
@@ -139,7 +139,7 @@ export class GrenadeAnim {
         break
       }
     }
-    // Hết động tác: nhận pha logic đã đến trong lúc bận (ví dụ nhấn lại ngay khi đang đưa quả mới lên)
+    // Motion finished: accept the logic phase that arrived while busy (e.g. pressed again while a new grenade is being brought up)
     if (this.phase === 'idle' && this.pending) {
       const p = this.pending; this.pending = null
       this.setLogic(p.phase, this.mode, p.pull, this.hasMore)

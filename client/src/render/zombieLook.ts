@@ -1,5 +1,5 @@
-// Hình dáng zombie (plan 16, ZF.1): tint ngả màu (giữ texture gốc), cỡ lệch nhẹ, mắt đỏ phát sáng (sprite cộng sáng, không bị ánh sáng ảnh hưởng).
-// Chưa có model zombie riêng thì dùng chính model của người đó (Lây Nhiễm) hoặc Cướp (Thủ Thành) cộng tint.
+// Zombie look (plan 16, ZF.1): colour tint (keeps the original texture), slight size variation, glowing red eyes (additive sprites, unaffected by lighting).
+// Without a dedicated zombie model, use the player's own model (Infection) or the Terrorists model (Defense) plus a tint.
 import * as THREE from 'three'
 import { ZOMBIE_LOOK, zombieVariation } from '@fps/shared'
 import type { CharacterRig } from './characters/types'
@@ -30,7 +30,7 @@ const _right = new THREE.Vector3()
 
 function headNode(rig: CharacterRig): THREE.Object3D { return rig.skel?.headBone ?? rig.headPivot }
 
-/** Biến rig thành zombie: tint + cỡ + mắt. `opts` như zombieVariation (Thủ Thành: tint theo loại). */
+/** Turn a rig into a zombie: tint + size + eyes. `opts` as in zombieVariation (Defense: tint per type). */
 export function makeZombieFx(scene: THREE.Scene, rig: CharacterRig, id: number, opts: Parameters<typeof zombieVariation>[1], sizeMul = 1, eyeScale = 1, modelScale = 1): ZombieFx {
   const v = zombieVariation(id, opts)
   const orig = new Map<THREE.MeshBasicMaterial | THREE.MeshLambertMaterial, number>()
@@ -42,11 +42,11 @@ export function makeZombieFx(scene: THREE.Scene, rig: CharacterRig, id: number, 
     orig.set(mm, mm.color.getHex())
     mm.color.copy(white).lerp(tint, v.tintStrength)
   }
-  sizeMul *= modelScale   // model zombie riêng có chiều cao khác 1,8m: đưa về cỡ hitbox
+  sizeMul *= modelScale   // a dedicated zombie model has a height other than 1.8m: bring it to the hitbox size
   rig.root.scale.setScalar(v.scale * sizeMul)
   const mk = (): THREE.Sprite => {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false }))
-    s.scale.setScalar(0.22 * eyeScale * Math.sqrt(sizeMul))   // quầng to để thấy rõ từ xa trong đêm
+    s.scale.setScalar(0.22 * eyeScale * Math.sqrt(sizeMul))   // large halo so it is clearly visible from afar at night
     s.renderOrder = 9
     scene.add(s)
     return s
@@ -54,14 +54,14 @@ export function makeZombieFx(scene: THREE.Scene, rig: CharacterRig, id: number, 
   return { eyes: [mk(), mk()], scale: v.scale * sizeMul, orig }
 }
 
-/** Đặt mắt theo đầu mỗi frame (đầu cúi theo pitch, nên lấy vị trí/hướng thế giới của xương) */
+/** Place the eyes on the head every frame (the head tilts with pitch, so use the bone's world position/direction) */
 export function updateZombieFx(fx: ZombieFx, rig: CharacterRig, visible: boolean, far = false): void {
-  const on = visible && !far   // ngoài 40m tắt mắt (ZF.7)
+  const on = visible && !far   // beyond 40m the eyes are switched off (ZF.7)
   fx.eyes[0].visible = fx.eyes[1].visible = on
   if (!on) return
   const h = headNode(rig)
   h.getWorldPosition(_head)
-  // Mặt hướng theo yaw của root (model đã xoay π nên mặt quay về −Z của root)
+  // The face follows the root yaw (the model is rotated by pi so the face points to the root's -Z)
   const yaw = rig.root.rotation.y
   _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw))
   _right.set(Math.cos(yaw), 0, -Math.sin(yaw))

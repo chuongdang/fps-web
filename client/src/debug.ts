@@ -10,7 +10,7 @@ export function initDebugOverlay(
   net?: PingStats,
   snap?: () => SnapshotStore | null,
   pred?: () => Prediction | null,
-  extra?: () => string[],   // dòng thêm (spread…)
+  extra?: () => string[],   // extra lines (spread…)
 ): (state: PlayerState, fps: number) => void {
   const el = document.createElement('pre')
   el.style.cssText =
@@ -28,17 +28,17 @@ export function initDebugOverlay(
     const hspd = Math.hypot(state.vel[0], state.vel[2])
     el.textContent = [
       `FPS        ${fps.toFixed(0)}`,
-      `Tốc độ    ${hspd.toFixed(2)} m/s`,
+      `Speed    ${hspd.toFixed(2)} m/s`,
       `grounded  ${state.grounded}`,
       `slideTimer ${state.slideTimer.toFixed(3)}   adsT ${state.adsT.toFixed(2)}`,
       ...(extra ? extra() : []),
       `pos  ${state.pos.map(v => v.toFixed(2)).join('  ')}`,
       `yaw  ${state.yaw.toFixed(3)}   pitch ${state.pitch.toFixed(3)}`,
-      ...(pred?.() ? [`pending ${pred()!.pending.length}   sai số reconcile ${pred()!.lastError.toFixed(3)} m   max 5s ${pred()!.maxError().toFixed(3)} m`] : []),
-      ...(pred?.() ? [`súng: lệch server ${weaponSyncStats.mismatches}/${weaponSyncStats.checks} lần`] : []),
-      ...(snap?.() ? [`snapshot/s ${snap()!.perSec.toFixed(1)}   ghost(F5) bóng ma server`] : []),
+      ...(pred?.() ? [`pending ${pred()!.pending.length}   reconcile error ${pred()!.lastError.toFixed(3)} m   max 5s ${pred()!.maxError().toFixed(3)} m`] : []),
+      ...(pred?.() ? [`weapon: server mismatches ${weaponSyncStats.mismatches}/${weaponSyncStats.checks}`] : []),
+      ...(snap?.() ? [`snapshot/s ${snap()!.perSec.toFixed(1)}   ghost(F5) server ghosts`] : []),
       ...(snap?.()?.serverTime ? [`snapshot: serverNow − serverTime = ${(clock.serverNow() - snap()!.serverTime).toFixed(0)} ms   #${snap()!.count}`] : []),
-      ...(net ? [`RTT  ${net.rttMs.toFixed(0)} ms   pong sai thứ tự ${net.outOfOrder}`, `interp delay ${interp.delayMs.toFixed(0)} ms (trễ 1 chiều ${clock.oneWayMs.toFixed(0)})`, `serverNow ${clock.serverNow().toFixed(0)}   offset ${clock.offset.toFixed(1)}${clock.synced ? '' : ' (chưa sync)'}`] : []),
+      ...(net ? [`RTT  ${net.rttMs.toFixed(0)} ms   out-of-order pongs ${net.outOfOrder}`, `interp delay ${interp.delayMs.toFixed(0)} ms (one-way ${clock.oneWayMs.toFixed(0)})`, `serverNow ${clock.serverNow().toFixed(0)}   offset ${clock.offset.toFixed(1)}${clock.synced ? '' : ' (not synced)'}`] : []),
     ].join('\n')
   }
 }

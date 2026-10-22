@@ -8,7 +8,7 @@ import type { CharacterSetId } from './characters'
 import type { ThrowMode } from './grenade'
 import type { GameMode, RoomConfig, RoomOptions } from './roomConfig'
 
-// Phân loại message theo plan/04-phase3-netcode-move.md (C2S 1-3, S2C 101-105)
+// Message classification per plan/04-phase3-netcode-move.md (C2S 1-3, S2C 101-105)
 export const MsgType = {
   // Client → Server
   Join: 1,
@@ -16,10 +16,12 @@ export const MsgType = {
   Ping: 3,
   SetDebug: 4,
   ChooseTeam: 5,
-  Buy: 6,            // plan ghi t:5 nhưng 5 là ChooseTeam
-  ListRooms: 7,      // xin danh sách phòng + map (trước khi Join)
-  DebugCmd: 8,       // lệnh debug (task M.8); server chỉ nhận khi không chạy production
-  OfflineCmd: 9,     // plan 15: điều khiển phòng offline (thêm/xoá bot, đổi phe, tiền vô hạn); chỉ phòng offline nhận
+  Buy: 6,            // plan says t:5 but 5 is ChooseTeam
+  ListRooms: 7,      // request the room list + maps (before Join)
+  DebugCmd: 8,       // debug command (task M.8); the server only accepts it when not running in production
+  OfflineCmd: 9,     // plan 15: control an offline room (add/remove bots, switch side, infinite money); only offline rooms accept it
+  DropWeapon: 10,    // G: drop the held gun (shared/weaponDrop.ts)
+  PickupWeapon: 11,  // E: pick up the nearest dropped gun in reach
   // Server → Client
   Welcome: 101,
   Pong: 102,
@@ -32,31 +34,34 @@ export const MsgType = {
   ShotFx: 109,
   DebugShot: 110,
   Hurt: 111,
-  MatchState: 112,   // plan ghi 111 nhưng 111 đã là Hurt
+  MatchState: 112,   // plan says 111 but 111 is already Hurt
   TeamAssigned: 113,
   Scoreboard: 114,
-  BuyResult: 115,    // plan ghi 114 nhưng 114 là Scoreboard
+  BuyResult: 115,    // plan says 114 but 114 is Scoreboard
   MoneyEvent: 116,
-  GrenadeSpawn: 117,   // plan 12 ghi 116–118 nhưng 116 đã là MoneyEvent
+  GrenadeSpawn: 117,   // plan 12 says 116–118 but 116 is already MoneyEvent
   GrenadeExplode: 118,
   GrenadeAnim: 119,
-  RoomList: 120,       // trả lời ListRooms
-  JoinRejected: 121,   // Join không được (phòng đầy / đã tồn tại / không có)
-  RoundEnd: 122,       // Sinh Tử: kết thúc ván (plan 13 ghi 121–123 nhưng 120/121 đã dùng)
-  RoundReset: 123,     // Sinh Tử: bắt đầu ván mới (xoá lựu đạn/xác)
-  MatchEnd: 124,       // Sinh Tử: kết thúc trận
-  OfflineState: 125,   // plan 15: danh sách bot + tiền vô hạn của phòng offline
-  BotDebug: 126,       // plan 15 (F11): trạng thái từng bot, 10 lần/giây, chỉ khi client bật
-  NavDebug: 127,       // plan 15 (F11): lưới di chuyển, gửi một lần khi bật
-  Infected: 130,       // plan 16: zombie mẹ xuất hiện / có người bị lây nhiễm
-  HeroChosen: 131,     // plan 16: người cuối cùng thành anh hùng
-  InfectionCount: 132, // plan 16: số người / zombie (khi đổi)
-  Sniffed: 133,        // plan 16 (I.3): gửi người bị zombie đánh hơi (nghe growl gần + icon mũi)
-  DefenseState: 140,   // plan 17: pha, đợt, số zombie còn lại
-  WaveStart: 141,      // plan 17: banner đầu đợt
-  WaveClear: 142,      // plan 17: hết đợt + tiền thưởng
-  DefenseEnd: 143,     // plan 17: thắng/thua + thống kê
-  Telegraph: 144,      // plan 17: báo trước chiêu của boss (vòng đỏ dưới đất, hướng lao)
+  RoomList: 120,       // reply to ListRooms
+  JoinRejected: 121,   // Join not possible (room full / already exists / not found)
+  RoundEnd: 122,       // Elimination: round over (plan 13 says 121–123 but 120/121 are taken)
+  RoundReset: 123,     // Elimination: new round starts (clears grenades/corpses)
+  MatchEnd: 124,       // Elimination: match over
+  OfflineState: 125,   // plan 15: bot list + infinite money of the offline room
+  BotDebug: 126,       // plan 15 (F11): per-bot state, 10 times/second, only when the client enables it
+  NavDebug: 127,       // plan 15 (F11): navigation mesh, sent once when enabled
+  Infected: 130,       // plan 16: mother zombie appears / a player got infected
+  HeroChosen: 131,     // plan 16: the last human becomes the hero
+  InfectionCount: 132, // plan 16: human / zombie counts (when they change)
+  Sniffed: 133,        // plan 16 (I.3): sent to a player sniffed by a zombie (nearby growl + nose icon)
+  DefenseState: 140,   // plan 17: phase, wave, zombies remaining
+  WaveStart: 141,      // plan 17: banner at the start of a wave
+  WaveClear: 142,      // plan 17: wave cleared + bonus money
+  DefenseEnd: 143,     // plan 17: win/lose + stats
+  Telegraph: 144,      // plan 17: boss ability warning (red ring on the ground, charge direction)
+  WeaponDropSpawn: 150,   // a gun was dropped (or: a gun already lying here when you joined)
+  WeaponDropRemove: 151,  // a dropped gun was picked up / expired (id -1 = every dropped gun)
+  HoldSlot: 152,          // the server changed which slot you hold (after a drop / pickup): the next cmd must carry it
 } as const
 
 export type MsgTypeValue = (typeof MsgType)[keyof typeof MsgType]
@@ -70,26 +75,26 @@ export interface InputsMsg {
 export interface PingMsg {
   t: typeof MsgType.Ping
   clientTime: number
-  rtt?: number   // RTT client đo được gần nhất (ms), server dùng cho cột ping ở bảng điểm
+  rtt?: number   // latest RTT measured by the client (ms), used by the server for the ping column on the scoreboard
 }
 
 export interface JoinMsg {
   t: typeof MsgType.Join
   name: string
   room: string
-  team?: TeamId | 'auto'   // đội muốn vào; mặc định auto
-  characterSet?: string    // bộ nhân vật; chỉ có tác dụng khi người này tạo phòng mới (sai/thiếu → mặc định)
-  create?: boolean         // true: tạo phòng mới (lỗi nếu tên đã có); false: chỉ vào phòng có sẵn; thiếu: vào, chưa có thì tạo
-  mapId?: string           // map của phòng mới (thiếu/sai → map đầu tiên)
-  options?: RoomOptions    // thể thức + cài đặt của phòng mới (server kẹp theo SETTINGS_LIMITS)
-  version?: string         // phiên bản client; server có đặt version mà khác/thiếu thì từ chối ('version')
+  team?: TeamId | 'auto'   // team to join; default auto
+  characterSet?: string    // character set; only takes effect when this player creates a new room (wrong/missing → default)
+  create?: boolean         // true: create a new room (error if the name exists); false: only join an existing room; missing: join, create if absent
+  mapId?: string           // map of the new room (missing/wrong → first map)
+  options?: RoomOptions    // mode + settings of the new room (server clamps to SETTINGS_LIMITS)
+  version?: string         // client version; if the server sets a version and it differs/is missing, reject ('version')
 }
 
 export type BotDifficulty = 'medium' | 'hard'
 export const BOT_DIFFICULTIES: readonly BotDifficulty[] = ['medium', 'hard']
-export const BOT_TAG: Record<BotDifficulty, string> = { medium: 'TB', hard: 'KHÓ' }
+export const BOT_TAG: Record<BotDifficulty, string> = { medium: 'MED', hard: 'HARD' }
 
-// Phòng offline (plan 15, B.7). `ally`: bot phe mình (Shift); mặc định bot phe địch.
+// Offline room (plan 15, B.7). `ally`: bot on your own side (Shift); by default a bot is on the enemy side.
 export type OfflineCmdMsg = { t: typeof MsgType.OfflineCmd } & (
   | { cmd: 'addBot'; difficulty: BotDifficulty; ally?: boolean }
   | { cmd: 'removeBot'; id: number }
@@ -110,33 +115,37 @@ export interface BotDebugInfo {
   id: number
   state: string                          // 'Engage', 'TakeCover'...
   eye: [number, number, number]
-  look: [number, number, number]         // điểm bot đang nhìn thẳng tới (xanh)
-  want: [number, number, number] | null  // điểm bot định nhắm (đỏ)
+  look: [number, number, number]         // point the bot is looking straight at (green)
+  want: [number, number, number] | null  // point the bot intends to aim at (red)
   path: [number, number, number][]
 }
 export interface BotDebugMsg { t: typeof MsgType.BotDebug; bots: BotDebugInfo[] }
-/** nodes: phẳng [x, y, z, coverMask, ...]; edges: phẳng [a, b, ...] (chỉ số node) */
+/** nodes: flat [x, y, z, coverMask, ...]; edges: flat [a, b, ...] (node indices) */
 export interface NavDebugMsg { t: typeof MsgType.NavDebug; nodes: number[]; edges: number[] }
 
-// Lệnh debug trong game (task M.8): '/endround A' ...
+// In-game debug command (task M.8): '/endround A' ...
 export interface DebugCmdMsg { t: typeof MsgType.DebugCmd; cmd: string }
 
-// Xin danh sách phòng đang có
-export interface ListRoomsMsg { t: typeof MsgType.ListRooms; version?: string }   // version: phiên bản client (server đóng gói từ chối nếu khác)
+// Request the list of existing rooms
+export interface ListRoomsMsg { t: typeof MsgType.ListRooms; version?: string }   // version: client version (the packaged server rejects if different)
 
-// Đổi đội (server áp luật cân bằng, trả lời bằng TeamAssigned)
+// Switch team (server applies balance rules, replies with TeamAssigned)
 export interface ChooseTeamMsg {
   t: typeof MsgType.ChooseTeam
   team: TeamId | 'auto'
 }
 
-// Mua súng (server kiểm: còn sống, trong khu mua, đủ tiền, ≤ 5 lệnh/giây)
+// Buy a weapon (server checks: alive, in buy zone, enough money, ≤ 5 commands/second)
 export interface BuyMsg {
   t: typeof MsgType.Buy
   key: string
 }
 
-// Bật/tắt DebugShot (F7); ngoài plan, cần để server biết khi nào gửi
+// Drop the held gun / pick up the nearest dropped gun (server checks: alive, human, mode allows it, reach, ≤ 5 commands/second)
+export interface DropWeaponMsg { t: typeof MsgType.DropWeapon }
+export interface PickupWeaponMsg { t: typeof MsgType.PickupWeapon }
+
+// Toggle DebugShot (F7); outside the plan, needed so the server knows when to send
 export interface SetDebugMsg {
   t: typeof MsgType.SetDebug
   shots: boolean
@@ -144,7 +153,7 @@ export interface SetDebugMsg {
 
 // Server → Client
 export interface RoomInfo {
-  id: string                 // tên phòng
+  id: string                 // room name
   mapId: string
   characterSet: CharacterSetId
   players: number
@@ -152,8 +161,17 @@ export interface RoomInfo {
   teamA: number
   teamB: number
   mode: GameMode
-  status: string             // 'Đang chờ' | 'Ván 5/19 · 3–2' | 'Còn 06:12 · 23–18'
+  status: RoomStatus         // what the room is doing now; the client turns the code + numbers into text (no prose crosses the wire)
 }
+/** Room state shown on the lobby cards. `waiting`: not enough players; `preparing`/`ended`: Team Deathmatch between matches. */
+export type RoomStatus =
+  | { code: 'waiting' }
+  | { code: 'preparing' }
+  | { code: 'ended' }
+  | { code: 'timeLeft'; seconds: number; scoreA: number; scoreB: number }                              // Team Deathmatch, playing
+  | { code: 'round'; round: number; maxRounds: number; scoreA: number; scoreB: number }               // Elimination
+  | { code: 'infectionRound'; round: number; maxRounds: number; humans: number; zombies: number }     // Infection
+  | { code: 'wave'; wave: number; maxWaves: number; players: number }                                 // Defense
 export interface MapInfo { id: string; name: string }
 export interface RoomListMsg { t: typeof MsgType.RoomList; rooms: RoomInfo[]; maps: MapInfo[] }
 export type JoinRejectReason = 'full' | 'exists' | 'missing' | 'bad' | 'version'
@@ -164,24 +182,25 @@ export interface WelcomeMsg {
   yourId: number
   tick: number
   serverTime: number
+  mapId: string                  // id of the room's map (key of assets/maps/index.ts); the client builds that map
   mapName: string
-  characterSet: CharacterSetId   // bộ nhân vật của phòng
-  config: RoomConfig             // thể thức + cài đặt phòng
-  players: { id: number; name: string }[]   // những người đã có trong phòng lúc vào (để biết tên cho killfeed)
+  characterSet: CharacterSetId   // character set of the room
+  config: RoomConfig             // mode + room settings
+  players: { id: number; name: string }[]   // players already in the room when joining (to know names for the killfeed)
 }
 
-// Đủ mọi trường của PlayerState để client đặt lại state chính xác (reconcile ở 3.6)
+// All PlayerState fields so the client can reset its state exactly (reconcile in 3.6)
 export const NetFlag = {
   Grounded:  1 << 0,
   Crouching: 1 << 1,
-  Sliding:   1 << 2,   // slideTimer > 0; chỉ để hiển thị, không dùng để dựng lại state
-  Dead:      1 << 3,   // đã chết, chờ hồi sinh (không có hitbox, không vẽ)
-  Invuln:    1 << 4,   // bất tử sau hồi sinh (vẽ nhấp nháy)
-  Downed:    1 << 9,   // Thủ Thành: gục chờ cứu (nằm, bò chậm)
-  Flashlight: 1 << 8,  // người đang bật đèn pin (ban đêm): người khác vẽ vệt đèn
-  Hero:      1 << 7,   // anh hùng (Lây Nhiễm): máu 200, damage ×1.5, chạy ×1.1
-  Zombie:    1 << 5,   // vai zombie (plan 16): dùng cấu hình di chuyển/vuốt zombie, vẽ model zombie
-  Transform: 1 << 6,   // đang biến hình (bất tử, không di chuyển được)
+  Sliding:   1 << 2,   // slideTimer > 0; display only, not used to rebuild state
+  Dead:      1 << 3,   // dead, waiting to respawn (no hitbox, not drawn)
+  Invuln:    1 << 4,   // invulnerable after respawn (drawn blinking)
+  Downed:    1 << 9,   // Defense: downed awaiting revive (lying, slow crawl)
+  Flashlight: 1 << 8,  // player has the flashlight on (night): others draw the light beam
+  Hero:      1 << 7,   // hero (Infection): 200 health, damage ×1.5, run ×1.1
+  Zombie:    1 << 5,   // zombie role (plan 16): uses the zombie movement/claw config, draws the zombie model
+  Transform: 1 << 6,   // transforming (invulnerable, cannot move)
 } as const
 
 export interface NetPlayer {
@@ -193,31 +212,31 @@ export interface NetPlayer {
   flags: number
   slideTimer: number
   slideCooldown: number
-  adsT: number     // mức ngắm 0..1 (reconcile dùng đúng giá trị; người khác dùng để vẽ súng lên má)
+  adsT: number     // ADS level 0..1 (reconcile uses the exact value; others use it to draw the gun at the cheek)
   hp: number
   team: TeamId
-  weapon: number   // súng đang cầm (để vẽ súng trên tay người khác)
-  killStreak: number   // chuỗi hạ hiện tại (≥ ECONOMY.bountyStreak: dấu truy nã trên đầu)
-  leapCd?: number      // zombie: giây còn lại của hồi chiêu nhảy E (reconcile dùng đúng giá trị)
-  hpMax?: number       // zombie: máu tối đa (máu zombie hàng nghìn, HUD cần để vẽ thanh máu)
-  runSpeed?: number    // zombie: tốc độ chạy theo loại (client dựng cấu hình di chuyển giống server)
-  ztype?: string       // zombie: loại ('mother'/'normal'/'walker'/...), để chọn dáng/tint
-  zscale?: number      // zombie to/nhỏ (boss 2.2): cỡ model và hitbox
-  downLeft?: number    // Thủ Thành: ms còn lại của người đang gục (vòng thời gian)
-  reviveP?: number     // Thủ Thành: tiến độ được cứu 0..1
-  sniffLeft?: number   // zombie (Lây Nhiễm): ms còn lại của chiêu đánh hơi đang chạy
-  sniffCd?: number     // zombie: ms còn lại của hồi chiêu đánh hơi
+  weapon: number   // held weapon (to draw the gun in other players' hands)
+  killStreak: number   // current kill streak (≥ ECONOMY.bountyStreak: wanted mark overhead)
+  leapCd?: number      // zombie: seconds left on the E leap cooldown (reconcile uses the exact value)
+  hpMax?: number       // zombie: max health (zombie health is in the thousands, the HUD needs it to draw the health bar)
+  runSpeed?: number    // zombie: run speed by type (the client builds the same movement config as the server)
+  ztype?: string       // zombie: type ('mother'/'normal'/'walker'/...), to pick the look/tint
+  zscale?: number      // big/small zombie (boss 2.2): model and hitbox size
+  downLeft?: number    // Defense: ms left for a downed player (time ring)
+  reviveP?: number     // Defense: revive progress 0..1
+  sniffLeft?: number   // zombie (Infection): ms left on the active sniff ability
+  sniffCd?: number     // zombie: ms left on the sniff cooldown
 }
 
 export interface SnapshotMsg {
   t: typeof MsgType.Snapshot
   tick: number
   serverTime: number
-  ack: number          // lastProcessedSeq của chính client nhận gói này
+  ack: number          // lastProcessedSeq for the client receiving this packet
   players: NetPlayer[]
-  wpn?: WeaponState    // WeaponState của chính client nhận gói này, sau cmd `ack` (client replay cmd chưa ack lên trên)
-  money?: number       // tiền của chính client nhận gói này
-  loadout?: (OwnedWeapon | null)[]   // súng đã mua ở 5 ô (kèm số tiền đã trả → hiển thị giá bán lại; ô 5 có thêm count lựu đạn)
+  wpn?: WeaponState    // WeaponState of the client receiving this packet, after cmd `ack` (the client replays unacked cmds on top)
+  money?: number       // money of the client receiving this packet
+  loadout?: (OwnedWeapon | null)[]   // purchased weapons in 5 slots (with the money paid → show resale price; slot 5 also carries the grenade count)
 }
 
 export interface PlayerJoinedMsg {
@@ -231,18 +250,18 @@ export interface PlayerLeftMsg {
   id: number
 }
 
-// Cả phòng: ai hạ ai
+// Whole room: who killed whom
 export interface KillMsg {
   t: typeof MsgType.Kill
   killerId: number
   victimId: number
   weapon: number
   headshot: boolean
-  reward: number          // tiền người hạ được (0 nếu không tính: đồng đội, ngoài PLAYING...)
-  victimStreak: number    // chuỗi hạ của nạn nhân trước khi chết (≥ 3 = truy nã)
+  reward: number          // money the killer received (0 if not counted: teammate, outside PLAYING...)
+  victimStreak: number    // victim's kill streak before dying (≥ 3 = wanted)
 }
 
-// Cả phòng: người chơi hồi sinh ở pos/yaw (client của chính người đó teleport, không làm mượt)
+// Whole room: a player respawns at pos/yaw (that player's own client teleports, no smoothing)
 export interface RespawnMsg {
   t: typeof MsgType.Respawn
   id: number
@@ -250,14 +269,15 @@ export interface RespawnMsg {
   yaw: number
 }
 
-// Gửi riêng nạn nhân (ngoài plan): hướng đạn đến để vẽ viền đỏ + tiếng bị trúng
+// Sent privately to the victim (outside the plan): incoming bullet direction to draw a red edge + hit sound
 export interface HurtMsg {
   t: typeof MsgType.Hurt
-  origin: [number, number, number]   // mắt người bắn
+  origin: [number, number, number]   // shooter's eye
   damage: number
+  fall?: true   // damage from a fall from height (no shooter; origin = own feet): the client flashes the whole screen red instead of a directional edge
 }
 
-// Gửi riêng người bắn: phát bắn trúng người (hitmarker chỉ hiện khi nhận gói này)
+// Sent privately to the shooter: a shot that hit a player (the hitmarker only shows when this packet is received)
 export interface HitConfirmMsg {
   t: typeof MsgType.HitConfirm
   damage: number
@@ -265,7 +285,7 @@ export interface HitConfirmMsg {
   targetId: number
 }
 
-// Gửi cả phòng trừ người bắn: vẽ vệt đạn + tiếng súng có vị trí. `weapon` ngoài plan, cần để chọn tiếng súng.
+// Sent to the whole room except the shooter: draw the tracer + positional gun sound. `weapon` is outside the plan, needed to choose the gun sound.
 export interface ShotFxMsg {
   t: typeof MsgType.ShotFx
   shooterId: number
@@ -273,10 +293,10 @@ export interface ShotFxMsg {
   origin: [number, number, number]
   dir: [number, number, number]
   dist: number
-  extra?: { dir: [number, number, number]; dist: number }[]   // các tia còn lại của súng nhiều tia (shotgun), cùng gốc origin
+  extra?: { dir: [number, number, number]; dist: number }[]   // remaining rays of a multi-ray weapon (shotgun), same origin
 }
 
-// Chỉ gửi người bắn khi đã bật debug: tia + hitbox mọi người khác ở thời điểm đã tua
+// Only sent to the shooter when debug is on: ray + everyone else's hitboxes at the rewound time
 export interface DebugShotMsg {
   t: typeof MsgType.DebugShot
   origin: [number, number, number]
@@ -284,23 +304,23 @@ export interface DebugShotMsg {
   boxes: HitBox[]
 }
 
-// Cả phòng: gửi khi đổi pha và mỗi 1s. phaseEndsAt theo serverTime (0 = không có hạn)
+// Whole room: sent on phase change and every 1s. phaseEndsAt in serverTime (0 = no deadline)
 export interface MatchStateMsg {
   t: typeof MsgType.MatchState
   phase: MatchPhase
   phaseEndsAt: number
-  scoreA: number          // Sinh Tử: số ván thắng; Hỗn Chiến: số mạng
+  scoreA: number          // Elimination: rounds won; Team Deathmatch: kills
   scoreB: number
   sideSwapped: boolean
   mode: GameMode
-  round: number           // Sinh Tử: ván hiện tại (1…); Hỗn Chiến: 0
+  round: number           // Elimination: current round (1…); Team Deathmatch: 0
   maxRounds: number
-  aliveA: number          // Sinh Tử: số người còn sống mỗi đội
+  aliveA: number          // Elimination: players alive per team
   aliveB: number
-  buyEndsAt: number | null   // Sinh Tử: hết giờ mua (serverTime); null = không giới hạn
+  buyEndsAt: number | null   // Elimination: buy time ends (serverTime); null = no limit
 }
 
-// Sinh Tử: ván vừa xong. winner null = hoà. Tiền nhận ở MoneyEvent (round_win / round_loss / round_draw)
+// Elimination: round just ended. winner null = draw. Money received in MoneyEvent (round_win / round_loss / round_draw)
 export type RoundEndReason = 'elimination' | 'time_alive' | 'time_hp' | 'draw' | 'infected_all' | 'time_survive'
 export interface RoundEndMsg { t: typeof MsgType.RoundEnd; round: number; winner: TeamId | null; reason: RoundEndReason }
 export interface RoundResetMsg { t: typeof MsgType.RoundReset; round: number }
@@ -314,17 +334,17 @@ export interface TeamAssignedMsg {
 
 export interface ScoreboardRow {
   id: number; name: string; team: TeamId; kills: number; deaths: number; ping: number; money?: number
-  // Lây Nhiễm: điểm cá nhân, số người đã lây nhiễm, số zombie đã hạ, vai hiện tại
+  // Infection: personal points, humans infected, zombies downed, current role
   pts?: number; inf?: number; zk?: number; role?: 'human' | 'zombie'
-  // Thủ Thành: sát thương gây ra, số lần cứu đồng đội
+  // Defense: damage dealt, teammate revives
   dmg?: number; rev?: number
-}   // money chỉ có khi người nhận cùng đội
+}   // money is only present when the receiver is on the same team
 export interface ScoreboardMsg {
   t: typeof MsgType.Scoreboard
   rows: ScoreboardRow[]
 }
 
-// Riêng người mua
+// Private to the buyer
 export interface BuyResultMsg {
   t: typeof MsgType.BuyResult
   ok: boolean
@@ -333,15 +353,15 @@ export interface BuyResultMsg {
 }
 
 export type MoneyReason = 'kill' | 'bounty' | 'buy' | 'sell' | 'reset' | 'round_win' | 'round_loss' | 'round_draw'
-// Riêng người nhận: tiền đổi (để hiện +$500...)
+// Private to the receiver: money change (to show +$500...)
 export interface MoneyEventMsg {
   t: typeof MsgType.MoneyEvent
   delta: number
   reason: MoneyReason
 }
 
-// Lựu đạn rời tay (cả phòng). Client tự mô phỏng quỹ đạo (grenadePhysics tất định) từ pos/vel/spawnTick;
-// throwSeq = WeaponState.throwSeq lúc ném, để chủ nhân nhận ra quả đã dự đoán của mình.
+// Grenade leaves the hand (whole room). The client simulates the trajectory itself (deterministic grenadePhysics) from pos/vel/spawnTick;
+// throwSeq = WeaponState.throwSeq at throw time, so the owner recognises its own predicted grenade.
 export interface GrenadeSpawnMsg {
   t: typeof MsgType.GrenadeSpawn
   id: number
@@ -351,38 +371,57 @@ export interface GrenadeSpawnMsg {
   vel: [number, number, number]
   spawnTick: number
   throwSeq: number
+  kind?: string   // weapon key of the grenade ('smoke'); missing = 'm67'
 }
 
-// Nổ (nguồn chân lý: nổ đúng chỗ này, xoá quả local). hits = sát thương đã áp cho từng người
+// Explosion (source of truth: it explodes exactly here, remove the local grenade). hits = damage applied to each player
 export interface GrenadeExplodeMsg {
   t: typeof MsgType.GrenadeExplode
   id: number
   pos: [number, number, number]
   hits: { id: number; damage: number }[]
+  kind?: string   // 'smoke': no damage, bursts into a smoke cloud (the client draws it per SMOKE); missing = M67 explosion
 }
 
-// Động tác của người khác để vẽ 3rd person: rút chốt / ném / huỷ
+// Other players' actions for 3rd-person drawing: pull pin / throw / cancel
 export interface GrenadeAnimMsg {
   t: typeof MsgType.GrenadeAnim
   playerId: number
   phase: 'pulling' | 'throw' | 'cancel'
-  mode?: ThrowMode   // pulling/throw: ném mạnh hay thấp
+  mode?: ThrowMode   // pulling/throw: strong or low throw
+  kind?: string      // weapon key of the held grenade ('smoke'); missing = 'm67'
 }
 
-// Lây Nhiễm (plan 16): byId = zombie đã cào (null = zombie mẹ được chọn / tự rớt khỏi map)
+// A gun is lying in the world. The client simulates the flight itself (grenadePhysics, from pos/vel/spawnTick) like a grenade without a fuse;
+// resting = already at rest (guns that were there when you joined). weapon = WEAPONS id, ammo = rounds left in the magazine.
+export interface WeaponDropSpawnMsg {
+  t: typeof MsgType.WeaponDropSpawn
+  id: number
+  weapon: number
+  ammo: number
+  ownerId: number     // who dropped it (-1 = none)
+  pos: [number, number, number]
+  vel: [number, number, number]
+  spawnTick: number
+  resting: boolean
+}
+export interface WeaponDropRemoveMsg { t: typeof MsgType.WeaponDropRemove; id: number; byId?: number }   // byId: who picked it up (absent = expired / cleared)
+export interface HoldSlotMsg { t: typeof MsgType.HoldSlot; slot: number }
+
+// Infection (plan 16): byId = zombie that clawed (null = chosen mother zombie / fell off the map by itself)
 export interface InfectedMsg { t: typeof MsgType.Infected; playerId: number; byId: number | null; kind: 'mother' | 'infected' }
 export interface SniffedMsg { t: typeof MsgType.Sniffed; byId: number }
 export interface HeroChosenMsg { t: typeof MsgType.HeroChosen; playerId: number }
 export interface InfectionCountMsg { t: typeof MsgType.InfectionCount; humans: number; zombies: number }
 
-// Thủ Thành (plan 17)
+// Defense (plan 17)
 export type DefensePhase = 'waiting' | 'prep' | 'wave' | 'intermission' | 'victory' | 'defeat'
 export interface DefenseStateMsg { t: typeof MsgType.DefenseState; phase: DefensePhase; wave: number; waves: number; phaseEndsAt: number; zombiesLeft: number }
 export interface WaveStartMsg { t: typeof MsgType.WaveStart; wave: number; title: string; hint: string }
 export interface WaveClearMsg { t: typeof MsgType.WaveClear; wave: number; bonus: number }
 export interface DefenseStatMsg { id: number; kills: number; damage: number; revives: number }
 export interface DefenseEndMsg { t: typeof MsgType.DefenseEnd; result: 'victory' | 'defeat'; wave: number; stats: DefenseStatMsg[] }
-/** Báo trước chiêu boss: slam = vòng tròn đỏ bán kính `radius` quanh `pos`; charge = đường lao từ `pos` theo `dir` dài `radius` */
+/** Boss ability warning: slam = red circle of radius `radius` around `pos`; charge = charge line from `pos` along `dir`, `radius` long */
 export interface TelegraphMsg { t: typeof MsgType.Telegraph; kind: 'slam' | 'charge' | 'summon'; pos: [number, number, number]; dir?: [number, number, number]; radius: number; endsAt: number }
 
 export interface PongMsg {
@@ -392,13 +431,13 @@ export interface PongMsg {
 }
 
 export type AnyMsg =
-  | JoinMsg | InputsMsg | PingMsg | SetDebugMsg | ChooseTeamMsg | BuyMsg | ListRoomsMsg | OfflineCmdMsg
-  | WelcomeMsg | PongMsg | SnapshotMsg | PlayerJoinedMsg | PlayerLeftMsg | HitConfirmMsg | ShotFxMsg | DebugShotMsg | KillMsg | RespawnMsg | HurtMsg | MatchStateMsg | TeamAssignedMsg | ScoreboardMsg | BuyResultMsg | MoneyEventMsg | GrenadeSpawnMsg | GrenadeExplodeMsg | GrenadeAnimMsg | RoomListMsg | JoinRejectedMsg | DebugCmdMsg | RoundEndMsg | RoundResetMsg | MatchEndMsg | OfflineStateMsg | BotDebugMsg | NavDebugMsg | InfectedMsg | HeroChosenMsg | InfectionCountMsg | SniffedMsg | DefenseStateMsg | WaveStartMsg | WaveClearMsg | DefenseEndMsg | TelegraphMsg
+  | JoinMsg | InputsMsg | PingMsg | SetDebugMsg | ChooseTeamMsg | BuyMsg | DropWeaponMsg | PickupWeaponMsg | ListRoomsMsg | OfflineCmdMsg
+  | WelcomeMsg | PongMsg | SnapshotMsg | PlayerJoinedMsg | PlayerLeftMsg | HitConfirmMsg | ShotFxMsg | DebugShotMsg | KillMsg | RespawnMsg | HurtMsg | MatchStateMsg | TeamAssignedMsg | ScoreboardMsg | BuyResultMsg | MoneyEventMsg | GrenadeSpawnMsg | GrenadeExplodeMsg | GrenadeAnimMsg | WeaponDropSpawnMsg | WeaponDropRemoveMsg | HoldSlotMsg | RoomListMsg | JoinRejectedMsg | DebugCmdMsg | RoundEndMsg | RoundResetMsg | MatchEndMsg | OfflineStateMsg | BotDebugMsg | NavDebugMsg | InfectedMsg | HeroChosenMsg | InfectionCountMsg | SniffedMsg | DefenseStateMsg | WaveStartMsg | WaveClearMsg | DefenseEndMsg | TelegraphMsg
 
 export const MAX_PITCH = 1.56
 const ALL_BUTTONS = Object.values(Btn).reduce((a, b) => a | b, 0)
 
-// Cmd từ client không đáng tin: kiểm tra trước khi cho vào hàng đợi
+// Cmds from the client are untrusted: validate before queueing
 export function isValidCmd(c: unknown): c is InputCmd {
   if (typeof c !== 'object' || c === null) return false
   const m = c as Record<string, unknown>
@@ -408,7 +447,7 @@ export function isValidCmd(c: unknown): c is InputCmd {
     (m.buttons & ~ALL_BUTTONS) === 0 &&
     typeof m.yaw === 'number' && Number.isFinite(m.yaw) &&
     typeof m.pitch === 'number' && Math.abs(m.pitch) <= MAX_PITCH &&
-    typeof m.weapon === 'number' && Number.isInteger(m.weapon) && m.weapon >= 0 && m.weapon < SLOT_COUNT &&   // ô 0–4
+    typeof m.weapon === 'number' && Number.isInteger(m.weapon) && m.weapon >= 0 && m.weapon < SLOT_COUNT &&   // slots 0–4
     
     (m.fireRenderTime === undefined || (typeof m.fireRenderTime === 'number' && Number.isFinite(m.fireRenderTime)))
   )

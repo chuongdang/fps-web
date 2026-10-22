@@ -3,7 +3,7 @@ import raw from './poses.json'
 import { loadPoses, WEAPON_KEYS } from './poses'
 
 describe('loadPoses', () => {
-  it('poses.json hợp lệ: đủ 8 súng, súng dài cầm 2 tay, súng ngắn/dao 1 tay ở góc 3', () => {
+  it('poses.json is valid: all 8 guns present, long guns held with 2 hands, pistols/knife with 1 hand in the 3rd-person view', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const p = loadPoses(raw)
     expect(warn).not.toHaveBeenCalled()
@@ -13,7 +13,7 @@ describe('loadPoses', () => {
     warn.mockRestore()
   })
 
-  it('file rỗng/thiếu trường: dùng mặc định, không văng lỗi', () => {
+  it('empty file / missing fields: falls back to defaults without throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const p = loadPoses({ first: { fov: 70 } })
     expect(p.first.fov).toBe(70)

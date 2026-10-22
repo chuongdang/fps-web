@@ -6,18 +6,18 @@ export interface HitBox {
   part: 'head' | 'body' | 'legs'
 }
 
-// Kích thước AABB (không xoay theo yaw — cố ý, đơn giản cho netcode)
+// AABB sizes (not rotated by yaw — deliberate, keeps netcode simple)
 const WIDE_HALF  = 0.30   // half 0.6m cho legs/body
 const HEAD_HALF  = 0.175  // half 0.35m cho head
-const DEPTH_HALF = 0.15   // 0.3m trước/sau
+const DEPTH_HALF = 0.15   // 0.3m front/back
 
-// `size` = hệ số cỡ (zombie to: boss 2.2): nhân mọi kích thước hộp quanh chân
+// `size` = scale factor (big zombies: boss 2.2): scales every box dimension around the feet
 export function hitboxesFor(state: PlayerState, cfg: MovementConfig, size = 1): HitBox[] {
   const [x, y, z] = state.pos
   const scale  = (state.crouching ? cfg.crouchHeight / cfg.standHeight : 1) * size
   const legTop  = y + 0.80 * scale
   const bodyTop = y + 1.45 * scale
-  const headTop = y + cfg.standHeight * scale  // = crouchHeight khi ngồi
+  const headTop = y + cfg.standHeight * scale  // = crouchHeight when crouching
   const wide = WIDE_HALF * size, head = HEAD_HALF * size, depth = DEPTH_HALF * size
 
   return [
@@ -27,8 +27,8 @@ export function hitboxesFor(state: PlayerState, cfg: MovementConfig, size = 1): 
   ]
 }
 
-// Slab test ray-AABB. Trả khoảng cách, hoặc null nếu không trúng.
-// Trả 0 nếu origin nằm trong box.
+// Slab test for ray-AABB. Returns the distance, or null if no hit.
+// Returns 0 if the origin is inside the box.
 export function rayAabb(
   origin: [number, number, number],
   dir: [number, number, number],
@@ -41,7 +41,7 @@ export function rayAabb(
   for (let i = 0; i < 3; i++) {
     const d = dir[i]!
     if (Math.abs(d) < 1e-9) {
-      // Tia song song với mặt phẳng — kiểm tra origin có trong slap không
+      // Ray parallel to the slab planes — check whether the origin is inside the slab
       if (origin[i]! < box.min[i]! || origin[i]! > box.max[i]!) return null
     } else {
       const invD = 1 / d
@@ -57,7 +57,7 @@ export function rayAabb(
   return tMin
 }
 
-// Tính hướng bắn từ yaw/pitch (theo quy ước dự án)
+// Compute the fire direction from yaw/pitch (per project convention)
 // dir = (−sin(yaw)·cos(pitch), sin(pitch), −cos(yaw)·cos(pitch))
 export function shootDir(
   yaw: number,

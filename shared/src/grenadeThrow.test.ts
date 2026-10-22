@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { Btn, GRENADE, GRENADE_ID, GRENADE_SLOT, makeWeaponState, stepWeaponCmd, type InputCmd, type WeaponState, type WeaponEvent } from './index'
 
-// Người chơi có Dao (ô 0), Colt (ô 1), M16 (ô 3) + `n` lựu đạn (ô 4)
+// Player has Knife (slot 0), Colt (slot 1), M16 (slot 3) + `n` grenades (slot 4)
 function player(n: number): WeaponState {
   const ws = makeWeaponState([6, 2, -1, 1, n > 0 ? GRENADE_ID : -1])
   ws.ammo[GRENADE_ID] = n
   return ws
 }
 let seq = 0
-let wanted = 3   // ô client đang xin trong cmd.weapon (G / auto-switch không đổi giá trị này)
-const ms = (t: number) => Math.round(t * 60 / 1000)   // ms → số tick
+let wanted = 3   // slot the client requests in cmd.weapon (G / auto-switch do not change this value)
+const ms = (t: number) => Math.round(t * 60 / 1000)   // ms → tick count
 function run(ws: WeaponState, buttons: number, ticks: number, weapon?: number): WeaponEvent[] {
   if (weapon !== undefined) wanted = weapon
   const evs: WeaponEvent[] = []
@@ -20,10 +20,10 @@ function run(ws: WeaponState, buttons: number, ticks: number, weapon?: number): 
   }
   return evs
 }
-const pull = ms(GRENADE.pinPullMs) + 2   // đủ để rút chốt xong
+const pull = ms(GRENADE.pinPullMs) + 2   // enough to finish pulling the pin
 
-describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server', () => {
-  it('phím 5 cầm lựu đạn; Fire giữ ≥ 0,35s rồi thả = ném mạnh, còn lại giảm 1', () => {
+describe('grenade throwing (G.3): state machine shared by client/server', () => {
+  it('key 5 holds a grenade; Fire held ≥ 0.35s then released = strong throw, then count drops by 1', () => {
     wanted = 3; seq = 1000
     const ws = player(2)
     run(ws, 0, 1, GRENADE_SLOT)
@@ -32,10 +32,10 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     run(ws, Btn.Fire, pull); expect(ws.nade.phase).toBe('ready')
     const b = run(ws, 0, 1); expect(b).toEqual(['threw'])
     expect(ws.ammo[GRENADE_ID]).toBe(1); expect(ws.throwSeq).toBe(1); expect(ws.nade.phase).toBe('idle')
-    expect(ws.current).toBe(GRENADE_ID)   // còn quả: vẫn cầm
+    expect(ws.current).toBe(GRENADE_ID)   // grenades left: still held
   })
 
-  it('chuột phải = ném thấp (lob)', () => {
+  it('right mouse = low throw (lob)', () => {
     wanted = 3; seq = 2000
     const ws = player(2)
     run(ws, 0, 1, GRENADE_SLOT)
@@ -44,7 +44,7 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     expect(run(ws, 0, 1)).toEqual(['threw']); expect(ws.nade.mode).toBe('lob')
   })
 
-  it('giữ 0,2s rồi thả: không ném, còn đủ lựu đạn', () => {
+  it('hold 0.2s then release: no throw, grenades intact', () => {
     wanted = 3; seq = 3000
     const ws = player(2)
     run(ws, 0, 1, GRENADE_SLOT)
@@ -53,20 +53,20 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     expect(ws.ammo[GRENADE_ID]).toBe(2); expect(ws.nade.phase).toBe('idle'); expect(ws.throwSeq).toBe(0)
   })
 
-  it('spam Fire liên tục (giữ không nhả): chỉ một lần rút chốt, không ném quá số đang có', () => {
+  it('spamming Fire continuously (held, never released): only one pin pull, never throws more than owned', () => {
     wanted = 3; seq = 4000
     const ws = player(2)
     run(ws, 0, 1, GRENADE_SLOT)
-    const evs = run(ws, Btn.Fire, 600)   // giữ chuột 10 giây
+    const evs = run(ws, Btn.Fire, 600)   // hold the mouse for 10 seconds
     expect(evs.filter(e => e === 'pull')).toHaveLength(1); expect(evs).not.toContain('threw')
     expect(ws.ammo[GRENADE_ID]).toBe(2)
-    // nhấn-nhả liên tục (mỗi 2 tick): vẫn tối đa 2 quả
+    // continuous press-release (every 2 ticks): still at most 2 grenades
     let threw = 0
     for (let i = 0; i < 200; i++) { threw += run(ws, Btn.Fire, pull).filter(e => e === 'threw').length; threw += run(ws, 0, 1).filter(e => e === 'threw').length }
     expect(threw).toBe(2); expect(ws.ammo[GRENADE_ID]).toBe(0)
   })
 
-  it('đang cooldown sau khi ném: nhấn ngay chưa rút chốt', () => {
+  it('on cooldown after a throw: pressing right away does not pull the pin', () => {
     wanted = 3; seq = 5000
     const ws = player(2)
     run(ws, 0, 1, GRENADE_SLOT)
@@ -77,7 +77,7 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     expect(run(ws, Btn.Fire, 1)).toEqual(['pull'])
   })
 
-  it('quả cuối: ô trống, sau autoSwitchBackMs tự đổi về súng trước đó', () => {
+  it('last grenade: slot empty, after autoSwitchBackMs auto-switches to the previous gun', () => {
     wanted = 3; seq = 6000
     const ws = player(1)
     run(ws, 0, 1, 3)   // M16
@@ -89,17 +89,17 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     expect(ws.current).toBe(1); expect(ws.slot).toBe(3)
   })
 
-  it('đổi súng khi đang rút chốt: huỷ, không mất quả', () => {
+  it('switching guns while pulling the pin: cancels, no grenade lost', () => {
     wanted = 3; seq = 7000
     const ws = player(2)
     run(ws, 0, 1, GRENADE_SLOT)
     run(ws, Btn.Fire, ms(100))
     expect(ws.nade.phase).toBe('pulling')
-    run(ws, Btn.Fire, 1, 3)   // bấm phím 4 (M16)
+    run(ws, Btn.Fire, 1, 3)   // press key 4 (M16)
     expect(ws.current).toBe(1); expect(ws.nade.phase).toBe('idle'); expect(ws.ammo[GRENADE_ID]).toBe(2)
   })
 
-  it('G: cầm + rút chốt luôn; giữ đủ rồi thả = ném mạnh, sau đó tự về súng trước', () => {
+  it('G: equips + pulls the pin right away; hold long enough then release = strong throw, then auto-returns to the previous gun', () => {
     wanted = 3; seq = 8000
     const ws = player(2)
     run(ws, 0, 1, 3)
@@ -108,10 +108,10 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     run(ws, Btn.QuickNade, pull); expect(ws.nade.phase).toBe('ready')
     expect(run(ws, 0, 1)).toEqual(['threw'])
     run(ws, 0, ms(GRENADE.autoSwitchBackMs) + 2)
-    expect(ws.current).toBe(1); expect(ws.ammo[GRENADE_ID]).toBe(1)   // còn 1 quả nhưng đã về súng
+    expect(ws.current).toBe(1); expect(ws.ammo[GRENADE_ID]).toBe(1)   // 1 grenade left but back on the gun
   })
 
-  it('G thả sớm: huỷ, về súng cũ ngay, còn nguyên lựu đạn', () => {
+  it('G released early: cancels, returns to the old gun immediately, grenades intact', () => {
     wanted = 3; seq = 9000
     const ws = player(2)
     run(ws, 0, 1, 3)
@@ -121,7 +121,7 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     expect(ws.current).toBe(1); expect(ws.ammo[GRENADE_ID]).toBe(2)
   })
 
-  it('không có lựu đạn: G và phím 5 không làm gì', () => {
+  it('no grenades: G and key 5 do nothing', () => {
     wanted = 3; seq = 10000
     const ws = player(0)
     run(ws, 0, 1, 3)
@@ -129,7 +129,7 @@ describe('ném lựu đạn (G.3): máy trạng thái dùng chung client/server'
     run(ws, 0, 1, GRENADE_SLOT); expect(ws.current).toBe(1)
   })
 
-  it('tất định: hai bản chạy cùng dãy cmd cho state giống hệt (client dự đoán = server)', () => {
+  it('deterministic: two runs of the same cmd sequence give identical state (client prediction = server)', () => {
     wanted = 3; seq = 11000
     const a = player(2), b = player(2)
     const cmds: InputCmd[] = []

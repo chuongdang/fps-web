@@ -1,11 +1,12 @@
+import { t } from '../../i18n'
 import { CHARACTER_SETS, DEFAULT_CHARACTER_SET, type CharacterSetId } from '@fps/shared'
 import { blocky } from './blocky'
 import { robot } from './robot'
 import type { CharacterSet } from './types'
 
-// Đăng ký bộ nhân vật. Thêm bộ mới: thêm id vào CHARACTER_SETS (shared) + module + một dòng ở đây.
-// Bão Cát Sa Mạc có xương (characterRig.ts); khối hộp chỉ là dự phòng khi glb lỗi hoặc ?blocky=1
-const saberDesert: CharacterSet = { ...blocky, id: 'saberDesert', label: 'Bão Cát Sa Mạc' }
+// Character set registry. To add a set: add the id to CHARACTER_SETS (shared) + a module + one line here.
+// Desert Sandstorm is skinned (characterRig.ts); the blocky boxes are only a fallback when the glb fails or with ?blocky=1
+const saberDesert: CharacterSet = { ...blocky, id: 'saberDesert', label: t('renderB.charset.saberDesert') }
 const REGISTRY: Record<CharacterSetId, CharacterSet> = { saberDesert, copRobber: blocky, robot }
 
 export function getCharacterSet(id: string): CharacterSet {

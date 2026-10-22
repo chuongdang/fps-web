@@ -5,11 +5,14 @@ import type { LoadedMap } from '../map/types'
 // An interaction is allowed if (memberA & filterB) != 0 && (memberB & filterA) != 0
 const MAP_FILTER    = (0x0001 << 16) | 0xFFFF  // member=1, collides with all
 const PLAYER_FILTER = (0x0002 << 16) | 0x0001  // member=2, collides with map only
-const GRENADE_FILTER = (0x0004 << 16) | 0x0001 // member=4, chỉ va chạm với map (không chạm người chơi: xem plan 12, G.2)
+const GRENADE_FILTER = (0x0004 << 16) | 0x0001 // member=4, collides only with the map (not players: see plan 12, G.2)
 
-// Controller có thể để chân lún ~1e-4 dưới mặt sàn; không nâng shape lên thì canStand
-// luôn false (sàn cắt capsule) và người chơi kẹt ở trạng thái ngồi khi nhả Ctrl.
+// The controller may leave the feet sunk ~1e-4 below the floor surface; unless the shape is lifted, canStand
+// is always false (the floor cuts the capsule) and the player gets stuck crouching after releasing Ctrl.
 const CANSTAND_EPS = 0.02
+
+// Auto-step (a map with `stepHeight`): the free width needed on top of a ledge for the player to step onto it
+const AUTOSTEP_MIN_WIDTH = 0.2
 
 export interface CollisionWorld {
   moveCharacter(
@@ -18,7 +21,7 @@ export interface CollisionWorld {
     crouching: boolean,
   ): { pos: [number, number, number]; grounded: boolean; hitCeiling: boolean }
   canStand(pos: [number, number, number]): boolean
-  /** Đổi chiều cao capsule khi ngồi (zombie thấp hơn người, plan 16). Gọi mỗi bước; chỉ dựng lại collider khi giá trị đổi. Mock trong test có thể bỏ qua. */
+  /** Change the capsule height when crouching (zombies are shorter than humans, plan 16). Called every step; only rebuilds the collider when the value changes. Test mocks may ignore it. */
   setCrouchHeight?(h: number): void
   castRay(
     origin: [number, number, number],
@@ -26,9 +29,9 @@ export interface CollisionWorld {
     maxDist: number,
   ): { dist: number; normal: [number, number, number] } | null
   /**
-   * Quét hình cầu bán kính `radius` từ `origin` theo hướng đơn vị `dir` tối đa `maxDist` (liên tục, không xuyên tường nhỏ-nhanh).
-   * Chỉ va chạm với collider map. `normal` = pháp tuyến bề mặt, hướng ra phía quả cầu (ngược với `dir`).
-   * dist = 0 khi đã chồng lấn ngay từ đầu.
+   * Sweep a sphere of radius `radius` from `origin` along unit direction `dir` up to `maxDist` (continuous, small fast spheres do not tunnel through walls).
+   * Collides only with map colliders. `normal` = surface normal, pointing out toward the sphere (opposite `dir`).
+   * dist = 0 when already overlapping at the start.
    */
   castSphere(
     origin: [number, number, number],
@@ -37,7 +40,7 @@ export interface CollisionWorld {
     radius: number,
   ): { dist: number; normal: [number, number, number] } | null
   debugRender(): { vertices: Float32Array; colors: Float32Array }
-  dispose(): void   // giải phóng bộ nhớ WASM; không dùng world sau khi gọi
+  dispose(): void   // free WASM memory; do not use the world after calling this
 }
 
 class PhysicsWorld implements CollisionWorld {
@@ -55,7 +58,7 @@ class PhysicsWorld implements CollisionWorld {
   private _crouchH: number
   private _crouchDirty = false
 
-  constructor(w: RAPIER.World, standH: number, crouchH: number, r: number) {
+  constructor(w: RAPIER.World, standH: number, crouchH: number, r: number, stepHeight = 0) {
     this._w      = w
     this._radius = r
     this._crouchH = crouchH
@@ -63,7 +66,7 @@ class PhysicsWorld implements CollisionWorld {
     this._crouchHalf = (crouchH - 2 * r) / 2
     this._standOffset  = r + this._standHalf
     this._crouchOffset = r + this._crouchHalf
-    // Shape kiểm tra đứng: bỏ CANSTAND_EPS ở đáy để chạm sàn không bị tính là va chạm
+    // Stand-check shape: drop CANSTAND_EPS at the bottom so touching the floor does not count as a collision
     this._standShape   = new RAPIER.Capsule(this._standHalf - CANSTAND_EPS / 2, r)
 
     this._body = w.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased())
@@ -75,7 +78,8 @@ class PhysicsWorld implements CollisionWorld {
     this._ctrl = w.createCharacterController(0.02)
     this._ctrl.setMaxSlopeClimbAngle(50 * Math.PI / 180)
     this._ctrl.enableSnapToGround(0.3)
-    this._ctrl.disableAutostep()
+    if (stepHeight > 0) this._ctrl.enableAutostep(stepHeight, AUTOSTEP_MIN_WIDTH, false)
+    else this._ctrl.disableAutostep()
   }
 
   setCrouchHeight(h: number): void {
@@ -180,7 +184,7 @@ class PhysicsWorld implements CollisionWorld {
     )
     if (!hit) return null
     let nx = hit.normal2.x, ny = hit.normal2.y, nz = hit.normal2.z
-    // chuẩn hoá hướng: pháp tuyến luôn ngược chiều di chuyển (hướng ra phía quả cầu)
+    // normalise direction: the normal always opposes the movement direction (pointing out toward the sphere)
     if (nx * dir[0] + ny * dir[1] + nz * dir[2] > 0) { nx = -nx; ny = -ny; nz = -nz }
     return { dist: hit.toi, normal: [nx, ny, nz] }
   }
@@ -249,7 +253,14 @@ export async function createWorld(
     )
   }
 
-  // Cập nhật pipeline truy vấn một lần: không có thì castRay/castShape trước lần moveCharacter đầu không thấy collider nào (lựu đạn dùng castSphere độc lập)
+  if (map.trimesh) {
+    world.createCollider(
+      RAPIER.ColliderDesc.trimesh(new Float32Array(map.trimesh.vertices), new Uint32Array(map.trimesh.indices))
+        .setCollisionGroups(MAP_FILTER),
+    )
+  }
+
+  // Refresh the query pipeline once: without it castRay/castShape before the first moveCharacter see no colliders (grenades use castSphere independently)
   world.step()
-  return new PhysicsWorld(world, standHeight, crouchHeight, radius)
+  return new PhysicsWorld(world, standHeight, crouchHeight, radius, map.stepHeight)
 }

@@ -1,18 +1,18 @@
-// Profile âm thanh từng súng (chỉ client). Giá trị khởi điểm theo plan/08-task-gun-audio.md,
-// chỉnh tai bằng bảng F8 rồi dán JSON vào đây.
+// Per-gun audio profiles (client only). Starting values follow plan/08-task-gun-audio.md,
+// tune by ear with the F8 panel, then paste the JSON here.
 
 export interface LayerDef {
-  files: string[]         // chọn ngẫu nhiên, không lặp file vừa phát nếu có ≥ 2
+  files: string[]         // picked at random, not repeating the file just played if there are ≥ 2
   gainDb: number
-  pitch: number           // playbackRate gốc
-  pitchRand: number       // ± ngẫu nhiên
-  gainRandDb: number      // ± ngẫu nhiên
+  pitch: number           // base playbackRate
+  pitchRand: number       // ± random
+  gainRandDb: number      // ± random
   delayMs: number
-  synthDecayMs?: number   // độ dài âm tổng hợp dự phòng (chỉ dùng cho tail)
-  synthTailHz?: number    // tail tổng hợp: có giá trị → bandpass quanh tần số này (ít bass); không có → lowpass 1800Hz
+  synthDecayMs?: number   // length of the fallback synthesized sound (tail only)
+  synthTailHz?: number    // synthesized tail: if set → bandpass around this frequency (less bass); otherwise → 1800Hz lowpass
 }
 
-export interface ThumpDef {   // lớp bass tổng hợp
+export interface ThumpDef {   // synthesized bass layer
   gainDb: number
   startHz: number
   endHz: number
@@ -22,9 +22,9 @@ export interface ThumpDef {   // lớp bass tổng hợp
 export type ReloadSynth = 'magout' | 'magin' | 'bolt' | 'shells' | 'insert'
 export interface ReloadStep { file: string; at: number; synth: ReloadSynth; emptyOnly?: boolean }
 export type ReloadSoundDef =
-  // whole: một file nạp trọn vẹn phát một lần thay cho các step; startFrac = tỉ lệ thời gian nạp mới phát, speed = tốc độ phát tối thiểu (kéo tiếng lên đạn sớm)
-  // (súng dài chờ animation hạ súng xong); boltFile phát tiếp sau tiếng thay băng, lúc animation đưa súng lên
-  // (boltAtFrac = RELOAD_UP_START của viewmodel; luôn đợi file whole phát xong + một khoảng nghỉ BOLT_GAP_MS để phân biệt)
+  // whole: a single full reload file played once instead of the steps; startFrac = fraction of the reload time before it starts playing, speed = minimum playback speed (pulls the chambering sound earlier)
+  // (long guns wait for the lower-weapon animation to finish); boltFile plays after the magazine swap sound, when the raise animation starts
+  // (boltAtFrac = RELOAD_UP_START of the viewmodel; always waits for the whole file to finish + a BOLT_GAP_MS pause so they stay distinct)
   | { kind: 'mag'; steps: ReloadStep[]; whole?: { file: string; gainDb: number; startFrac: number; speed?: number; boltFile?: string; boltAtFrac?: number } }
   | {
       kind: 'perRound'
@@ -37,14 +37,14 @@ export interface GunSoundProfile {
   layers: { body: LayerDef; mech?: LayerDef; tail?: LayerDef }
   thump: ThumpDef
   eq: { lowShelfHz: number; lowShelfDb: number; highShelfHz: number; highShelfDb: number }
-  shell: 'rifle' | 'pistol' | null     // rulô không văng vỏ khi bắn
+  shell: 'rifle' | 'pistol' | null     // revolver does not eject shells when firing
   shellDelayMs: number
-  cockFile?: string                    // lên cò giữa hai phát (~60% fireIntervalMs)
+  cockFile?: string                    // hammer cock between shots (~60% fireIntervalMs)
   reload: ReloadSoundDef
   dryfire: { file?: string; kind: 'rifle' | 'pistol' }
   draw: string
   maxVoices: number
-  lowAmmoWarning?: boolean              // tiếng "tink" sắp hết đạn; mặc định bật
+  lowAmmoWarning?: boolean              // "tink" low-ammo sound; on by default
 }
 
 const rifleReload = (boltFile: string): ReloadSoundDef => ({
@@ -57,10 +57,10 @@ const rifleReload = (boltFile: string): ReloadSoundDef => ({
 })
 
 /**
- * Âm vỏ đạn tổng hợp (khi thiếu file shell_*): chuỗi n cú "keng" nảy, n = gainsDb.length.
- * Khoảng cách cú 1→2 là firstGapMs, các khoảng sau nhân gapMul (nảy dồn dần); độ vang
- * cú thứ i = decayMs * decayMul^i. Mỗi cú: sine tần số ngẫu nhiên [freqMin, freqMax] + họa âm
- * ×partialRatio (lệch partialDb), thêm một tiếng "tách" clickDb ở cú đầu.
+ * Synthesized shell casing sound (when shell_* files are missing): a chain of n bouncing "clink" hits, n = gainsDb.length.
+ * The gap between hit 1→2 is firstGapMs, later gaps are multiplied by gapMul (bounces get closer together); the ring
+ * of hit i = decayMs * decayMul^i. Each hit: a sine at a random frequency in [freqMin, freqMax] + a harmonic
+ * at ×partialRatio (offset by partialDb), plus a "click" at clickDb on the first hit.
  */
 export interface ShellSynthDef {
   firstGapMs: number; gapMul: number; gainsDb: number[]
@@ -74,7 +74,7 @@ export const SHELL_SYNTH: Record<'rifle' | 'pistol', ShellSynthDef> = {
 }
 
 export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
-  0: { // AK47 – dày, rền, thô
+  0: { // AK47 – thick, rumbling, raw
     folder: 'ak47',
     layers: {
       body: { files: ['shot_01','shot_02','shot_03','shot_04'], gainDb: 0,  pitch: 0.95, pitchRand: 0.03, gainRandDb: 1, delayMs: 0 },
@@ -92,7 +92,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'rifle' },
     draw: 'draw', maxVoices: 8, lowAmmoWarning: false,
   },
-  1: { // M16 – mỏng, sắc, gọn
+  1: { // M16 – thin, sharp, tight
     folder: 'm16',
     layers: {
       body: { files: ['shot_01','shot_02','shot_03','shot_04'], gainDb: 0,  pitch: 1.10, pitchRand: 0.03, gainRandDb: 1, delayMs: 0 },
@@ -110,7 +110,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'rifle' },
     draw: 'draw', maxVoices: 8, lowAmmoWarning: false,
   },
-  2: { // Colt – bốp ngắn, khô
+  2: { // Colt – short pop, dry
     folder: 'colt',
     layers: {
       body: { files: ['shot_01','shot_02','shot_03'], gainDb: -1, pitch: 1.06, pitchRand: 0.03, gainRandDb: 1, delayMs: 0 },
@@ -128,7 +128,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'pistol' },
     draw: 'draw', maxVoices: 4,
   },
-  3: { // Rulô – gần giống Colt, vang hơn một chút
+  3: { // Revolver – close to the Colt, slightly more reverb
     folder: 'rulo',
     layers: {
       body: { files: ['shot_01','shot_02','shot_03'], gainDb: -1, pitch: 1.0, pitchRand: 0.03, gainRandDb: 1, delayMs: 0 },
@@ -146,7 +146,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'pistol' },
     draw: 'draw', maxVoices: 4,
   },
-  4: { // Sniper – nổ sâu, vang dài, kéo khoá nòng sau mỗi phát (chưa có file riêng: dùng âm tổng hợp)
+  4: { // Sniper – deep boom, long tail, bolt pull after each shot (no dedicated file yet: uses synthesized sound)
     folder: 'sniper',
     layers: {
       body: { files: ['shot_01','shot_02'], gainDb: 0,  pitch: 0.8, pitchRand: 0.02, gainRandDb: 1, delayMs: 0 },
@@ -164,7 +164,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'rifle' },
     draw: 'draw', maxVoices: 4, lowAmmoWarning: false,
   },
-  7: { // SMG – gọn, dồn, tiếng khô (chưa có file riêng: dùng âm tổng hợp)
+  7: { // SMG – tight, rapid, dry (no dedicated file yet: uses synthesized sound)
     folder: 'smg',
     layers: {
       body: { files: ['shot_01','shot_02','shot_03'], gainDb: -2, pitch: 1.2, pitchRand: 0.04, gainRandDb: 1, delayMs: 0 },
@@ -177,7 +177,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
     dryfire: { kind: 'pistol' },
     draw: 'draw', maxVoices: 8, lowAmmoWarning: false,
   },
-  5: { // Shotgun – nổ to, thô, vang ngắn; kéo ống đẩy giữa hai phát (chưa có file riêng: dùng âm tổng hợp)
+  5: { // Shotgun – loud, raw boom, short tail; pump action between shots (no dedicated file yet: uses synthesized sound)
     folder: 'shotgun',
     layers: {
       body: { files: ['shot_01','shot_02'], gainDb: 0,  pitch: 0.85, pitchRand: 0.03, gainRandDb: 1, delayMs: 0 },
@@ -198,7 +198,7 @@ export const GUN_SOUNDS: Record<number, GunSoundProfile> = {
   },
 };
 
-/** Mọi file (khoá, không đuôi) mà các profile + âm chung có thể dùng — để preload. */
+/** Every file (key, no extension) the profiles + common sounds may use — for preloading. */
 export function allGunSoundKeys(gunKey: (f: string, n: string) => string, commonKey: (n: string) => string): string[] {
   const keys: string[] = []
   for (const p of Object.values(GUN_SOUNDS)) {

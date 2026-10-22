@@ -1,12 +1,15 @@
-// HUD trận đấu (5.2/5.3): điểm đội + đồng hồ, đếm ngược, banner kết thúc, bảng điểm giữ Tab. DOM thuần, chỉ ghi khi text đổi.
+// Match HUD (5.2/5.3): team scores + clock, countdown, end banner, hold-Tab scoreboard. Plain DOM, only writes when the text changes.
 import { MatchPhase, TEAMS, winnerOf, type GameMode, type MatchEndMsg, type MatchStateMsg, type RoomConfig, type RoundEndMsg, type RoundEndReason, type ScoreboardRow, type TeamId } from '@fps/shared'
+import { t } from './i18n'
+import { IS_TOUCH } from './touch/mode'
+import { hudIcon } from './hudIcons'
 
 export function formatClock(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-// Sắp xếp bảng điểm: kill giảm dần, bằng nhau thì ít death hơn lên trước
+// Scoreboard order: kills descending, ties broken by fewer deaths first
 export function sortRows(rows: readonly ScoreboardRow[], team: TeamId): ScoreboardRow[] {
   return rows.filter(r => r.team === team).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.id - b.id)
 }
@@ -14,24 +17,20 @@ export function sortRows(rows: readonly ScoreboardRow[], team: TeamId): Scoreboa
 export function bannerText(phase: MatchPhase, scoreA: number, scoreB: number): string {
   if (phase !== MatchPhase.Ended) return ''
   const w = winnerOf(scoreA, scoreB)
-  return w ? `${TEAMS[w].name.toUpperCase()} THẮNG` : 'HOÀ'
+  return w ? t('match.teamWins', { team: t(`team.${w}.name`).toUpperCase() }) : t('match.draw')
 }
 
-export const REASON_TEXT: Record<RoundEndReason, string> = {
-  elimination: 'Tiêu diệt toàn bộ',
-  time_alive: 'Hết giờ · còn nhiều người hơn',
-  time_hp: 'Hết giờ · còn nhiều máu hơn',
-  draw: 'Hai bên cùng hạ gục',
-  infected_all: 'Zombie đã lây nhiễm tất cả',
-  time_survive: 'Hết giờ · còn người sống sót',
+/** Sub-line explaining why a round ended */
+export function reasonText(reason: RoundEndReason): string {
+  return t(`match.reason.${reason}`)
 }
 
-/** Tiêu đề kết thúc ván (Sinh Tử) */
+/** Round-end title (Elimination) */
 export function roundBannerText(winner: TeamId | null, round: number): string {
-  return winner ? `${TEAMS[winner].name.toUpperCase()} THẮNG VÁN ${round}` : 'VÁN HOÀ'
+  return winner ? t('match.roundWin', { team: t(`team.${winner}.name`).toUpperCase(), round }) : t('match.roundDraw')
 }
 
-/** Màu đồng hồ: FREEZE vàng; LIVE dưới 10 giây đỏ */
+/** Clock colour: FREEZE yellow; LIVE under 10 seconds red */
 export function clockColor(phase: MatchPhase, leftMs: number): string {
   if (phase === MatchPhase.Freeze) return '#ffd23c'
   if (phase === MatchPhase.Playing && leftMs <= 10_000) return '#ff5555'
@@ -50,50 +49,55 @@ function setText(e: HTMLElement, text: string): void { if (e.textContent !== tex
 export interface MatchSounds { start(): void; win(): void; lose(): void; tick(): void }
 
 export function createMatchHud(sounds?: MatchSounds) {
-  const top = el('position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#fff;font:bold 20px monospace;' +
-    'text-align:center;pointer-events:none;z-index:20;background:rgba(0,0,0,0.5);padding:4px 14px;display:none')
+  const top = el('position:fixed;top:8px;left:50%;transform:translateX(-50%);color:#fff;font:bold ' + (IS_TOUCH ? 15 : 20) + 'px monospace;' +
+    'text-align:center;pointer-events:none;z-index:20;background:rgba(0,0,0,0.5);padding:4px 14px;display:none;white-space:nowrap')
   const row = document.createElement('div')
   row.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px'
   const dotsA = document.createElement('span'), dotsB = document.createElement('span')
   const scoreA = document.createElement('span'), scoreB = document.createElement('span'), clockEl = document.createElement('span')
   scoreA.style.color = '#6fa0ff'; scoreB.style.color = TEAMS.B.uiColor
-  clockEl.style.cssText = 'min-width:84px;font-size:18px'
+  clockEl.style.cssText = `min-width:${IS_TOUCH ? 60 : 84}px;font-size:${IS_TOUCH ? 13 : 18}px`
   row.append(dotsA, scoreA, clockEl, scoreB, dotsB)
+  if (IS_TOUCH) {   // keep clear of the two icon buttons (left) and the leave button (right): a long clock text ("Waiting for more players…") is cut with "…"
+    top.style.maxWidth = 'calc(100vw - 236px)'; top.style.boxSizing = 'border-box'
+    for (const c of [dotsA, scoreA, scoreB, dotsB]) c.style.flex = 'none'
+    clockEl.style.cssText += ';min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+  }
   const subTop = document.createElement('div')
-  subTop.style.cssText = 'font-size:13px;opacity:.85'
+  subTop.style.cssText = `font-size:${IS_TOUCH ? 11 : 13}px;opacity:.85`
   top.append(row, subTop)
-  const big = el('position:fixed;top:30%;left:0;right:0;text-align:center;color:#fff;font:bold 96px monospace;' +
+  const big = el(`position:fixed;top:30%;left:0;right:0;text-align:center;color:#fff;font:bold ${IS_TOUCH ? 56 : 96}px monospace;` +
     'text-shadow:0 0 12px #000;pointer-events:none;z-index:21')
-  const sub = el('position:fixed;top:calc(30% + 110px);left:0;right:0;text-align:center;color:#fff;font:bold 28px monospace;' +
+  const sub = el(`position:fixed;top:calc(30% + ${IS_TOUCH ? 64 : 110}px);left:0;right:0;text-align:center;color:#fff;font:bold ${IS_TOUCH ? 18 : 28}px monospace;` +
     'text-shadow:0 0 8px #000;pointer-events:none;z-index:21')
   let st: MatchStateMsg | null = null
   let config: RoomConfig | null = null
   let sizeA = 0, sizeB = 0
   let lastEnd: RoundEndMsg | null = null
-  let roundMoney = 0                 // tiền cuối ván mình nhận (MoneyEvent round_*)
+  let roundMoney = 0                 // money I got at the end of the round (MoneyEvent round_*)
   let matchEnd: MatchEndMsg | null = null
   let mvpName = ''
   let online = false
-  let unlimited = false              // offline: Hỗn Chiến không giới hạn mạng và thời gian
+  let unlimited = false              // offline: Team Deathmatch with no kill or time limit
   let lastTickSec = -1
   let dotsKey = ''
 
   function dots(team: TeamId, alive: number, total: number, el: HTMLElement): string {
     const k = `${team}${alive}/${total}`
-    el.style.cssText = `color:${team === 'A' ? '#6fa0ff' : TEAMS.B.uiColor};letter-spacing:2px;font-size:16px`
+    el.style.cssText = `color:${team === 'A' ? '#6fa0ff' : TEAMS.B.uiColor};display:inline-flex;gap:3px;align-items:center`
     el.replaceChildren(...Array.from({ length: total }, (_, i) => {
-      const d = document.createElement('span'); d.textContent = '●'; d.style.opacity = i < alive ? '1' : '.25'; return d
+      const d = hudIcon('dot', '14px'); d.style.opacity = i < alive ? '1' : '.25'; return d
     }))
     return k
   }
 
   function render(serverNow: number): void {
-    if (!online || !st || st.mode === 'infection' || st.mode === 'defense') { top.style.display = 'none'; setText(big, ''); setText(sub, ''); return }   // thể thức zombie có HUD riêng (hudZombie.ts)
+    if (!online || !st || st.mode === 'infection' || st.mode === 'defense') { top.style.display = 'none'; setText(big, ''); setText(sub, ''); return }   // zombie modes have their own HUD (hudZombie.ts)
     top.style.display = 'block'
     const elim = st.mode === 'elimination'
     const left = st.phaseEndsAt - serverNow
-    setText(scoreA, `${TEAMS.A.name} ${st.scoreA}`)
-    setText(scoreB, `${st.scoreB} ${TEAMS.B.name}`)
+    setText(scoreA, `${t('team.A.name')} ${st.scoreA}`)
+    setText(scoreB, `${st.scoreB} ${t('team.B.name')}`)
     clockEl.style.color = clockColor(st.phase, left)
     if (elim) {
       const k = `${st.aliveA}/${sizeA}|${st.aliveB}/${sizeB}`
@@ -103,25 +107,25 @@ export function createMatchHud(sounds?: MatchSounds) {
     let clock = '', bigT = '', subT = '', topSub = ''
     const maxR = st.maxRounds
     switch (st.phase) {
-      case MatchPhase.Waiting: clock = 'Chờ thêm người chơi…'; break
-      case MatchPhase.Countdown: clock = 'Chuẩn bị'; bigT = String(Math.max(0, Math.ceil(left / 1000))); subT = st.sideSwapped ? 'Đã đổi bên' : ''; break
+      case MatchPhase.Waiting: clock = t('match.waiting'); break
+      case MatchPhase.Countdown: clock = t('match.getReady'); bigT = String(Math.max(0, Math.ceil(left / 1000))); subT = st.sideSwapped ? t('match.sidesSwapped') : ''; break
       case MatchPhase.Playing: clock = unlimited ? '∞' : formatClock(left); break
-      case MatchPhase.Freeze: clock = formatClock(left); bigT = `VÁN ${st.round}`; subT = 'Mua súng: B'; break
+      case MatchPhase.Freeze: clock = formatClock(left); bigT = t('match.roundBig', { round: st.round }); subT = t('match.buyHint'); break
       case MatchPhase.RoundEnd:
         clock = '0:00'
-        if (lastEnd) { bigT = roundBannerText(lastEnd.winner, lastEnd.round); subT = REASON_TEXT[lastEnd.reason] + (roundMoney > 0 ? `   +$${roundMoney}` : '') }
+        if (lastEnd) { bigT = roundBannerText(lastEnd.winner, lastEnd.round); subT = reasonText(lastEnd.reason) + (roundMoney > 0 ? `   +$${roundMoney}` : '') }
         break
-      case MatchPhase.Halftime: clock = 'Nghỉ'; bigT = 'HẾT HIỆP 1 · ĐỔI BÊN'; subT = `${TEAMS.A.name} ${st.scoreA} — ${st.scoreB} ${TEAMS.B.name}`; break
+      case MatchPhase.Halftime: clock = t('match.break'); bigT = t('match.halftime'); subT = `${t('team.A.name')} ${st.scoreA} — ${st.scoreB} ${t('team.B.name')}`; break
       case MatchPhase.Ended:
-        clock = elim ? `Trận mới sau ${formatClock(left)}` : 'Hết trận'
+        clock = elim ? t('match.newMatchIn', { time: formatClock(left) }) : t('match.matchOver')
         if (elim && matchEnd) {
-          bigT = matchEnd.winner ? `${TEAMS[matchEnd.winner].name.toUpperCase()} THẮNG TRẬN` : 'HOÀ'
-          subT = `${matchEnd.scoreA} — ${matchEnd.scoreB}${mvpName ? `   MVP: ${mvpName}` : ''}`
+          bigT = matchEnd.winner ? t('match.matchWin', { team: t(`team.${matchEnd.winner}.name`).toUpperCase() }) : t('match.draw')
+          subT = `${matchEnd.scoreA} — ${matchEnd.scoreB}${mvpName ? `   ${t('match.mvp', { name: mvpName })}` : ''}`
         } else bigT = bannerText(st.phase, st.scoreA, st.scoreB)
         break
     }
-    if (elim && st.phase !== MatchPhase.Waiting) topSub = `Ván ${Math.min(st.round, maxR)} / ${maxR}`
-    else if (!elim && config?.settings.mode === 'tdm') topSub = unlimited ? 'Không giới hạn' : `Mục tiêu: ${config.settings.killLimit} mạng`
+    if (elim && st.phase !== MatchPhase.Waiting) topSub = t('match.roundOf', { n: Math.min(st.round, maxR), max: maxR })
+    else if (!elim && config?.settings.mode === 'tdm') topSub = unlimited ? t('match.unlimited') : t('match.killTarget', { n: config.settings.killLimit })
     setText(clockEl, clock); setText(big, bigT); setText(sub, subT); setText(subTop, topSub)
 
     if (elim && st.phase === MatchPhase.Playing && left > 0 && left <= 10_000) {
@@ -169,68 +173,68 @@ export function createScoreboard() {
   let dirty = true
 
   function table(team: TeamId): HTMLElement {
-    const t = document.createElement('table')
-    t.style.cssText = 'border-collapse:collapse;min-width:260px'
+    const tbl = document.createElement('table')
+    tbl.style.cssText = 'border-collapse:collapse;min-width:260px'
     const head = document.createElement('caption')
-    head.textContent = TEAMS[team].name
+    head.textContent = t(`team.${team}.name`)
     head.style.cssText = `font-weight:bold;font-size:18px;text-align:left;padding-bottom:4px;color:${TEAMS[team].uiColor === '#2f6fd6' ? '#6fa0ff' : TEAMS[team].uiColor}`
-    t.appendChild(head)
-    const hr = t.insertRow()
-    for (const h of ['Tên', '$', 'K', 'D', 'Ping']) {
+    tbl.appendChild(head)
+    const hr = tbl.insertRow()
+    for (const [i, h] of [t('match.sb.name'), '$', 'K', 'D', 'Ping'].entries()) {
       const c = hr.insertCell(); c.textContent = h
-      c.style.cssText = 'opacity:.6;padding:2px 8px;text-align:' + (h === 'Tên' ? 'left' : 'right')
+      c.style.cssText = 'opacity:.6;padding:2px 8px;text-align:' + (i === 0 ? 'left' : 'right')
     }
     for (const r of sortRows(rows, team)) {
-      const tr = t.insertRow()
+      const tr = tbl.insertRow()
       if (r.id === myId) tr.style.background = 'rgba(255,255,255,0.22)'
       const cells: [string, string][] = [[r.name, 'left'], [r.money === undefined ? '—' : `$${r.money}`, 'right'], [String(r.kills), 'right'], [String(r.deaths), 'right'], [String(r.ping), 'right']]
       for (const [txt, al] of cells) { const c = tr.insertCell(); c.textContent = txt; c.style.cssText = `padding:2px 8px;text-align:${al}` }
     }
-    return t
+    return tbl
   }
 
-  // Lây Nhiễm: một bảng theo điểm cá nhân (điểm, lây nhiễm, hạ zombie, vai hiện tại)
+  // Infection: one table ordered by personal score (score, infections, zombie kills, current role)
   function infectionTable(): HTMLElement {
-    const t = document.createElement('table')
-    t.style.cssText = 'border-collapse:collapse;min-width:460px'
+    const tbl = document.createElement('table')
+    tbl.style.cssText = 'border-collapse:collapse;min-width:460px'
     const head = document.createElement('caption')
-    head.textContent = 'Lây Nhiễm'
+    head.textContent = t('mode.infection')
     head.style.cssText = 'font-weight:bold;font-size:18px;text-align:left;padding-bottom:4px;color:#7ed957'
-    t.appendChild(head)
-    const hr = t.insertRow()
-    for (const h of ['Tên', 'Điểm', 'Lây', 'Hạ ZB', 'Vai', 'Ping']) {
+    tbl.appendChild(head)
+    const hr = tbl.insertRow()
+    for (const [i, h] of [t('match.sb.name'), t('match.sb.score'), t('match.sb.infections'), t('match.sb.zombieKills'), t('match.sb.role'), 'Ping'].entries()) {
       const c = hr.insertCell(); c.textContent = h
-      c.style.cssText = 'opacity:.6;padding:2px 8px;text-align:' + (h === 'Tên' ? 'left' : 'right')
+      c.style.cssText = 'opacity:.6;padding:2px 8px;text-align:' + (i === 0 ? 'left' : 'right')
     }
     for (const r of rows.slice().sort((a, b) => (b.pts ?? 0) - (a.pts ?? 0) || a.id - b.id)) {
-      const tr = t.insertRow()
+      const tr = tbl.insertRow()
       if (r.id === myId) tr.style.background = 'rgba(255,255,255,0.22)'
-      const cells: [string, string][] = [[r.name, 'left'], [String(r.pts ?? 0), 'right'], [String(r.inf ?? 0), 'right'], [String(r.zk ?? 0), 'right'], [r.role === 'zombie' ? '🧟' : '🧍', 'right'], [String(r.ping), 'right']]
-      for (const [txt, al] of cells) { const c = tr.insertCell(); c.textContent = txt; c.style.cssText = `padding:2px 8px;text-align:${al}` }
+      const cells: [string | Node, string][] = [[r.name, 'left'], [String(r.pts ?? 0), 'right'], [String(r.inf ?? 0), 'right'], [String(r.zk ?? 0), 'right'], [hudIcon(r.role === 'zombie' ? 'zombie' : 'human'), 'right'], [String(r.ping), 'right']]
+      for (const [txt, al] of cells) { const c = tr.insertCell(); if (typeof txt === 'string') c.textContent = txt; else c.appendChild(txt); c.style.cssText = `padding:2px 8px;text-align:${al}` }
     }
-    return t
+    return tbl
   }
 
-  // Thủ Thành: bảng chung một đội (zombie hạ, sát thương, số lần cứu)
+  // Defense: one shared team table (zombie kills, damage, revives)
   function defenseTable(): HTMLElement {
-    const t = document.createElement('table')
-    t.style.cssText = 'border-collapse:collapse;min-width:420px'
+    const tbl = document.createElement('table')
+    tbl.style.cssText = 'border-collapse:collapse;min-width:420px'
     const head = document.createElement('caption')
-    head.textContent = 'Thủ Thành'
+    head.textContent = t('mode.defense')
     head.style.cssText = 'font-weight:bold;font-size:18px;text-align:left;padding-bottom:4px;color:#6fa0ff'
-    t.appendChild(head)
-    const hr = t.insertRow()
-    for (const h of ['Tên', '$', 'Zombie hạ', 'Sát thương', 'Cứu', 'Ping']) {
+    tbl.appendChild(head)
+    const hr = tbl.insertRow()
+    for (const [i, h] of [t('match.sb.name'), '$', t('match.sb.zombieKillsFull'), t('match.sb.damage'), t('match.sb.revives'), 'Ping'].entries()) {
       const c = hr.insertCell(); c.textContent = h
-      c.style.cssText = 'opacity:.6;padding:2px 8px;text-align:' + (h === 'Tên' ? 'left' : 'right')
+      c.style.cssText = 'opacity:.6;padding:2px 8px;text-align:' + (i === 0 ? 'left' : 'right')
     }
     for (const r of rows.slice().sort((a, b) => (b.zk ?? 0) - (a.zk ?? 0) || a.id - b.id)) {
-      const tr = t.insertRow()
+      const tr = tbl.insertRow()
       if (r.id === myId) tr.style.background = 'rgba(255,255,255,0.22)'
       const cells: [string, string][] = [[r.name, 'left'], [r.money === undefined ? '—' : `$${r.money}`, 'right'], [String(r.zk ?? 0), 'right'], [String(r.dmg ?? 0), 'right'], [String(r.rev ?? 0), 'right'], [String(r.ping), 'right']]
       for (const [txt, al] of cells) { const c = tr.insertCell(); c.textContent = txt; c.style.cssText = `padding:2px 8px;text-align:${al}` }
     }
-    return t
+    return tbl
   }
 
   function rebuild(): void {

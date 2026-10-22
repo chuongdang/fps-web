@@ -10,12 +10,13 @@
   },
   "dependencies": {
     "@fps/shared": "*",
-    "three": "0.168.0"
+    "three": "0.168.0",
+    "vitest": "^5.0.5"
   },
   "devDependencies": {
     "@types/node": "22.9.0",
     "@types/three": "0.168.0",
     "typescript": "5.6.3",
-    "vite": "5.4.10"
+    "vite": "^8.3.5"
   }
 }

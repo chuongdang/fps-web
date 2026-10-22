@@ -1,12 +1,12 @@
-// Sinh Tử: chơi theo ván, mỗi ván một mạng. Đội đạt roundsToWin ván trước thắng.
+// Elimination: played in rounds, one life per round. The first team to reach roundsToWin rounds wins.
 //
-// WARMUP(Waiting) ─(mỗi đội ≥ 1 người)→ FREEZE ─→ LIVE(Playing) ─→ ROUND_END ─┬→ FREEZE (ván sau)
+// WARMUP(Waiting) ─(each team ≥ 1 player)→ FREEZE ─→ LIVE(Playing) ─→ ROUND_END ─┬→ FREEZE (next round)
 //                                                                              ├→ HALFTIME → FREEZE
-//                                                                              └→ MATCH_END(Ended) → FREEZE ván 1 / WARMUP
-// Một đội không còn ai kết nối → ván hiện tại xử thua cho đội đó (nếu đang LIVE), về WARMUP, giữ tỉ số.
+//                                                                              └→ MATCH_END(Ended) → FREEZE round 1 / WARMUP
+// A team with nobody connected -> the current round is awarded as a loss to that team (if LIVE), back to WARMUP, score kept.
 import {
   ECONOMY_ELIM, MatchPhase, MsgType, addMoney, killReward, roundIncome,
-  type EliminationSettings, type MatchStateMsg, type RoundEndReason, type RoundOutcome, type TeamId,
+  type EliminationSettings, type MatchStateMsg, type RoomStatus, type RoundEndReason, type RoundOutcome, type TeamId,
 } from '@fps/shared'
 import type { Player, Room } from '../room'
 import { broadcastScoreboard, setPhase } from '../match'
@@ -16,10 +16,10 @@ const MS = 1000
 
 export class EliminationMode implements MatchMode {
   readonly mode = 'elimination' as const
-  round = 1                                   // ván đang chơi / sắp chơi (1…)
+  round = 1                                   // round being played / about to be played (1...)
   private lossStreak: Record<TeamId, number> = { A: 0, B: 0 }
   private buyEndsAt: number | null = null
-  private fresh = true                        // true: trận mới chưa vào FREEZE lần nào → FREEZE đầu tiên đặt lại tiền/súng
+  private fresh = true                        // true: new match that has not entered FREEZE yet -> the first FREEZE resets money/weapons
 
   constructor(readonly s: EliminationSettings) {}
 
@@ -51,7 +51,7 @@ export class EliminationMode implements MatchMode {
         else if (now >= room.phaseEndsAt) setPhase(room, MatchPhase.Playing, now + this.s.roundTimeSec * MS)
         break
       case MatchPhase.Playing: {
-        if (!ready) {   // một đội không còn ai: xử thua ván cho đội đó, về WARMUP giữ tỉ số
+        if (!ready) {   // a team has nobody left: award the round loss to that team, back to WARMUP keeping the score
           const winner: TeamId | null = a > 0 ? 'A' : b > 0 ? 'B' : null
           if (winner) { if (winner === 'A') room.scoreA++; else room.scoreB++; this.round++ }
           if (room.scoreA >= this.s.roundsToWin || room.scoreB >= this.s.roundsToWin) this.endMatch(room, now)
@@ -86,9 +86,10 @@ export class EliminationMode implements MatchMode {
     }
   }
 
-  // Đầu ván: xoá lựu đạn, mọi người hồi sinh ở căn cứ (mỗi người một điểm), người sống sót giữ súng
+  // Round start: clear grenades, everyone respawns at base (one spawn point each), survivors keep their weapons
   private startFreeze(room: Room, now: number): void {
-    room.grenades = []
+    room.grenades = []; room.smokes = []
+    room.clearDrops()
     for (const p of room.players.values()) p.transport.send({ t: MsgType.RoundReset, round: this.round })
     const used = { A: 0, B: 0 }
     for (const p of room.players.values()) {
@@ -107,7 +108,7 @@ export class EliminationMode implements MatchMode {
 
   private endRound(room: Room, now: number, winner: TeamId | null, reason: RoundEndReason): void {
     if (winner === 'A') room.scoreA++; else if (winner === 'B') room.scoreB++
-    // Tiền cuối ván cho mọi người trong đội, kể cả người đã chết; người đang xem chờ vào (không có trong ván) thì không
+    // End-of-round money goes to everyone on the team, including the dead; spectators waiting to join (not in the round) get none
     for (const team of ['A', 'B'] as const) {
       const outcome: RoundOutcome = winner === null ? 'draw' : winner === team ? 'win' : 'loss'
       const inc = roundIncome(outcome, this.lossStreak[team])
@@ -124,12 +125,12 @@ export class EliminationMode implements MatchMode {
   }
 
   private afterRoundEnd(room: Room, now: number): void {
-    for (const p of room.players.values()) { p.survived = p.alive; p.inRound = false }   // sống tới hết ROUND_END mới giữ súng
+    for (const p of room.players.values()) { p.survived = p.alive; p.inRound = false }   // only those alive through the end of ROUND_END keep their weapons
     const finished = this.round
     const toWin = this.s.roundsToWin
     if (room.scoreA >= toWin || room.scoreB >= toWin || finished >= this.maxRounds) { this.endMatch(room, now); return }
     this.round++
-    if (finished === toWin - 1) {   // hết hiệp 1: đổi bên, tiền và súng về ban đầu
+    if (finished === toWin - 1) {   // end of half 1: swap sides, money and weapons reset
       room.sideSwapped = !room.sideSwapped
       if (ECONOMY_ELIM.resetAtHalftime) {
         this.lossStreak = { A: 0, B: 0 }
@@ -150,7 +151,7 @@ export class EliminationMode implements MatchMode {
     broadcastScoreboard(room)
   }
 
-  // Trận mới từ 0–0: điểm, tiền, súng về ban đầu; đội giữ nguyên
+  // New match from 0-0: score, money, weapons reset; teams unchanged
   private newMatch(room: Room, now: number, ready: boolean): void {
     room.scoreA = room.scoreB = 0
     room.sideSwapped = false
@@ -165,14 +166,14 @@ export class EliminationMode implements MatchMode {
   onPlayerJoin(room: Room, p: Player): void {
     p.inRound = false
     p.survived = false
-    if (room.phase === MatchPhase.Waiting) { p.inRound = true; return }   // khởi động: chơi ngay
-    // Vào giữa trận: xem cho tới FREEZE ván sau
+    if (room.phase === MatchPhase.Waiting) { p.inRound = true; return }   // warmup: play immediately
+    // Joining mid-match: spectate until the next round's FREEZE
     p.alive = false
     p.hp = 0
     p.respawnAt = Infinity
   }
 
-  onPlayerLeave(): void { /* tick kiểm tra điều kiện kết thúc ván ngay ở tick kế */ }
+  onPlayerLeave(): void { /* the next tick checks the round-end conditions straight away */ }
 
   onKill(room: Room, killer: Player | null, victim: Player): number {
     if (room.phase !== MatchPhase.Playing && room.phase !== MatchPhase.RoundEnd) return 0
@@ -186,7 +187,7 @@ export class EliminationMode implements MatchMode {
     return reward
   }
 
-  afterDeaths(): void { /* không đổi đội giữa ván */ }
+  afterDeaths(): void { /* no team change mid-round */ }
 
   respawnDelayMs(room: Room): number | null { return room.phase === MatchPhase.Waiting ? 0 : null }
 
@@ -198,9 +199,9 @@ export class EliminationMode implements MatchMode {
 
   canSwitchTeam(room: Room): boolean { return room.phase === MatchPhase.Waiting || room.phase === MatchPhase.Freeze }
 
-  statusText(room: Room): string {
-    if (room.phase === MatchPhase.Waiting) return 'Đang chờ'
-    return `Ván ${Math.min(this.round, this.maxRounds)}/${this.maxRounds} · ${room.scoreA}–${room.scoreB}`
+  roomStatus(room: Room): RoomStatus {
+    if (room.phase === MatchPhase.Waiting) return { code: 'waiting' }
+    return { code: 'round', round: Math.min(this.round, this.maxRounds), maxRounds: this.maxRounds, scoreA: room.scoreA, scoreB: room.scoreB }
   }
 
   stateMessage(room: Room): MatchStateMsg {
@@ -214,14 +215,14 @@ export class EliminationMode implements MatchMode {
     }
   }
 
-  // ── Lệnh debug (M.8)
+  // ── Debug commands (M.8)
   devEndRound(room: Room, winner: 'A' | 'B' | 'draw'): boolean {
     if (room.phase !== MatchPhase.Playing) return false
     this.endRound(room, room.serverNow, winner === 'draw' ? null : winner, winner === 'draw' ? 'draw' : 'elimination')
     return true
   }
 
-  /** Nhảy tới ván `n`: tỉ số giả lập (nửa số ván thắng mỗi đội), chuyển ngay sang FREEZE */
+  /** Jump to round `n`: fake the score (half of the rounds won by each team) and switch straight to FREEZE */
   devSetRound(room: Room, n: number): boolean {
     this.round = Math.max(1, Math.min(this.maxRounds, Math.round(n)))
     const wins = this.round - 1

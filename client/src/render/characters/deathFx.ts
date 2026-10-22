@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { CharacterRig } from './types'
 
-// Chết (6.2): các khối tách ra, bay nhẹ rồi mờ dần. Rẻ hơn ragdoll, hợp phong cách khối hộp.
+// Death (6.2): the boxes break apart, drift away and fade out. Cheaper than a ragdoll and fits the blocky style.
 const GRAVITY = 9.8
 const LIFE_S = 1.4
 const FADE_S = 0.7
@@ -10,7 +10,7 @@ const FLOOR_Y = 0.06
 interface Debris {
   mesh: THREE.Mesh
   vx: number; vy: number; vz: number
-  wx: number; wy: number; wz: number   // tốc độ xoay (rad/s)
+  wx: number; wy: number; wz: number   // spin speed (rad/s)
   age: number
 }
 
@@ -24,13 +24,13 @@ export function createDeathFx(scene: THREE.Scene) {
   function remove(i: number): void {
     const d = live[i]!
     scene.remove(d.mesh)
-    ;(d.mesh.material as THREE.Material).dispose()   // geometry dùng chung với rig nên không dispose ở đây
+    ;(d.mesh.material as THREE.Material).dispose()   // geometry is shared with the rig, so it is not disposed here
     live[i] = live[live.length - 1]!
     live.pop()
   }
 
   return {
-    // Gọi một lần khi rig vừa chết; rig phải đang ở tư thế cuối (matrixWorld cập nhật tại đây)
+    // Call once when the rig has just died; the rig must be in its final pose (matrixWorld is updated here)
     burst(rig: CharacterRig): void {
       rig.root.updateWorldMatrix(true, true)
       const cx = rig.root.position.x, cy = rig.root.position.y + 0.9, cz = rig.root.position.z
@@ -64,7 +64,7 @@ export function createDeathFx(scene: THREE.Scene) {
         const m = d.mesh
         m.position.x += d.vx * dt; m.position.y += d.vy * dt; m.position.z += d.vz * dt
         m.rotation.x += d.wx * dt; m.rotation.y += d.wy * dt; m.rotation.z += d.wz * dt
-        if (m.position.y < FLOOR_Y) {   // chạm đất: trượt/xoay chậm dần
+        if (m.position.y < FLOOR_Y) {   // hit the ground: slide/spin slows down
           m.position.y = FLOOR_Y
           d.vy = 0; d.vx *= 0.8; d.vz *= 0.8; d.wx *= 0.7; d.wy *= 0.7; d.wz *= 0.7
         }

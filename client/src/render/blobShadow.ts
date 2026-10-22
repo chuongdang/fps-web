@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-// Bóng tròn giả dưới chân nhân vật (nhân vật không đổ bóng thật cho nhẹ). Texture, geometry, material dùng chung mọi người.
+// Fake round blob shadow under a character's feet (characters cast no real shadow, to stay cheap). Texture, geometry and material are shared by everyone.
 const RADIUS = 0.5
 const OPACITY = 0.45
 let tex: THREE.CanvasTexture | null = null
@@ -26,8 +26,8 @@ export function makeBlobShadow(): THREE.Mesh {
     })
   }
   const m = new THREE.Mesh(geo!, mat!)
-  m.rotation.x = -Math.PI / 2   // nằm phẳng trên sàn
-  m.position.y = 0.02           // gốc rig ở chân
+  m.rotation.x = -Math.PI / 2   // lie flat on the floor
+  m.position.y = 0.02           // rig origin is at the feet
   m.renderOrder = 1
   return m
 }

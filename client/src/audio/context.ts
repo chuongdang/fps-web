@@ -1,24 +1,24 @@
-// AudioContext + đồ thị master (A.4):
+// AudioContext + master graph (A.4):
 //   gunGroup ─┐
-//   (reload, hit, ui, âm người khác) ─► master Gain ─► muffle (lowpass, mở hết) ─► Compressor ─► destination
-// gunGroup (tiếng súng của mình) nằm riêng để ducking khi phát tiếng hạ gục.
-// Context chỉ được tạo trong sự kiện người dùng đầu tiên → không cảnh báo autoplay.
+//   (reload, hit, ui, other players' sounds) ─► master Gain ─► muffle (lowpass, fully open) ─► Compressor ─► destination
+// gunGroup (own gunshots) is kept separate so it can duck when the kill sound plays.
+// The context is only created in the first user event → no autoplay warning.
 
 export interface AudioSettings {
   volume: number
   lowAmmoWarning: boolean
   heartbeat: boolean
-  dynamicCrosshair: boolean   // tâm ngắm giãn theo độ toé thật (tắt: khoảng hở cố định)
+  dynamicCrosshair: boolean   // crosshair expands with the real spread (off: fixed gap)
 }
 
 const LS_KEY = 'fps_audio'
 export const settings: AudioSettings = { volume: 1, lowAmmoWarning: true, heartbeat: true, dynamicCrosshair: true }
 try {
   Object.assign(settings, JSON.parse(localStorage.getItem(LS_KEY) ?? '{}'))
-} catch { /* localStorage hỏng/không có: dùng mặc định */ }
+} catch { /* localStorage broken/unavailable: use defaults */ }
 
 export function saveSettings(): void {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(settings)) } catch { /* bỏ qua */ }
+  try { localStorage.setItem(LS_KEY, JSON.stringify(settings)) } catch { /* ignore */ }
   if (graph) graph.master.gain.value = settings.volume
 }
 
@@ -28,7 +28,7 @@ export interface AudioGraph {
   comp: DynamicsCompressorNode
   analyser: AnalyserNode
   gunGroup: GainNode
-  muffle: BiquadFilterNode   // lowpass trước compressor: 20kHz bình thường, bị 'bịt' xuống 700Hz khi ù tai sau tiếng nổ (G.8)
+  muffle: BiquadFilterNode   // lowpass before the compressor: 20kHz normally, 'muffled' down to 700Hz by tinnitus after an explosion (G.8)
 }
 
 let graph: AudioGraph | null = null
@@ -36,13 +36,13 @@ const readyCbs: ((g: AudioGraph) => void)[] = []
 
 export const getGraph = (): AudioGraph | null => graph
 
-/** Gọi cb khi context đã sẵn sàng (ngay lập tức nếu đã có). */
+/** Calls cb when the context is ready (immediately if it already exists). */
 export function onAudioReady(cb: (g: AudioGraph) => void): void {
   if (graph) cb(graph)
   else readyCbs.push(cb)
 }
 
-/** Đăng ký tạo context ở click/phím đầu tiên (user gesture). */
+/** Registers context creation on the first click/key (user gesture). */
 export function initAudioContext(): void {
   const start = () => {
     if (!graph) {
@@ -71,15 +71,17 @@ export function initAudioContext(): void {
     if (graph.ctx.state === 'suspended') void graph.ctx.resume()
     document.removeEventListener('click', start)
     document.removeEventListener('keydown', start)
+    document.removeEventListener('touchend', start)
   }
   document.addEventListener('click', start)
   document.addEventListener('keydown', start)
+  document.addEventListener('touchend', start)   // iOS unlocks audio from a touch gesture
 }
 
 // ── Listener (camera) ─────────────────────────────────────────────────────────
 export const listenerPos: [number, number, number] = [0, 0, 0]
 
-/** Gọi mỗi frame: không cấp phát. yaw/pitch theo quy ước dự án (yaw 0 nhìn -Z). */
+/** Called every frame: no allocation. yaw/pitch follow the project convention (yaw 0 looks toward -Z). */
 export function updateListener(x: number, y: number, z: number, yaw: number, pitch: number): void {
   listenerPos[0] = x; listenerPos[1] = y; listenerPos[2] = z
   if (!graph) return

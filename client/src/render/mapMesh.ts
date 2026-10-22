@@ -7,7 +7,7 @@ function makeGridTexture(): THREE.Texture {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#ffffff'   // trung tính: màu thật do material.color nhân vào
+  ctx.fillStyle = '#ffffff'   // neutral: the real colour is multiplied in by material.color
   ctx.fillRect(0, 0, size, size)
   ctx.strokeStyle = '#999999'
   ctx.lineWidth = 2
@@ -22,7 +22,7 @@ function makeGridTexture(): THREE.Texture {
 
 const TILE = 1.0  // metres per texture tile
 
-const RAMP_COLOR = 0x7a8a7a   // màu dốc (giữ như ô kẻ xanh xám cũ)
+const RAMP_COLOR = 0x7a8a7a   // ramp colour (kept like the old grey-green checker tiles)
 const CRATE_MODEL = '/models/crate.glb'
 
 function makeMat(tex: THREE.Texture, ru: number, rv: number, color: THREE.ColorRepresentation = 0xffffff): THREE.MeshLambertMaterial {
@@ -32,7 +32,7 @@ function makeMat(tex: THREE.Texture, ru: number, rv: number, color: THREE.ColorR
   return new THREE.MeshLambertMaterial({ map: t, color })
 }
 
-// Ảnh vật liệu (client/public/textures/<tên>.jpg): nạp một lần mỗi tên; chưa nạp xong thì material tự cập nhật khi ảnh về
+// Material images (client/public/textures/<name>.jpg): loaded once per name; until loaded, the material updates itself when the image arrives
 const imageLoader = new THREE.TextureLoader()
 const images = new Map<string, THREE.Texture>()
 function getImage(name: string): THREE.Texture {
@@ -72,13 +72,13 @@ export function buildMapMesh(map: LoadedMap): THREE.Group {
   const group = new THREE.Group()
   const baseTex = makeGridTexture()
 
-  const crateSlots: THREE.Mesh[] = []   // hộp tạm của các thùng, thay bằng model khi load xong (va chạm/đạn luôn theo hộp của map)
+  const crateSlots: THREE.Mesh[] = []   // placeholder boxes for the crates, replaced by the model once loaded (collision/bullets always use the map boxes)
   for (const box of map.boxes) {
     if (box.invisible) continue
     const [sx, sy, sz] = box.size
     const look = resolveBoxLook(box)
     const geo = new THREE.BoxGeometry(sx, sy, sz)
-    // Mỗi mặt một material để ảnh lặp theo đúng kích thước mặt đó (thứ tự: +x −x +y −y +z −z)
+    // One material per face so the image repeats to that face's size (order: +x -x +y -y +z -z)
     const src = look.file ? getImage(look.file) : baseTex
     const tile = look.file ? look.tileM : TILE
     const faces: [number, number][] = [[sz, sy], [sz, sy], [sx, sz], [sx, sz], [sx, sy], [sx, sy]]
@@ -94,7 +94,7 @@ export function buildMapMesh(map: LoadedMap): THREE.Group {
     new GLTFLoader().loadAsync(CRATE_MODEL).then(gltf => {
       gltf.scene.traverse(o => { if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true } })
       for (const slot of crateSlots) {
-        const crate = gltf.scene.clone(true)   // model là khối 1×1×1 tâm ở gốc: scale theo kích thước box
+        const crate = gltf.scene.clone(true)   // the model is a 1x1x1 block centred at the origin: scale it to the box size
         crate.position.copy(slot.position)
         const p = (slot.geometry as THREE.BoxGeometry).parameters
         crate.scale.set(p.width, p.height, p.depth)
@@ -102,14 +102,14 @@ export function buildMapMesh(map: LoadedMap): THREE.Group {
         group.remove(slot)
         slot.geometry.dispose()
       }
-    }).catch(err => console.warn(`mapMesh: cannot load ${CRATE_MODEL}, giữ hộp thay thế`, err))
+    }).catch(err => console.warn(`mapMesh: cannot load ${CRATE_MODEL}, keeping the placeholder box`, err))
   }
 
   for (const ramp of map.ramps) {
     const len = rampLen(ramp)
     const thick = 0.3
     const geo = new THREE.BoxGeometry(len, thick, ramp.width)
-    // Dốc có "texture" thì vẽ như box (ảnh lặp theo kích thước dốc), không thì ô kẻ xanh xám cũ
+    // A ramp with a "texture" is drawn like a box (image repeats to the ramp size), otherwise the old grey-green checker tiles
     const look = ramp.texture
       ? resolveBoxLook({ pos: ramp.from, size: [len, 0.3, ramp.width], texture: ramp.texture, variant: ramp.variant, color: ramp.color })
       : null
@@ -131,5 +131,37 @@ export function buildMapMesh(map: LoadedMap): THREE.Group {
     group.add(mesh)
   }
 
+  if (map.model) addModel(group, map.model)
+
   return group
+}
+
+/** A modelled map (plan/tools-model-import.md): the glb is already in game coordinates, so it is added as is. It arrives later than the boxes, once loaded. */
+function addModel(group: THREE.Group, url: string): void {
+  new GLTFLoader().loadAsync(url).then(gltf => {
+    if (group.userData.disposed) { disposeMapMesh(gltf.scene as unknown as THREE.Group); return }   // the room's map replaced this one while it was loading
+    gltf.scene.traverse(o => {
+      if (!(o instanceof THREE.Mesh)) return
+      // The game lights everything with Lambert materials (one look for all maps); keep only the picture of the model's PBR material
+      const src = o.material as THREE.MeshStandardMaterial
+      o.material = new THREE.MeshLambertMaterial({ map: src.map, side: src.side })
+      src.dispose()
+      o.castShadow = true
+      o.receiveShadow = true
+    })
+    group.add(gltf.scene)
+  }).catch(err => console.warn(`mapMesh: cannot load ${url}`, err))
+}
+
+/** Free the GPU memory of a mesh made by buildMapMesh (when the room's map replaces the lobby backdrop) */
+export function disposeMapMesh(group: THREE.Group): void {
+  group.userData.disposed = true
+  group.traverse(o => {
+    if (!(o instanceof THREE.Mesh)) return
+    o.geometry.dispose()
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      (m as THREE.MeshLambertMaterial).map?.dispose()
+      m.dispose()
+    }
+  })
 }

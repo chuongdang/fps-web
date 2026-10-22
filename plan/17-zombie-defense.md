@@ -1,21 +1,21 @@
-# 17 – Thể thức **Thủ Thành**: cùng phe giữ thành chống zombie theo đợt
+# 17 – The **Defense** mode: everyone on the same team holding the fortress against zombie waves
 
-| Tên hiển thị | Mã |
+| Display name | Code |
 |---|---|
-| **Thủ Thành** | `defense` |
+| **Defense** | `defense` |
 
-Tóm tắt: mọi người chơi cùng một phe, giữ **căn cứ A** của map "Hai thành". Zombie (bot) kéo tới theo **10 đợt**, đợt sau đông và mạnh hơn, có nhiều loại zombie khác nhau, đợt 10 là **boss**. Giữa các đợt được mua đồ và hồi sinh đồng đội. Trụ hết 10 đợt là thắng; cả đội chết cùng lúc là thua.
+Summary: all players are on the same team, holding **base A** of the "Two Citadels" map. Zombies (bots) come in **10 waves**, each wave bigger and stronger, with many different zombie types, and wave 10 is a **boss**. Between waves you can buy gear and respawn teammates. Holding out all 10 waves wins; the whole team dying at once loses.
 
-Yêu cầu trước:
-- File 16, **phần ZF** (nền zombie) đã xong. Phần I (Lây Nhiễm) không bắt buộc.
-- File 15: **B.0, B.1, B.2** (offline chạy Room, nav grid, hạ tầng bot).
-- File 13: `MatchMode`, tạo phòng.
+Prerequisites:
+- File 16, **part ZF** (zombie foundation) is done. Part I (Infection) is not required.
+- File 15: **B.0, B.1, B.2** (offline runs a Room, nav grid, bot infrastructure).
+- File 13: `MatchMode`, room creation.
 
-Thứ tự: T.1 → T.2 → T.3 → T.4 → T.5 → T.6 → T.7 → T.8 → T.9. Task ⚠️ nên dùng model mạnh.
+Order: T.1 → T.2 → T.3 → T.4 → T.5 → T.6 → T.7 → T.8 → T.9. Tasks marked ⚠️ should use a strong model.
 
 ---
 
-## Cài đặt phòng
+## Room settings
 
 ```ts
 export interface DefenseSettings {
@@ -26,91 +26,91 @@ export interface DefenseSettings {
   lighting: 'day' | 'night';                  // 'night'
 }
 ```
-`MODE_LABEL.defense = 'Thủ Thành'`. Chơi được 1–6 người (offline 1 người là chính).
+`MODE_LABEL.defense = 'Defense'`. Playable with 1–6 players (offline, mainly 1 player).
 
 ---
 
-## Task T.1 – Lớp thể thức `DefenseMode` (server) ⚠️
+## Task T.1 – The `DefenseMode` class (server) ⚠️
 
-Các pha:
+Phases:
 
 ```
-WARMUP ──(chủ phòng bấm Bắt đầu / offline tự bắt đầu)──► PREP (30s) ──► WAVE 1 ──► INTERMISSION ──► WAVE 2 ... ──► WAVE 10 (boss) ──► VICTORY
+WARMUP ──(host presses Start / offline starts automatically)──► PREP (30s) ──► WAVE 1 ──► INTERMISSION ──► WAVE 2 ... ──► WAVE 10 (boss) ──► VICTORY
                                                                    │                                                     
-                                                         (mọi người chơi đều chết cùng lúc) ──► DEFEAT
+                                                         (all players dead at the same time) ──► DEFEAT
 VICTORY / DEFEAT ──(20s)──► WARMUP
 ```
 
-- Mọi người chơi ở đội A (Cớm hoặc Cướp tuỳ người chọn, chỉ là skin), spawn trong **căn cứ A**. Zombie là thực thể riêng (không phải người chơi), xem T.4.
-- **PREP / INTERMISSION**: mua đồ trong khu mua căn cứ A, đồng đội chết được **hồi sinh** ở căn cứ với súng đã có, máu đầy. Đếm ngược hiện to.
-- **WAVE n**: sinh zombie theo `waves.json` (T.3). Hết đợt khi đã sinh đủ và **toàn bộ zombie của đợt đã chết**. Thưởng hết đợt.
-- **Người chết trong đợt**: không hồi sinh tới INTERMISSION; chuyển sang xem đồng đội (dùng lại M.5). Có thể được **cứu** (T.6).
-- **DEFEAT**: tất cả người chơi đều đang chết (hoặc đang gục chờ cứu) cùng lúc.
-- **VICTORY**: hạ boss đợt 10 và mọi zombie còn lại.
-- **Kinh tế** (`ECONOMY_DEFENSE`):
+- All players are on team A (Cops or Terrorists depending on their choice, just a skin) and spawn in **base A**. Zombies are separate entities (not players), see T.4.
+- **PREP / INTERMISSION**: buy gear in the base A buy zone; dead teammates are **respawned** at the base with the guns they already had, full health. A large countdown is shown.
+- **WAVE n**: spawn zombies per `waves.json` (T.3). The wave ends once everything has been spawned and **all zombies of the wave are dead**. Wave-clear bonus is awarded.
+- **Player dies during a wave**: does not respawn until INTERMISSION; switches to spectating teammates (reusing M.5). Can be **rescued** (T.6).
+- **DEFEAT**: all players are dead (or downed awaiting rescue) at the same time.
+- **VICTORY**: the wave 10 boss and all remaining zombies are downed.
+- **Economy** (`ECONOMY_DEFENSE`):
   ```ts
-  { startMoney: 1500, maxMoney: 16000, waveClearBonus: 800, waveClearPerWave: 100, // đợt n thưởng 800 + 100×n
+  { startMoney: 1500, maxMoney: 16000, waveClearBonus: 800, waveClearPerWave: 100, // wave n rewards 800 + 100×n
     keepLoadoutOnDeath: true, infiniteReserve: true, sellRatio: 0.8 }
   ```
-  Tiền hạ zombie theo từng loại (T.2). Không có truy nã.
-- Không friendly fire. Lựu đạn của mình nổ vào mình vẫn mất 50% (luật G.3).
+  Money for killing a zombie depends on its type (T.2). No wanted bounty.
+- No friendly fire. Your own grenade exploding on you still costs 50% (rule G.3).
 
-Message thêm:
+Additional messages:
 
 ```ts
   | { t: 140; phase: string; wave: number; waves: number; phaseEndsAt: number; zombiesLeft: number }  // DefenseState
-  | { t: 141; wave: number; title: string; hint: string }                                          // WaveStart ("ĐỢT 4", "Cẩn thận zombie nhảy!")
+  | { t: 141; wave: number; title: string; hint: string }                                          // WaveStart ("WAVE 4", "Watch out for leaping zombies!")
   | { t: 142; wave: number; bonus: number }                                                        // WaveClear
   | { t: 143; result: 'victory' | 'defeat'; wave: number; stats: { id: number; kills: number; damage: number; revives: number }[] } // DefenseEnd
 ```
 
-Nghiệm thu:
-- [ ] Offline 1 người: PREP 30s → đợt 1 → hết zombie → INTERMISSION → đợt 2...
-- [ ] Chết giữa đợt: xem đồng đội (nếu có), hồi sinh ở INTERMISSION; chơi một mình chết là DEFEAT.
-- [ ] Lệnh debug: `/wave 9` nhảy tới đợt 9, `/clearwave` giết hết zombie đợt hiện tại.
+Acceptance:
+- [ ] Offline 1 player: PREP 30s → wave 1 → no zombies left → INTERMISSION → wave 2...
+- [ ] Dying mid-wave: spectate teammates (if any), respawn at INTERMISSION; dying while playing alone is DEFEAT.
+- [ ] Debug commands: `/wave 9` jumps to wave 9, `/clearwave` kills all zombies of the current wave.
 
 ---
 
-## Task T.2 – Các loại zombie (`shared/src/zombieTypes.json`)
+## Task T.2 – Zombie types (`shared/src/zombieTypes.json`)
 
 ```json
 {
-  "walker":   { "name": "Zombie thường", "hp": 150, "runSpeed": 4.5, "clawDamage": 15, "attackMs": 900,  "knockbackResist": 0.0, "reward": 50,
+  "walker":   { "name": "Walker",        "hp": 150, "runSpeed": 4.5, "clawDamage": 15, "attackMs": 900,  "knockbackResist": 0.0, "reward": 50,
                 "scale": 1.0,  "tintOverride": null,      "abilities": [] },
-  "runner":   { "name": "Zombie chạy",   "hp": 90,  "runSpeed": 9.0, "clawDamage": 10, "attackMs": 600,  "knockbackResist": 0.0, "reward": 75,
+  "runner":   { "name": "Runner",        "hp": 90,  "runSpeed": 9.0, "clawDamage": 10, "attackMs": 600,  "knockbackResist": 0.0, "reward": 75,
                 "scale": 0.92, "tintOverride": "#c9b28a", "abilities": [] },
-  "crawler":  { "name": "Zombie bò",     "hp": 110, "runSpeed": 5.0, "clawDamage": 12, "attackMs": 800,  "knockbackResist": 0.0, "reward": 75,
+  "crawler":  { "name": "Crawler",       "hp": 110, "runSpeed": 5.0, "clawDamage": 12, "attackMs": 800,  "knockbackResist": 0.0, "reward": 75,
                 "scale": 0.95, "tintOverride": "#8f9f8a", "abilities": ["crawl_holes"] },
-  "leaper":   { "name": "Zombie nhảy",   "hp": 160, "runSpeed": 7.0, "clawDamage": 18, "attackMs": 850,  "knockbackResist": 0.1, "reward": 100,
+  "leaper":   { "name": "Leaper",        "hp": 160, "runSpeed": 7.0, "clawDamage": 18, "attackMs": 850,  "knockbackResist": 0.1, "reward": 100,
                 "scale": 1.0,  "tintOverride": "#9a8fb0", "abilities": ["leap"] },
-  "brute":    { "name": "Zombie trâu",   "hp": 900, "runSpeed": 3.8, "clawDamage": 40, "attackMs": 1400, "knockbackResist": 0.8, "reward": 300,
+  "brute":    { "name": "Brute",         "hp": 900, "runSpeed": 3.8, "clawDamage": 40, "attackMs": 1400, "knockbackResist": 0.8, "reward": 300,
                 "scale": 1.35, "tintOverride": "#a87a6a", "abilities": ["shove"] },
-  "screamer": { "name": "Zombie gào",    "hp": 250, "runSpeed": 5.0, "clawDamage": 10, "attackMs": 1000, "knockbackResist": 0.2, "reward": 200,
+  "screamer": { "name": "Screamer",      "hp": 250, "runSpeed": 5.0, "clawDamage": 10, "attackMs": 1000, "knockbackResist": 0.2, "reward": 200,
                 "scale": 1.05, "tintOverride": "#b0a060", "abilities": ["rally"] },
-  "boss":     { "name": "Đại Ca Zombie", "hp": 12000, "runSpeed": 4.2, "clawDamage": 60, "attackMs": 1600, "knockbackResist": 0.95, "reward": 3000,
+  "boss":     { "name": "Zombie Kingpin", "hp": 12000, "runSpeed": 4.2, "clawDamage": 60, "attackMs": 1600, "knockbackResist": 0.95, "reward": 3000,
                 "scale": 2.2,  "tintOverride": "#7a5050", "abilities": ["slam", "summon", "charge"], "headMult": 3 }
 }
 ```
 
-- `hp` là máu ở độ khó `normal`, 1 người chơi. Nhân hệ số ở T.3.
-- `crawl_holes`: được đi đường qua lỗ bắn (cạnh nav đặc biệt, T.4). Mọi zombie khác **không** dùng đường qua lỗ.
-- `leap`: dùng chiêu nhảy cao E của ZF.2 để lên gờ tường (cạnh nav nhảy lên, T.4).
-- `shove`: cào trúng đẩy người lùi 4 m/s (đẩy người khỏi gờ tường xuống đất!).
-- `rally`: mỗi 10s gào lên, zombie khác trong 12m tăng 25% tốc độ trong 5s (có hiệu ứng mắt sáng hơn). Ưu tiên hạ trước.
+- `hp` is the health at `normal` difficulty with 1 player. Multiply by the factors in T.3.
+- `crawl_holes`: may use the path through loopholes (a special nav edge, T.4). Every other zombie does **not** use hole paths.
+- `leap`: uses the E high-leap ability from ZF.2 to get onto the wall ledge (the leap-up nav edge, T.4).
+- `shove`: a claw hit pushes the human back at 4 m/s (pushing people off the wall ledge to the ground!).
+- `rally`: every 10s it screams, and other zombies within 12m gain 25% speed for 5s (with a brighter-eyes effect). Priority target.
 - Boss: T.5.
-- Mỗi loại chọn model ngẫu nhiên từ `zombieModels.json` (ZF.1) trừ khi có `modelOverride`; `tintOverride` thay tint ngẫu nhiên để **nhìn màu là biết loại**. Nhóm người dùng có thêm model nào thì có thể gán riêng cho loại đó bằng `modelOverride: "z2"`.
-- Zombie dùng **cùng hitbox** người (đầu ×2 mặc định, boss ×3), hitbox nhân theo `scale`.
+- Each type picks a random model from `zombieModels.json` (ZF.1) unless it has `modelOverride`; `tintOverride` replaces the random tint so that **you can tell the type by color**. If the group has extra models, you can assign one to a specific type with `modelOverride: "z2"`.
+- Zombies use the **same hitbox** as humans (head ×2 by default, boss ×3), with the hitbox multiplied by `scale`.
 
 ---
 
-## Task T.3 – Đợt zombie (`shared/src/waves.json`)
+## Task T.3 – Zombie waves (`shared/src/waves.json`)
 
 ```json
 {
   "spawnPoints": {
-    "baseB": "toàn bộ node mặt đất trong căn cứ B",
-    "laneLeft": "node mặt đất ở mép trái map, phía x > 0",
-    "laneRight": "node mặt đất ở mép phải map, phía x > 0"
+    "baseB": "all ground nodes inside base B",
+    "laneLeft": "ground nodes at the map's left edge, on the x > 0 side",
+    "laneRight": "ground nodes at the map's right edge, on the x > 0 side"
   },
   "scaling": {
     "countPerExtraPlayer": 0.6,
@@ -121,132 +121,132 @@ Nghiệm thu:
   },
   "maxAlive": 28,
   "waves": [
-    { "title": "ĐỢT 1", "hint": "Làm quen nào",                 "groups": [ { "type": "walker", "count": 10, "from": ["baseB"], "everyMs": 1500 } ] },
-    { "title": "ĐỢT 2", "hint": "Chúng chạy nhanh đấy",         "groups": [ { "type": "walker", "count": 10, "from": ["baseB"], "everyMs": 1200 },
+    { "title": "WAVE 1", "hint": "Let's get warmed up",            "groups": [ { "type": "walker", "count": 10, "from": ["baseB"], "everyMs": 1500 } ] },
+    { "title": "WAVE 2", "hint": "These ones run fast",            "groups": [ { "type": "walker", "count": 10, "from": ["baseB"], "everyMs": 1200 },
                                                                             { "type": "runner", "count": 6,  "from": ["laneLeft","laneRight"], "everyMs": 2500, "delayMs": 8000 } ] },
-    { "title": "ĐỢT 3", "hint": "Canh các lỗ bắn!",             "groups": [ { "type": "walker", "count": 12, "from": ["baseB"], "everyMs": 1000 },
+    { "title": "WAVE 3", "hint": "Watch the loopholes!",           "groups": [ { "type": "walker", "count": 12, "from": ["baseB"], "everyMs": 1000 },
                                                                             { "type": "crawler", "count": 8, "from": ["baseB"], "everyMs": 2000, "delayMs": 5000 } ] },
-    { "title": "ĐỢT 4", "hint": "Cẩn thận zombie nhảy lên gờ",  "groups": [ { "type": "walker", "count": 12, "from": ["baseB","laneLeft"], "everyMs": 1000 },
+    { "title": "WAVE 4", "hint": "Watch out for zombies leaping onto the ledge",  "groups": [ { "type": "walker", "count": 12, "from": ["baseB","laneLeft"], "everyMs": 1000 },
                                                                             { "type": "leaper", "count": 6,  "from": ["baseB"], "everyMs": 3000, "delayMs": 6000 } ] },
-    { "title": "ĐỢT 5", "hint": "Một con trâu đang tới",        "groups": [ { "type": "walker", "count": 14, "from": ["baseB"], "everyMs": 900 },
+    { "title": "WAVE 5", "hint": "A brute is coming",              "groups": [ { "type": "walker", "count": 14, "from": ["baseB"], "everyMs": 900 },
                                                                             { "type": "runner", "count": 8,  "from": ["laneLeft","laneRight"], "everyMs": 1800 },
                                                                             { "type": "brute",  "count": 1,  "from": ["baseB"], "delayMs": 15000 } ] },
-    { "title": "ĐỢT 6", "hint": "Hạ con gào trước!",            "groups": [ { "type": "walker", "count": 14, "from": ["baseB","laneRight"], "everyMs": 800 },
+    { "title": "WAVE 6", "hint": "Take down the screamer first!",  "groups": [ { "type": "walker", "count": 14, "from": ["baseB","laneRight"], "everyMs": 800 },
                                                                             { "type": "screamer", "count": 2, "from": ["baseB"], "everyMs": 10000, "delayMs": 5000 },
                                                                             { "type": "crawler", "count": 8, "from": ["baseB"], "everyMs": 1500 } ] },
-    { "title": "ĐỢT 7", "hint": "Chúng tới từ mọi phía",        "groups": [ { "type": "runner", "count": 14, "from": ["laneLeft","laneRight"], "everyMs": 1000 },
+    { "title": "WAVE 7", "hint": "They're coming from every side", "groups": [ { "type": "runner", "count": 14, "from": ["laneLeft","laneRight"], "everyMs": 1000 },
                                                                             { "type": "leaper", "count": 8,  "from": ["baseB"], "everyMs": 2000 },
                                                                             { "type": "brute",  "count": 2,  "from": ["baseB"], "everyMs": 12000, "delayMs": 10000 } ] },
-    { "title": "ĐỢT 8", "hint": "Giữ vững!",                     "groups": [ { "type": "walker", "count": 20, "from": ["baseB","laneLeft","laneRight"], "everyMs": 600 },
+    { "title": "WAVE 8", "hint": "Hold the line!",                 "groups": [ { "type": "walker", "count": 20, "from": ["baseB","laneLeft","laneRight"], "everyMs": 600 },
                                                                             { "type": "crawler", "count": 10, "from": ["baseB"], "everyMs": 1200 },
                                                                             { "type": "screamer", "count": 2, "from": ["laneLeft","laneRight"], "everyMs": 8000 } ] },
-    { "title": "ĐỢT 9", "hint": "Đợt cuối trước khi đại ca tới", "groups": [ { "type": "runner", "count": 16, "from": ["laneLeft","laneRight"], "everyMs": 700 },
+    { "title": "WAVE 9", "hint": "The last wave before the Kingpin arrives", "groups": [ { "type": "runner", "count": 16, "from": ["laneLeft","laneRight"], "everyMs": 700 },
                                                                             { "type": "leaper", "count": 10, "from": ["baseB"], "everyMs": 1500 },
                                                                             { "type": "brute",  "count": 3,  "from": ["baseB"], "everyMs": 9000 } ] },
-    { "title": "ĐỢT 10", "hint": "ĐẠI CA ZOMBIE",               "groups": [ { "type": "boss",   "count": 1,  "from": ["baseB"] },
+    { "title": "WAVE 10", "hint": "THE ZOMBIE KINGPIN",            "groups": [ { "type": "boss",   "count": 1,  "from": ["baseB"] },
                                                                             { "type": "walker", "count": 16, "from": ["baseB","laneLeft","laneRight"], "everyMs": 2500, "delayMs": 10000 } ] }
   ]
 }
 ```
 
-- `spawnPoints`: các mô tả trên là **ý nghĩa**; code lấy node thật từ nav grid theo vùng (task B.1). Chọn ngẫu nhiên node **không nằm trong tầm nhìn** của người chơi nào (raycast), không thì dời sang node khác.
-- Số lượng thực = `round(count × difficulty.count × (1 + countPerExtraPlayer × (số người − 1)))`. Máu thực tương tự.
-- Đang có `maxAlive` zombie sống thì tạm dừng sinh, chờ bớt.
-- Hot-reload file ở dev.
+- `spawnPoints`: the descriptions above are the **meaning**; the code takes real nodes from the nav grid by zone (task B.1). Pick a random node that is **not in any player's line of sight** (raycast); otherwise move on to another node.
+- Actual count = `round(count × difficulty.count × (1 + countPerExtraPlayer × (players − 1)))`. Actual health is computed similarly.
+- While `maxAlive` zombies are alive, spawning pauses and waits for some to die.
+- Hot-reload the file in dev.
 
 ---
 
-## Task T.4 – AI zombie (server) ⚠️
+## Task T.4 – Zombie AI (server) ⚠️
 
-Zombie là **thực thể riêng** `ZombieEntity` (không phải `Player`), nhưng **dùng chung `stepMovement`** với movement zombie (ZF.2) để va chạm, đi ramp, nhảy giống hệt, và client vẽ bằng nội suy như người khác.
+A zombie is a **separate entity** `ZombieEntity` (not a `Player`), but it **shares `stepMovement`** with the zombie movement (ZF.2) so that collisions, ramp walking, and jumping are identical, and the client draws it with interpolation like other players.
 
-- Mỗi zombie có `PlayerState` + `ZombieBrain`. Mỗi tick server: brain sinh `InputCmd` → `stepMovement`. Brain **nghĩ 5 lần/giây**, rải đều.
-- **Chọn mục tiêu**: người chơi còn sống gần nhất **theo đường đi** (A* độ dài, cache 1s), ưu tiên người đang nhìn thấy. Zombie luôn biết vị trí người (zombie "đánh hơi"), không cần nhìn thấy — đây là PvE, mục đích là lao vào.
-- **Cạnh nav đặc biệt** (thêm vào nav grid B.1, gắn cờ loại):
-  - `hole`: xuyên qua mỗi lỗ bắn (node trước lỗ → node sau lỗ, đi bằng ngồi + nhảy). Chỉ zombie có `crawl_holes`.
-  - `leapUp`: node mặt đất sát chân tường thành → node mặt tường ngay trên (chênh ≤ 4,2m). Chỉ zombie có `leap`, khi chiêu đã hồi.
-  - `leapTower`: node gờ tường → đỉnh tháp gần đó (chênh ≤ 2,2m). Chỉ `leap`.
-  - A* nhận danh sách cạnh được phép theo loại zombie.
-- **Đi**: theo đường, chọn phím W/A/S/D như bot (B.2), nhìn về hướng đi (zombie luôn nhìn trước mặt).
-- **Tách đám**: zombie không va chạm nhau (như người) nên dễ chồng lên nhau. Cộng lực đẩy nhẹ tránh nhau (separation): mỗi zombie lệch hướng đi ra xa các zombie khác trong bán kính 0,8m, để đám đông trông dàn ra.
-- **Tấn công**: mục tiêu trong 1,6m và nhìn thấy (raycast) → quay mặt, dừng, cào (`attackMs` nhịp, có 0,25s vung tay báo trước, người lùi kịp thì hụt). Damage nhân hệ số độ khó.
-- **Kẹt**: không tiến được 2s → nhảy một cái + tìm đường lại; kẹt 6s → nếu không ai nhìn thấy thì dịch chuyển về node hợp lệ gần nhất (tránh zombie kẹt góc làm đợt không kết thúc).
-- **Rơi khỏi map / lọt chỗ lạ**: dưới y = −5 → chết, không tính tiền.
-- **Đồng bộ mạng**: zombie gửi trong snapshot như `NetPlayer` rút gọn: `{ id, type, pos, vel, yaw, flags (attack, leap, crawl, hit, dead), hpPct }`. 28 zombie × 20Hz với msgpack vẫn nhỏ. Client nội suy giống người khác (task 3.5).
-- **Hiệu năng**: 28 zombie, mỗi zombie một capsule Rapier; A* cache đường theo node đích; tìm lại đường khi mục tiêu đi xa đường cũ > 3m.
+- Each zombie has a `PlayerState` + a `ZombieBrain`. Each server tick: the brain produces an `InputCmd` → `stepMovement`. The brain **thinks 5 times per second**, spread evenly.
+- **Target selection**: the nearest living player **by path** (A* length, cached for 1s), preferring a player it can see. Zombies always know where players are (zombies "sniff"), no need to see them — this is PvE, the point is to rush in.
+- **Special nav edges** (added to the B.1 nav grid, tagged by kind):
+  - `hole`: passes through each loophole (node before the hole → node after the hole, traversed by crouch + jump). Only zombies with `crawl_holes`.
+  - `leapUp`: a ground node at the foot of the fortress wall → the wall-top node directly above (height difference ≤ 4.2m). Only zombies with `leap`, when the ability is off cooldown.
+  - `leapTower`: a wall-ledge node → a nearby tower-top node (height difference ≤ 2.2m). `leap` only.
+  - A* receives the list of allowed edges per zombie type.
+- **Walking**: follows the path, picks W/A/S/D keys like bots (B.2), looks in the direction of travel (a zombie always looks ahead).
+- **Crowd separation**: zombies do not collide with each other (like humans), so they easily stack. Add a light separation push: each zombie's heading is offset away from other zombies within a 0.8m radius, so the crowd looks spread out.
+- **Attack**: target within 1.6m and visible (raycast) → turn to face, stop, claw (`attackMs` rhythm, with a 0.25s wind-up telegraph; if the human backs off in time it misses). Damage is multiplied by the difficulty factor.
+- **Stuck**: no progress for 2s → jump once + re-path; stuck for 6s → if no one can see it, teleport to the nearest valid node (prevents a zombie stuck in a corner from keeping the wave from ending).
+- **Falling off the map / ending up somewhere odd**: below y = −5 → dies, no money awarded.
+- **Network sync**: zombies are sent in the snapshot as a slimmed-down `NetPlayer`: `{ id, type, pos, vel, yaw, flags (attack, leap, crawl, hit, dead), hpPct }`. 28 zombies × 20Hz with msgpack is still small. The client interpolates like other players (task 3.5).
+- **Performance**: 28 zombies, one Rapier capsule each; A* caches paths by destination node; re-path when the target moves more than 3m away from the old path.
 
-Nghiệm thu:
-- [ ] Walker đi theo ramp lên gờ tường để tới người đang đứng trên gờ.
-- [ ] Crawler chui qua lỗ bắn vào căn cứ A; walker không chui.
-- [ ] Leaper nhảy từ chân tường lên gờ; từ gờ nhảy lên tháp.
-- [ ] 28 zombie không chồng thành một cục, không con nào kẹt mãi.
-- [ ] Server giữ 60 tick/giây với 28 zombie + 4 người.
-
----
-
-## Task T.5 – Boss "Đại Ca Zombie"
-
-- Model: zombie bất kỳ, `scale 2.2`, tint đỏ thẫm, mắt to sáng hơn. Thanh máu boss to ở trên cùng màn hình (`ĐẠI CA ZOMBIE` + máu %).
-- Không chui lỗ, không nhảy lên gờ, đi đường ramp. **Đứng trên gờ hoặc tháp không an toàn** vì có chiêu:
-- **Đập đất (`slam`)**: khi có người trong 7m, giơ hai tay 1,0s (vẽ **vòng tròn đỏ** trên mặt đất báo trước bán kính 6m) → đập: người trong vòng mất 35 máu và bị hất văng 9 m/s ra xa + 5 m/s lên trên. Hồi chiêu 8s.
-- **Gọi đàn (`summon`)**: mỗi khi máu boss xuống qua mốc 75%, 50%, 25%: gào lên, sinh 6 runner quanh boss (bỏ qua `maxAlive`).
-- **Lao tới (`charge`)**: mục tiêu ở 10–25m, cùng mặt phẳng: cúi đầu 0,8s báo trước (tiếng gầm) → lao thẳng 14 m/s trong 1,2s hoặc tới khi đâm tường; trúng người: 50 máu + hất văng. Đâm tường: choáng 2s, nhận ×1,5 damage (cơ hội xả đạn). Hồi chiêu 12s.
-- Điểm yếu: đầu ×3.
-- Chết: animation chết chậm, rơi tiền tượng trưng (hiệu ứng), banner `ĐÃ HẠ ĐẠI CA!`.
-
-Nghiệm thu:
-- [ ] Mọi chiêu đều có báo trước đủ để người chơi tỉnh táo né được.
-- [ ] Boss đâm tường bị choáng, xả đạn vào đầu thấy máu tụt nhanh.
+Acceptance:
+- [ ] A walker takes the ramp up to the wall ledge to reach a player standing on the ledge.
+- [ ] A crawler squeezes through a loophole into base A; a walker does not.
+- [ ] A leaper jumps from the wall foot onto the ledge; from the ledge onto the tower.
+- [ ] 28 zombies do not clump into one blob, and none stays stuck forever.
+- [ ] The server holds 60 ticks/second with 28 zombies + 4 players.
 
 ---
 
-## Task T.6 – Gục và cứu đồng đội
+## Task T.5 – Boss "Zombie Kingpin"
 
-- Trong đợt, người chơi máu về 0 → **gục** (không chết hẳn): nằm xuống, bò chậm 1 m/s, bắn được bằng súng ngắn (nếu có), 30 giây sau mới chết hẳn. Zombie vẫn tấn công người gục.
-- Đồng đội đứng cạnh (≤ 1,5m) **giữ phím E 3 giây** → cứu dậy với 40 máu. Bị đánh trúng trong lúc cứu thì phải giữ lại từ đầu.
-- Chơi một mình: không có gục, máu 0 là chết luôn (để không phải chờ 30s vô nghĩa).
-- HUD: người gục có icon chữ thập đỏ hiện xuyên tường với đồng đội, kèm vòng thời gian còn lại.
+- Model: any zombie, `scale 2.2`, dark red tint, bigger and brighter eyes. A large boss health bar at the top of the screen (`ZOMBIE KINGPIN` + health %).
+- Does not squeeze through holes, does not leap onto ledges, takes the ramp path. **Standing on the ledge or tower is not safe** because it has these abilities:
+- **Ground slam (`slam`)**: when a player is within 7m, it raises both arms for 1.0s (a **red circle** is drawn on the ground as a telegraph with a 6m radius) → slams: players inside the circle lose 35 health and are thrown 9 m/s away + 5 m/s upward. Cooldown 8s.
+- **Summon the horde (`summon`)**: each time boss health drops below 75%, 50%, 25%: it roars and spawns 6 runners around the boss (ignoring `maxAlive`).
+- **Charge (`charge`)**: target at 10–25m, on the same plane: lowers its head for a 0.8s telegraph (a roar) → charges straight at 14 m/s for 1.2s or until it hits a wall; hitting a player: 50 health + knockback. Hitting a wall: stunned for 2s, takes ×1.5 damage (a chance to unload ammo). Cooldown 12s.
+- Weak point: head ×3.
+- Death: slow death animation, symbolic money drop (effect), banner `KINGPIN DOWN!`.
 
-Nghiệm thu:
-- [ ] 2 tab: tab A gục, tab B tới cứu được; zombie cào B trong lúc cứu thì vòng cứu reset.
-
----
-
-## Task T.7 – HUD Thủ Thành
-
-- Trên giữa: `ĐỢT 4 / 10  ·  Còn 23 zombie` (trong đợt) hoặc `Đợt tiếp theo sau 0:18` (giữa đợt).
-- Banner đầu đợt (3s): tiêu đề + gợi ý trong `waves.json` (`ĐỢT 4` / `Cẩn thận zombie nhảy lên gờ`).
-- Banner hết đợt: `HẾT ĐỢT 4 · +$1200`.
-- Thanh máu boss khi có boss.
-- **Máu zombie**: thanh máu nhỏ trên đầu zombie bị bắn trong 3s gần nhất (để biết sắp hạ được chưa). Brute/screamer/boss luôn hiện tên loại màu tương ứng.
-- **Số damage nổi** (mặc định bật ở Thủ Thành).
-- Mũi tên mép màn hình chỉ hướng zombie đang tấn công **đồng đội** gần nhất (không chỉ mình), để biết cứu ai.
-- Hết trận: bảng thống kê từng người: zombie hạ, damage, số lần cứu, đợt cao nhất.
+Acceptance:
+- [ ] Every ability has enough telegraph for an alert player to dodge it.
+- [ ] A boss that hits a wall is stunned, and unloading into its head makes its health drop quickly.
 
 ---
 
-## Task T.8 – Không khí và dọn dẹp
+## Task T.6 – Downed and rescuing teammates
 
-- Dùng preset đêm + đèn pin của ZF.3.
-- Zombie chết: nằm lại 4s rồi chìm xuống đất (không mờ, đỡ tốn shader), tối đa 30 xác cùng lúc (xác cũ nhất biến trước).
-- Giữa các đợt: âm thanh nền dịu xuống; 5 giây trước đợt mới: tiếng gào xa vọng lại từ hướng zombie sẽ ra.
-- Đợt boss: đổi nhạc nền căng hơn (nếu có file `boss_theme.ogg`, không có thì bỏ qua).
+- During a wave, a player whose health reaches 0 is **downed** (not fully dead): lies down, crawls slowly at 1 m/s, can shoot with a pistol (if they have one), and only dies for good 30 seconds later. Zombies still attack a downed player.
+- A teammate standing next to them (≤ 1.5m) **holds the E key for 3 seconds** → revives them with 40 health. If the rescuer is hit during the rescue, they must restart the hold.
+- Playing alone: no downed state, health 0 is immediate death (so you do not wait a meaningless 30s).
+- HUD: a downed player shows a red cross icon through walls to teammates, with a ring for the time remaining.
 
----
-
-## Task T.9 – Cân bằng
-
-Chơi thử và chỉnh `zombieTypes.json`, `waves.json`. Mục tiêu (độ khó `normal`):
-- [ ] **1 người** chơi khá, mua đồ hợp lý: trụ được tới khoảng đợt 7–8, qua được cả 10 đợt nếu chơi rất tốt.
-- [ ] **4 người**: qua 10 đợt nếu phối hợp, thua nếu mỗi người chạy một nơi.
-- [ ] Tiền đủ để tới đợt 5 mua được súng dài tốt + lựu đạn, không thừa tới mức mua hết mọi thứ từ đợt 2.
-- [ ] Mỗi loại zombie đặc biệt đều buộc người chơi đổi cách thủ (canh lỗ, canh gờ, ưu tiên hạ con gào).
-- Ghi lại số liệu mỗi lần thử (đợt thua, thời gian mỗi đợt, tiền) vào `plan/notes/defense-balance.md` để so sánh.
+Acceptance:
+- [ ] 2 tabs: tab A goes down, tab B can rescue; a zombie clawing B during the rescue resets the rescue ring.
 
 ---
 
-## Ghi chú cho người dùng
+## Task T.7 – Defense HUD
 
-- Map "Hai thành" giờ đóng vai pháo đài: căn cứ A là nhà, tường thành A là tuyến thủ, tháp A là chỗ thủ cuối, căn cứ B và hai lối mép là cửa zombie tràn vào.
-- Có thêm model zombie: gán vào loại zombie mình muốn bằng `modelOverride` trong `zombieTypes.json` (ví dụ model to con cho `brute`, model gầy cho `runner`). Không gán thì zombie chọn ngẫu nhiên.
-- Sau này dễ mở rộng: thêm đợt 11–20 cho chế độ "vô tận", thêm loại zombie mới chỉ là thêm một mục JSON + một khả năng trong code.
+- Top center: `WAVE 4 / 10  ·  23 zombies left` (during a wave) or `Next wave in 0:18` (between waves).
+- Wave-start banner (3s): the title + hint from `waves.json` (`WAVE 4` / `Watch out for zombies leaping onto the ledge`).
+- Wave-clear banner: `WAVE 4 CLEARED · +$1200`.
+- Boss health bar when there is a boss.
+- **Zombie health**: a small health bar over the head of a zombie shot within the last 3s (to know whether it is about to go down). Brute/screamer/boss always show the type name in the matching color.
+- **Floating damage numbers** (on by default in Defense).
+- Screen-edge arrows pointing to the direction of zombies attacking the nearest **teammate** (not just you), so you know whom to rescue.
+- End of match: a stats table per player: zombies killed, damage, number of rescues, highest wave.
+
+---
+
+## Task T.8 – Atmosphere and cleanup
+
+- Use the night preset + flashlight from ZF.3.
+- Dead zombies: stay for 4s then sink into the ground (no fade, to save shader cost), at most 30 corpses at once (the oldest corpse disappears first).
+- Between waves: the background sound softens; 5 seconds before a new wave: distant screams echo from the direction the zombies will come from.
+- Boss wave: switch to a tenser background track (if a `boss_theme.ogg` file exists; if not, skip).
+
+---
+
+## Task T.9 – Balance
+
+Playtest and tune `zombieTypes.json`, `waves.json`. Goals (`normal` difficulty):
+- [ ] **1 player** who plays decently and buys sensibly: holds out to around wave 7–8, and clears all 10 waves if playing very well.
+- [ ] **4 players**: clear 10 waves if they coordinate, lose if each runs off on their own.
+- [ ] Money is enough that by wave 5 you can buy a good rifle + grenades, but not so much that you buy everything from wave 2.
+- [ ] Every special zombie type forces players to change how they defend (watch the holes, watch the ledge, prioritize the screamer).
+- Record the numbers of each attempt (wave lost, time per wave, money) in `plan/notes/defense-balance.md` for comparison.
+
+---
+
+## Notes for the user
+
+- The "Two Citadels" map now plays the role of a fortress: base A is home, the A fortress wall is the defensive line, tower A is the last stand, and base B and the two edge passages are the doors the zombies flood in through.
+- If you have extra zombie models: assign them to the zombie type you want with `modelOverride` in `zombieTypes.json` (for example a bulky model for `brute`, a skinny one for `runner`). If unassigned, zombies pick randomly.
+- Easy to extend later: add waves 11–20 for an "endless" mode; adding a new zombie type is just one JSON entry + one ability in code.

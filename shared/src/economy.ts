@@ -1,8 +1,8 @@
-// Luật mua/bán/thưởng (thuần). Server quyết định, client gọi để hiển thị. Không sửa object đầu vào.
-import { CATEGORY_SLOT, SLOT_COUNT, weaponByKey } from './weapons'
+// Buy/sell/reward rules (pure). The server decides, the client calls these for display. Never mutates input objects.
+import { CATEGORY_SLOT, GRENADE_IDS, SLOT_COUNT, WEAPONS, weaponByKey } from './weapons'
 import type { TeamId } from './teams'
 import type { GameMode } from './roomConfig'
-import { GRENADE } from './grenade'
+import { GRENADE, maxCarryOf } from './grenade'
 import { INFECTION } from './infection'
 import { DEFENSE } from './defense'
 
@@ -10,17 +10,17 @@ export interface EconomyConfig {
   startMoney: number
   maxMoney: number
   killReward: number
-  bountyStreak: number      // nạn nhân có chuỗi hạ >= số này thì hạ được tiền thưởng truy nã
+  bountyStreak: number      // a victim with a kill streak >= this pays out the bounty reward
   bountyReward: number
   sellRatio: number
-  defaultResaleValue: number   // giá bán lại súng được cấp sẵn (0 = không bán được)
+  defaultResaleValue: number   // resale price of the starting weapons (0 = cannot be sold)
   keepLoadoutOnDeath: boolean
   maxBuysPerSecond: number
-  infiniteReserve?: boolean   // thể thức zombie: đạn dự trữ vô hạn (chỉ phải nạp băng) – HUD hiện `25 / ∞`
-  magMult?: number            // thể thức zombie: băng đạn to gấp ngần này (mặc định 1)
+  infiniteReserve?: boolean   // zombie modes: infinite reserve ammo (only magazines need reloading) – HUD shows `25 / ∞`
+  magMult?: number            // zombie modes: magazines are this many times larger (default 1)
 }
 
-/** Hỗn Chiến (task 09) */
+/** Team Deathmatch (task 09) */
 export const ECONOMY: EconomyConfig = {
   startMoney: 2000,
   maxMoney: 16000,
@@ -34,26 +34,26 @@ export const ECONOMY: EconomyConfig = {
 }
 export const ECONOMY_TDM: EconomyConfig = ECONOMY
 
-/** Sinh Tử (task 13): tiền theo ván */
+/** Elimination (task 13): per-round money */
 export const ECONOMY_ELIM = {
   ...ECONOMY,
   startMoney: 800,
   killReward: 300,
   bountyReward: 600,
-  keepLoadoutIfSurvived: true,   // sống sót qua ván: giữ súng, lựu đạn
+  keepLoadoutIfSurvived: true,   // survive the round: keep weapons and grenades
   roundWin: 3000,
   roundLossBase: 1500,
-  roundLossStep: 400,            // thua liên tiếp: 1500, 1900, 2300, 2700, 3000
+  roundLossStep: 400,            // consecutive losses: 1500, 1900, 2300, 2700, 3000
   roundLossMax: 3000,
-  roundDraw: 1500,               // ván hoà: mỗi người +1500, chuỗi thua giữ nguyên
-  resetAtHalftime: true,         // đổi bên: tiền về startMoney, súng về mặc định
+  roundDraw: 1500,               // drawn round: everyone +1500, loss streak unchanged
+  resetAtHalftime: true,         // sides swap: money resets to startMoney, weapons to defaults
 }
 export type EliminationEconomy = typeof ECONOMY_ELIM
 
-/** Băng đạn của người trong thể thức zombie (Lây Nhiễm, Thủ Thành): ×2 vì zombie đông, 30 viên hết quá nhanh */
+/** Human magazine size in zombie modes (Infection, Defense): ×2 because zombies are numerous and 30 rounds run out too fast */
 export const ZOMBIE_MAG_MULT = 2
 
-/** Lây Nhiễm (plan 16): tiền đầu mỗi ván (không mang sang ván sau), mua ở pha chuẩn bị, đạn dự trữ vô hạn */
+/** Infection (plan 16): starting money each round (not carried over), buy during the prep phase, infinite reserve ammo */
 export const ECONOMY_INFECTION: EconomyConfig = {
   ...ECONOMY,
   startMoney: INFECTION.startMoney,
@@ -62,7 +62,7 @@ export const ECONOMY_INFECTION: EconomyConfig = {
   magMult: ZOMBIE_MAG_MULT,
 }
 
-/** Bộ kinh tế theo thể thức (server: mode.economy(); client dùng để hiển thị giá bán lại, tiền tối đa...) */
+/** Economy set by mode (server: mode.economy(); the client uses it to display resale price, max money...) */
 export function economyFor(mode: GameMode): EconomyConfig {
   switch (mode) {
     case 'elimination': return ECONOMY_ELIM
@@ -72,23 +72,25 @@ export function economyFor(mode: GameMode): EconomyConfig {
   }
 }
 
-/** Thủ Thành (plan 17): tiền ban đầu thấp, giữ súng khi chết, đạn dự trữ vô hạn; tiền hạ zombie theo từng loại (ZOMBIE_TYPES.reward), thưởng hết đợt: DEFENSE */
+/** Defense (plan 17): low starting money, keep weapons on death, infinite reserve ammo; zombie kill money is per type (ZOMBIE_TYPES.reward), wave-clear bonus: DEFENSE */
 export const ECONOMY_DEFENSE: EconomyConfig = {
   ...ECONOMY,
   startMoney: DEFENSE.startMoney,
   keepLoadoutOnDeath: true,
   infiniteReserve: true,
   magMult: ZOMBIE_MAG_MULT,
-  killReward: 0, bountyStreak: 1e9, bountyReward: 0,   // không có truy nã; tiền hạ zombie tính riêng theo loại
+  killReward: 0, bountyStreak: 1e9, bountyReward: 0,   // no bounty; zombie kill money is computed per type
 }
 
 export const DEFAULT_LOADOUT: Record<TeamId, string[]> = {
-  A: ['knife', 'colt', 'm16'],   // Cớm
-  B: ['knife', 'rulo', 'ak47'],  // Cướp
+  A: ['knife', 'colt', 'm16'],   // Cops
+  B: ['knife', 'rulo', 'ak47'],  // Terrorists
 }
 
-export interface OwnedWeapon { key: string; paid: number; count?: number }   // paid = số tiền đã trả (súng cấp sẵn = 0); count chỉ có ở hàng tiêu hao (lựu đạn)
-export interface Loadout { slots: (OwnedWeapon | null)[] }    // luôn đúng SLOT_COUNT phần tử, theo CATEGORY_SLOT
+// paid = money paid (starting weapons = 0). Only the grenade slot has count/counts: counts = number of each type ({ m67: 1, smoke: 1 }),
+// key = first type with any left (HE first), count = number of that type. Create/modify via nadeSlot().
+export interface OwnedWeapon { key: string; paid: number; count?: number; counts?: Record<string, number> }
+export interface Loadout { slots: (OwnedWeapon | null)[] }    // always exactly SLOT_COUNT entries, indexed by CATEGORY_SLOT
 
 export type BuyFailReason = 'not_buyable' | 'already_owned' | 'not_enough_money' | 'max_carry'
 export type BuyQuote =
@@ -104,24 +106,33 @@ export function defaultLoadout(team: TeamId, eco: EconomyConfig = ECONOMY): Load
   return { slots }
 }
 
-/** Giá bán lại một súng đang có (hàng tiêu hao không bán lại) */
+/** Resale price of an owned weapon (consumables cannot be resold) */
 export function resaleValue(w: OwnedWeapon, eco: EconomyConfig = ECONOMY): number {
   if (weaponByKey(w.key)?.consumable) return 0
   return Math.floor(w.paid * eco.sellRatio)
 }
 
-/** Số lựu đạn đang mang */
-export function grenadeCount(loadout: Loadout): number {
-  return loadout.slots[CATEGORY_SLOT.grenade]?.count ?? 0
+/** Number of grenades of type `key` ('m67' = default HE, 'smoke') being carried */
+export function grenadeCount(loadout: Loadout, key: string = GRENADE.key): number {
+  const g = loadout.slots[CATEGORY_SLOT.grenade]
+  return g?.counts?.[key] ?? (g && g.key === key ? g.count ?? 0 : 0)
 }
 
-/** Dùng một quả: count − 1, về 0 thì ô trống. Không sửa đầu vào; hết lựu đạn → trả nguyên loadout. */
-export function consumeGrenade(loadout: Loadout): Loadout {
+/** Build the grenade slot from per-type counts; none left → null. `paid` accumulates money paid (not used for resale) */
+export function nadeSlot(counts: Record<string, number>, paid = 0): OwnedWeapon | null {
+  const out: Record<string, number> = {}
+  for (const id of GRENADE_IDS) { const k = WEAPONS[id]!.key; if ((counts[k] ?? 0) > 0) out[k] = counts[k]! }
+  const first = Object.keys(out)[0]
+  return first ? { key: first, paid, count: out[first], counts: out } : null
+}
+
+/** Use one grenade of type `key`. Does not mutate input; if none of that type is left → returns the loadout unchanged. */
+export function consumeGrenade(loadout: Loadout, key: string = GRENADE.key): Loadout {
   const slot = CATEGORY_SLOT.grenade
   const g = loadout.slots[slot]
-  if (!g || (g.count ?? 0) <= 0) return loadout
+  if (!g || grenadeCount(loadout, key) <= 0) return loadout
   const slots = loadout.slots.slice()
-  slots[slot] = g.count! - 1 > 0 ? { ...g, count: g.count! - 1 } : null
+  slots[slot] = nadeSlot({ ...(g.counts ?? { [g.key]: g.count ?? 0 }), [key]: grenadeCount(loadout, key) - 1 }, g.paid)
   return { slots }
 }
 
@@ -130,9 +141,9 @@ export function quoteBuy(money: number, loadout: Loadout, key: string, eco: Econ
   if (!def || !def.buyable) return { ok: false, reason: 'not_buyable', price: def?.price ?? 0, refund: 0, net: def?.price ?? 0 }
   const slot = CATEGORY_SLOT[def.category]
   const old = loadout.slots[slot] ?? null
-  if (def.consumable) {   // hàng tiêu hao: cộng dồn tới maxCarry, không bán đổi
+  if (def.consumable) {   // consumables: stack up to maxCarry, no swap-for-refund
     const net = def.price
-    if ((old?.count ?? 0) >= GRENADE.maxCarry) return { ok: false, reason: 'max_carry', price: def.price, refund: 0, net }
+    if (grenadeCount(loadout, key) >= maxCarryOf(key)) return { ok: false, reason: 'max_carry', price: def.price, refund: 0, net }
     if (money < net) return { ok: false, reason: 'not_enough_money', price: def.price, refund: 0, net }
     return { ok: true, price: def.price, refund: 0, net, slot }
   }
@@ -149,11 +160,13 @@ export function applyBuy(money: number, loadout: Loadout, key: string, eco: Econ
   const slots = loadout.slots.slice()
   const old = slots[q.slot]
   const consumable = !!weaponByKey(key)?.consumable
-  slots[q.slot] = consumable ? { key, paid: (old?.paid ?? 0) + q.price, count: (old?.count ?? 0) + 1 } : { key, paid: q.price }
+  slots[q.slot] = consumable
+    ? nadeSlot({ ...(old?.counts ?? (old ? { [old.key]: old.count ?? 0 } : {})), [key]: grenadeCount(loadout, key) + 1 }, (old?.paid ?? 0) + q.price)
+    : { key, paid: q.price }
   return { money: addMoney(money, -q.net, eco), loadout: { slots } }
 }
 
-/** Tiền thưởng khi hạ người có chuỗi `victimStreak` */
+/** Reward for killing a player with kill streak `victimStreak` */
 export function killReward(victimStreak: number, eco: EconomyConfig = ECONOMY): number {
   return victimStreak >= eco.bountyStreak ? eco.bountyReward : eco.killReward
 }
@@ -165,8 +178,8 @@ export function addMoney(money: number, delta: number, eco: EconomyConfig = ECON
 export type RoundOutcome = 'win' | 'loss' | 'draw'
 
 /**
- * Tiền cuối ván (Sinh Tử) cho một người của đội có chuỗi thua `lossStreak` (trước ván này).
- * Thắng: +roundWin, chuỗi về 0. Thua: chuỗi + 1, +min(base + (chuỗi mới − 1)·step, max). Hoà: +roundDraw, chuỗi giữ nguyên.
+ * End-of-round money (Elimination) for one player of a team with loss streak `lossStreak` (before this round).
+ * Win: +roundWin, streak resets to 0. Loss: streak + 1, +min(base + (new streak − 1)·step, max). Draw: +roundDraw, streak unchanged.
  */
 export function roundIncome(outcome: RoundOutcome, lossStreak: number, eco: EliminationEconomy = ECONOMY_ELIM): { amount: number; lossStreak: number } {
   if (outcome === 'win') return { amount: eco.roundWin, lossStreak: 0 }
@@ -175,7 +188,7 @@ export function roundIncome(outcome: RoundOutcome, lossStreak: number, eco: Elim
   return { amount: Math.min(eco.roundLossBase + (next - 1) * eco.roundLossStep, eco.roundLossMax), lossStreak: next }
 }
 
-/** id súng ở từng ô (-1 = trống), để ghi vào WeaponState.slots */
+/** Weapon id in each slot (-1 = empty), to write into WeaponState.slots */
 export function loadoutWeaponIds(loadout: Loadout): number[] {
-  return loadout.slots.map(w => (w ? weaponByKey(w.key)?.id ?? -1 : -1))
+  return loadout.slots.map(w => (w ? weaponByKey(w.key)?.id ?? -1 : -1))   // grenade slot: key = first type with any left (nadeSlot)
 }

@@ -1,4 +1,4 @@
-// Sân thử bot không giao diện (test + bot-bench): Room thật + Rapier thật + map thật, tự bước tick bằng tay.
+// Headless bot test arena (tests + bot-bench): real Room + real Rapier + real map, ticks stepped manually.
 import { readFileSync } from 'fs'
 import { TICK_RATE, defaultMovement, loadMap, type AnyMsg, type LoadedMap, type MapFile, type Transport } from '@fps/shared'
 import { createWorld, type CollisionWorld } from '@fps/shared/physics/world'
@@ -22,7 +22,7 @@ export interface Arena {
   nav: ReturnType<typeof buildNav>
   tick: number
   step(ticks: number, each?: (tick: number) => void): void
-  /** Người "thật" không có client: đứng yên, có world để bị bắn. Tuỳ chọn teleport/giữ máu. */
+  /** A "real" player without a client: stands still, has a world so it can be shot. Optional teleport/keep health. */
   addDummy(team: 'A' | 'B', pos?: [number, number, number]): Promise<Dummy>
   dispose(): void
 }

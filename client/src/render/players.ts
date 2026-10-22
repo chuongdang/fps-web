@@ -8,32 +8,33 @@ import { BlockArm } from './blockArm'
 import { poses, weaponPose, getAnchor, scanModelAnchors, colorOf, type Vec3, type WeaponPose } from './poses'
 import { getCharacterSet, disposeRig, type CharacterRig } from './characters'
 import { makeSkeletalRig, requestCharacters, requestZombieModels, skeletalEnabled, skeletalReady, skinOfSet, zombieModelReady } from './characterRig'
-import { GRENADE_ID } from '@fps/shared'
+import { GRENADE_ID, SMOKE_ID, isGrenadeId } from '@fps/shared'
+import { tintSmoke } from './nadeTint'
 import { makeAnimState, updateAnim, HEAD_PITCH, type AnimState } from './characters/animate'
 import { createDeathFx } from './characters/deathFx'
 import { makeZombieFx, removeZombieFx, updateZombieFx, type ZombieFx } from './zombieLook'
 
-// Tối thiểu để vẽ; NetPlayer và InterpPlayer đều thoả
+// The minimum needed to draw; both NetPlayer and InterpPlayer satisfy it
 interface RenderPlayer { id: number; pos: [number, number, number]; yaw: number; pitch?: number; flags: number; weapon?: number; killStreak?: number; adsT?: number; ztype?: string; zscale?: number }
 
 export interface TeamInfo {
   teamOf(id: number): TeamId | undefined
   nameOf(id: number): string | undefined
   myTeam(): TeamId | undefined
-  characterSet?(): string   // bộ nhân vật của phòng (mặc định nếu thiếu)
-  /** Đội dùng để chọn model (zombie: người bị lây giữ nguyên model của mình dù đổi sang phe zombie) */
+  characterSet?(): string   // the room's character set (default if missing)
+  /** Team used to pick the model (zombie: an infected player keeps their own model even after switching to the zombie side) */
   modelTeam?(id: number, flags: number): TeamId | undefined
-  /** Vị trí mắt người xem (để tắt mắt zombie ở xa) */
+  /** Viewer eye position (to switch off distant zombie eyes) */
   viewer?(): [number, number, number]
-  /** Phòng Lây Nhiễm / Thủ Thành: tải sẵn model zombie */
+  /** Infection / Defense rooms: preload the zombie models */
   zombieMode?(): boolean
 }
 
 const FLASH_MS = 60
-const WANTED_STREAK = ECONOMY.bountyStreak   // killStreak từ ngần này: dấu truy nã trên đầu
+const WANTED_STREAK = ECONOMY.bountyStreak   // from this killStreak on: a wanted mark over the head
 const WEAPON_FILES = ['/models/ak47.glb', '/models/m16.glb', '/models/colt.glb', '/models/rouleau.glb', '/models/sniper.glb', '/models/shotgun.glb', '/models/knife_1.glb', '/models/submachine.glb', '/models/grenades/m67.glb']
 
-// Súng cầm trên tay người khác: load một lần mỗi loại, mỗi người clone (dùng chung geometry/material)
+// Guns held by other players: loaded once per type, cloned per player (geometry/material shared)
 const gunModels = new Map<number, THREE.Object3D>()
 let gunsRequested = false
 function requestGuns(): void {
@@ -51,7 +52,7 @@ function requestGuns(): void {
   })
 }
 
-// Nhãn tên đồng đội: sprite canvas tạo một lần cho mỗi người
+// Teammate name tag: a canvas sprite created once per player
 function makeNameSprite(text: string, color: string): THREE.Sprite {
   const c = document.createElement('canvas')
   c.width = 256; c.height = 64
@@ -67,7 +68,7 @@ function makeNameSprite(text: string, color: string): THREE.Sprite {
   return sp
 }
 
-// Dấu truy nã: ngôi sao vàng viền đỏ, một texture dùng chung
+// Wanted mark: a yellow star with a red outline, one shared texture
 let wantedTex: THREE.CanvasTexture | null = null
 function makeWantedSprite(): THREE.Sprite {
   if (!wantedTex) {
@@ -90,9 +91,9 @@ function makeWantedSprite(): THREE.Sprite {
   return sp
 }
 
-// Mỗi người = một rig dựng từ bộ nhân vật của phòng (render/characters) + súng + lửa nòng + animation.
-// Súng 2 tay (poses.json third.hold = twoHand): súng gắn vào `holder` (con của `aimPivot`, xoay theo pitch),
-// hai BlockArm bám hai điểm neo trên súng bằng IK. Súng 1 tay: như cũ (súng ở bàn tay phải của rig).
+// Each player = one rig built from the room's character set (render/characters) + gun + muzzle flash + animation.
+// Two-handed gun (poses.json third.hold = twoHand): the gun is attached to `holder` (child of `aimPivot`, rotates with pitch),
+// two BlockArms follow two anchor points on the gun via IK. One-handed gun: as before (gun in the rig's right hand).
 interface Actor {
   rig: CharacterRig
   anim: AnimState
@@ -103,24 +104,24 @@ interface Actor {
   wasDead: boolean
   aimPivot: THREE.Group
   holder: THREE.Group
-  armR: BlockArm | null   // null với nhân vật có xương (IK nằm trong rig.skel)
+  armR: BlockArm | null   // null for skinned characters (IK lives in rig.skel)
   armL: BlockArm | null
-  twoHand: boolean | null   // null = chưa chọn chế độ
-  drop: GunDrop | null      // súng rơi khỏi tay xác (nhân vật có xương)
-  pulling: boolean          // đang rút chốt (người khác): hết cử động tay trái thì chốt rời quả
-  pinOff: boolean           // chốt đã rút: ẩn node `pin` trên quả trong tay
-  thrown: boolean           // vừa ném: sau khi hết animation ném, quả mới (nếu còn) hiện lại trong tay
-  zfx: ZombieFx | null      // đang là zombie: tint + mắt đỏ
-  deadAt: number            // zombie chết: mốc performance.now() (xác chìm xuống đất sau CORPSE_MS)
-  zfile: string             // đang dựng từ model zombie riêng (file glb); '' = model người
+  twoHand: boolean | null   // null = mode not chosen yet
+  drop: GunDrop | null      // gun dropped from the corpse's hand (skinned character)
+  pulling: boolean          // pulling the pin (other players): once the left-hand motion ends the pin leaves the grenade
+  pinOff: boolean           // pin already pulled: hide the `pin` node on the grenade in hand
+  thrown: boolean           // just threw: after the throw animation ends, a new grenade (if any) reappears in the hand
+  zfx: ZombieFx | null      // currently a zombie: tint + red eyes
+  deadAt: number            // zombie died: performance.now() timestamp (the corpse sinks into the ground after CORPSE_MS)
+  zfile: string             // built from a dedicated zombie model (glb file); '' = human model
 }
 
-// Súng rơi khỏi tay người chết: rơi thẳng + xoay, nằm xuống sàn, mờ dần cùng xác
+// Gun dropped by a dead player: falls straight down + spins, lies on the floor, fades with the corpse
 const DROP_GRAVITY = 9.8
 const DROP_SETTLE_S = 0.2
 const DROP_HOLD_S = 3
 const DROP_FADE_S = 0.7
-const KILL_MEMORY_MS = 3000   // tin Kill đến trước snapshot chết trong khoảng này vẫn được dùng để chọn kiểu chết
+const KILL_MEMORY_MS = 3000   // a Kill message arriving this long before the death snapshot is still used to choose the death style
 interface GunDrop {
   obj: THREE.Object3D; mats: THREE.Material[]
   vy: number; wx: number; wz: number; floorY: number
@@ -128,18 +129,18 @@ interface GunDrop {
   from: THREE.Quaternion; to: THREE.Quaternion
 }
 
-// Zombie Thủ Thành: tint theo loại (nhìn màu biết loại), cỡ theo loại; Lây Nhiễm: tint xanh xám cố định, mẹ to hơn một chút
+// Defense zombies: tint per type (colour tells the type), size per type; Infection: fixed grey-green tint, the mother is slightly bigger
 function zombieOpts(ztype?: string): { fromHuman?: boolean; tintOverride?: string | null; modelOverride?: string | null } {
   const def = ztype ? ZOMBIE_TYPES[ztype] : undefined
   if (def) return { tintOverride: def.tintOverride, modelOverride: def.modelOverride }
-  return ztype === 'mother' ? { fromHuman: true, modelOverride: ZOMBIE_LOOK.motherModel ?? null } : { fromHuman: true }   // mẹ: model riêng (bighand)
+  return ztype === 'mother' ? { fromHuman: true, modelOverride: ZOMBIE_LOOK.motherModel ?? null } : { fromHuman: true }   // mother: dedicated model (bighand)
 }
 function zombieSize(ztype?: string, zscale?: number): number {
   if (zscale) return zscale
   return ztype === 'mother' ? 1.12 : 1
 }
 
-const HIP_Y = 0.8   // khớp kit.ts: `upper` có gốc ở hông
+const HIP_Y = 0.8   // matches kit.ts: `upper` has its origin at the hip
 const _m = new THREE.Matrix4()
 const _eul = new THREE.Euler()
 const _anchor = new THREE.Vector3()
@@ -183,7 +184,7 @@ function disposeActor(a: Actor, scene?: THREE.Scene): void {
   a.flash.material.dispose()
 }
 
-// Chuyển giữa tay khối cũ (súng 1 tay) và hai BlockArm (súng 2 tay) ngay trong frame đổi súng
+// Switch between the old block arm (one-handed gun) and the two BlockArms (two-handed gun) within the frame the gun changes
 function setHold(a: Actor, two: boolean): void {
   if (a.twoHand === two) return
   a.twoHand = two
@@ -209,8 +210,8 @@ function setHold(a: Actor, two: boolean): void {
   parent.add(a.flash)
 }
 
-// Súng ở holder: tư thế thường, hoặc (người đó đang ngắm) trượt dần sang adsGunPos/adsGunRotDeg: lên cao, sát má.
-// poses.json không có adsGunPos thì dùng ADS_THIRD_SHIFT cộng vào tư thế thường
+// Gun in the holder: normal pose, or (while that player aims) gradually slides to adsGunPos/adsGunRotDeg: raised, close to the cheek.
+// if poses.json has no adsGunPos, ADS_THIRD_SHIFT is added to the normal pose
 const ADS_THIRD_SHIFT: Vec3 = [-0.06, 0.1, 0.03]
 function placeHolder(a: Actor, weapon: number, wp: WeaponPose['third'], adsT: number): void {
   const k = WEAPONS[weapon]?.ads ? smoothstep01((adsT - 0.3) / 0.4) : 0
@@ -222,7 +223,7 @@ function placeHolder(a: Actor, weapon: number, wp: WeaponPose['third'], adsT: nu
 }
 function smoothstep01(x: number): number { const t = x < 0 ? 0 : x > 1 ? 1 : x; return t * t * (3 - 2 * t) }
 
-// Đặt súng ở holder theo poses.json rồi giải IK hai tay vào hai điểm neo. Mọi toạ độ trong hệ `rig.upper`.
+// Place the gun in the holder per poses.json, then solve IK for both hands onto the two anchor points. All coordinates are in `rig.upper` space.
 function solveArms(a: Actor, weapon: number, pitch: number, adsT: number): void {
   const t = poses.third, wp = weaponPose(weapon).third
   a.aimPivot.position.set(t.aimPivot[0], t.aimPivot[1] - HIP_Y, t.aimPivot[2])
@@ -244,7 +245,7 @@ function solveArms(a: Actor, weapon: number, pitch: number, adsT: number): void 
 const _gq = new THREE.Quaternion()
 const _rq = new THREE.Quaternion()
 const _sh = new THREE.Vector3()
-// Nhân vật có xương: đặt súng ở holder rồi IK hai bàn tay thật vào hai điểm neo, gập ngón. Mọi toạ độ thế giới.
+// Skinned character: place the gun in the holder, IK both real hands onto the two anchor points, curl the fingers. All coordinates are in world space.
 function solveSkelArms(a: Actor, weapon: number, adsT: number): void {
   const sk = a.rig.skel!, wp = weaponPose(weapon).third, c = poses.character
   placeHolder(a, weapon, wp, adsT)
@@ -264,11 +265,11 @@ function solveSkelArms(a: Actor, weapon: number, adsT: number): void {
   }
 }
 
-// Cầm lựu đạn (người khác): tay trái chạm vòng chốt khi rút chốt, chốt rời quả sau đó, quả trong tay ẩn tới khi ném xong.
+// Holding a grenade (other players): the left hand touches the pin ring when pulling the pin, the pin then leaves the grenade, and the grenade in hand stays hidden until the throw is done.
 function nadeHand(a: Actor): void {
   const sk = a.rig.skel!, gun = a.gun!
   if (a.pulling && sk.pullT <= 0) { a.pinOff = true; a.pulling = false }
-  if (a.thrown && !sk.throwActive) { a.thrown = false; a.pinOff = false }   // ném xong: quả mới (nếu còn) trong tay, chốt về chỗ cũ
+  if (a.thrown && !sk.throwActive) { a.thrown = false; a.pinOff = false }   // throw done: a new grenade (if any) is in the hand, the pin is back in place
   gun.visible = !sk.throwReleased
   const pin = gun.getObjectByName('pin')
   if (pin) pin.visible = !a.pinOff
@@ -286,22 +287,22 @@ function nadeHand(a: Actor): void {
   sk.armL.applyGrip(w)
 }
 
-// pos là vị trí chân. Cao đứng/ngồi lấy từ MovementConfig (chỉ co chân khi ngồi, đỉnh đầu khớp hitbox).
+// pos is the foot position. Standing/crouching heights come from MovementConfig (only the legs shrink when crouching, the top of the head matches the hitbox).
 export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
   const { standHeight, crouchHeight } = defaultMovement
   const actors = new Map<number, Actor>()
-  const lastSeen = new Map<number, number>()   // id → số frame cuối được thấy (tránh cấp phát Set mỗi frame)
+  const lastSeen = new Map<number, number>()   // id -> last frame number it was seen (avoids allocating a Set every frame)
   const labels = new Map<number, THREE.Sprite>()
-  const wanted = new Map<number, THREE.Sprite>()   // dấu truy nã trên đầu người có chuỗi hạ ≥ WANTED_STREAK (thấy cả với kẻ địch)
+  const wanted = new Map<number, THREE.Sprite>()   // wanted mark over players with a kill streak >= WANTED_STREAK (visible to enemies too)
   const deathFx = createDeathFx(scene)
   let frame = 0
   let lastNow = performance.now()
   let setId = ''
   requestGuns()
   const requestSkin = (id: string): void => { const sk = skinOfSet(getCharacterSet(id).id); if (sk) requestCharacters(sk) }
-  requestSkin(setId)   // chưa biết bộ của phòng → bộ mặc định
+  requestSkin(setId)   // room's set not known yet -> default set
 
-  // File model zombie riêng của từng zombie (tất định theo id); cache theo ztype để khỏi tính lại mỗi frame
+  // Dedicated model file for each zombie (deterministic per id); cached per ztype to avoid recomputing every frame
   const zfileCache = new Map<number, { ztype: string | undefined; file: string; scale: number }>()
   let zombiesRequested = false
   function zombieModelOf(p: RenderPlayer): { file: string; scale: number } | null {
@@ -324,11 +325,11 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     lastSeen.delete(id)
   }
 
-  // Dựng lại khi đội đổi (TeamAssigned đến sau snapshot đầu) hoặc đổi bộ nhân vật
+  // Rebuild when the team changes (TeamAssigned arrives after the first snapshot) or the character set changes
   function ensure(p: RenderPlayer): Actor | null {
     const team = info?.modelTeam?.(p.id, p.flags) ?? info?.teamOf(p.id) ?? 'A'
-    const skin = skinOfSet(getCharacterSet(setId).id)   // bộ có xương (Bão Cát Sa Mạc, Cớm & Cướp) → skin tương ứng
-    // Model zombie riêng (Thủ Thành, zombie mẹ): chưa tải xong thì zombie thường chưa vẽ, người bị lây vẫn đứng bằng model người
+    const skin = skinOfSet(getCharacterSet(setId).id)   // skinned set (Desert Sandstorm, Cops & Terrorists) -> the matching skin
+    // Dedicated zombie model (Defense, mother zombie): until loaded, a normal zombie is not drawn, while an infected player still stands with the human model
     const zm = skeletalEnabled() ? zombieModelOf(p) : null
     const zReady = !!zm && zombieModelReady(zm.file)
     if (zm && !zReady) requestZombieModels([zm.file])
@@ -336,7 +337,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     const humanSkel = skeletalEnabled() && !!skin && skeletalReady(skin, team)
     const wantSkel = humanSkel || zReady
     let a = actors.get(p.id)
-    if (!a && zm && !zReady && ZOMBIE_TYPES[p.ztype ?? '']) return null   // zombie Thủ Thành: đợi model
+    if (!a && zm && !zReady && ZOMBIE_TYPES[p.ztype ?? '']) return null   // Defense zombie: wait for the model
     if (a && (a.rig.team !== team || !!a.rig.skel !== wantSkel || a.zfile !== zfile)) { dropActor(p.id, a); a = undefined }
     if (!a) {
       a = makeActor(wantSkel ? makeSkeletalRig(skin ?? 'saber', team, zfile || undefined) : getCharacterSet(setId).build(team), (p.flags & NetFlag.Dead) !== 0)
@@ -347,7 +348,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     return a
   }
 
-  // Tên chỉ cho đồng đội, kẻ địch không có nhãn
+  // Names only for teammates, enemies get no tag
   function dressLabel(id: number, a: Actor, h: number): void {
     const team = info?.teamOf(id)
     let label = labels.get(id)
@@ -377,25 +378,26 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     let w = wanted.get(p.id)
     if (!on) { if (w) dropWanted(p.id); return }
     if (!w) { w = makeWantedSprite(); scene.add(w); wanted.set(p.id, w) }
-    // Cao hơn nhãn tên đồng đội một chút để không chồng lên
+    // A little above the teammate name tag so they do not overlap
     w.position.set(a.rig.root.position.x, a.rig.root.position.y + h + 0.95, a.rig.root.position.z)
   }
 
   function dressGun(a: Actor, weapon: number): void {
     if (a.gunId === weapon && a.gun) return
-    const src = gunModels.get(weapon)
-    if (!src) return   // chưa load xong: thử lại frame sau
+    const src = gunModels.get(isGrenadeId(weapon) ? GRENADE_ID : weapon)
+    if (!src) return   // not loaded yet: retry next frame
     const parent = a.twoHand ? a.holder : a.rig.gunAnchor
     if (a.gun) a.gun.removeFromParent()
     a.gun = src.clone(true)
     a.gunId = weapon
     a.pinOff = false; a.pulling = false; a.thrown = false
-    if (weapon === GRENADE_ID) {   // lựu đạn: tâm lòng bàn tay (anchor hand_r) trùng gốc gunAnchor
+    if (weapon === SMOKE_ID) tintSmoke(a.gun)   // smoke: the M67 model tinted grey
+    if (isGrenadeId(weapon)) {   // grenade: palm centre (anchor hand_r) coincides with the gunAnchor origin
       getAnchor(weapon, 'hand_r', _anchor)
       a.gun.position.set(-_anchor.x, -_anchor.y, -_anchor.z)
     }
     parent.add(a.gun)
-    // Toạ độ đầu nòng đã đo sẵn trong hệ gunGroup (node 'muzzle' nằm trong GunRoot đã scale nên không dùng trực tiếp)
+    // Muzzle coordinates pre-measured in gunGroup space (the 'muzzle' node is inside the scaled GunRoot so it cannot be used directly)
     a.flash.position.copy(MUZZLE_FALLBACK[weapon] ?? MUZZLE_FALLBACK[0]!)
   }
 
@@ -407,7 +409,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
   const killMemory = new Map<number, { headshot: boolean; t: number }>()
   const _e = new THREE.Euler(), _fwd = new THREE.Vector3(), _roll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2)
 
-  // Súng rời tay: giữ nguyên toạ độ thế giới, rơi + xoay. Vật liệu nhân bản để mờ riêng (geometry dùng chung nên không dispose)
+  // Gun leaving the hand: keeps its world coordinates, falls + spins. Materials are cloned so it fades on its own (geometry is shared so it is not disposed)
   function dropGun(a: Actor): void {
     if (!a.gun || a.drop) return
     const g = a.gun
@@ -473,27 +475,27 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     const weapon = p.weapon ?? 0
     const sliding = (p.flags & NetFlag.Sliding) !== 0, grounded = (p.flags & NetFlag.Grounded) !== 0
     if (rig.skel) {
-      // Nhân vật có xương. Thứ tự bắt buộc: mixer → spine theo pitch → súng → IK tay → ngón
+      // Skinned character. Required order: mixer -> spine by pitch -> gun -> hand IK -> fingers
       const sk = rig.skel
       if (dead && !sk.isDead) { sk.die(takeKill(p.id)); dropGun(a) }
       else if (!dead && sk.isDead) { sk.revive(); clearDrop(a) }
       a.wasDead = dead
       const zombie = (p.flags & NetFlag.Zombie) !== 0
-      sk.setZombie(zombie)   // clip z_*: chưa tải xong thì giữ animation người, frame sau thử lại
+      sk.setZombie(zombie)   // z_* clips: until loaded keep the human animation, retry next frame
       if (zombie && !a.zfx) {
         a.zfx = makeZombieFx(scene, rig, p.id, zombieOpts(p.ztype), zombieSize(p.ztype, p.zscale), 1, a.zfile ? zfileCache.get(p.id)?.scale ?? 1 : 1)
         a.deadAt = 0; hideGun(a)
-        // Người vừa bị lây (bất tử + đứng yên trong lúc biến hình): gào
+        // Player just infected (invulnerable + standing still while transforming): scream
         if ((p.flags & NetFlag.Invuln) && !ZOMBIE_TYPES[p.ztype ?? '']) sk.playZombie('scream', INFECTION.transformMs / 1000)
       } else if (!zombie && a.zfx) { removeZombieFx(scene, a.zfx, rig); a.zfx = null }
       const frame = { dt, x: p.pos[0], z: p.pos[2], yaw: p.yaw, grounded, crouching, sliding, pitch: p.pitch ?? 0, pistol: zombie, dead }
-      if (zombie && !dead) {   // zombie không cầm súng: tay buông theo animation
+      if (zombie && !dead) {   // zombies hold no gun: arms hang per the animation
         sk.animate(frame)
         sk.placeAim()
         sk.setOpacity((p.flags & NetFlag.Invuln) ? 0.55 + 0.3 * Math.sin(nowMs / 70) : 1)
         hideGun(a)
       } else if (!dead) {
-        if (a.gun) a.gun.visible = true   // vừa hồi phục từ zombie về người
+        if (a.gun) a.gun.visible = true   // just recovered from zombie back to human
         dressGun(a, weapon)
         const two = weaponPose(weapon).third.hold === 'twoHand' && !!a.gun
         setHold(a, two)
@@ -502,14 +504,14 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
         sk.placeAim()
         if (two) solveSkelArms(a, weapon, p.adsT ?? 0)
         else sk.refreshGunAnchor()
-        if (weapon === GRENADE_ID && a.gun) nadeHand(a)
+        if (isGrenadeId(weapon) && a.gun) nadeHand(a)
         sk.setOpacity((p.flags & NetFlag.Invuln) ? 0.55 + 0.3 * Math.sin(nowMs / 70) : 1)
       } else {
         sk.animate(frame)
-        if (sk.ikWeight > 0 && a.twoHand) { sk.placeAim(); solveSkelArms(a, weapon, 0) }   // IK mờ dần về tư thế animation
+        if (sk.ikWeight > 0 && a.twoHand) { sk.placeAim(); solveSkelArms(a, weapon, 0) }   // IK fades out toward the animation pose
       }
       rig.root.visible = sk.corpseVisible
-      if (a.zfx && dead) {   // xác zombie nằm 4s rồi chìm xuống đất (không mờ, đỡ tốn shader)
+      if (a.zfx && dead) {   // the zombie corpse lies for 4s then sinks into the ground (no fade, saves shader cost)
         if (a.deadAt === 0) a.deadAt = nowMs
         const sink = Math.min(1, Math.max(0, (nowMs - a.deadAt - DEFENSE.corpseMs) / DEFENSE.corpseSinkMs))
         rig.root.position.y = p.pos[1] - sink * 2.2
@@ -520,7 +522,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
       dressLabel(p.id, a, h)
       return
     }
-    if (dead && !a.wasDead) deathFx.burst(rig)   // vừa chết: các khối tách ra
+    if (dead && !a.wasDead) deathFx.burst(rig)   // just died: the boxes break apart
     a.wasDead = dead
     rig.root.visible = !dead
     if (!dead) {
@@ -529,8 +531,8 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
         grounded, crouching, sliding,
         pitch: p.pitch ?? 0, crouchDrop: standHeight - crouchHeight,
       })
-    } else a.anim.hasLast = false   // hồi sinh xa chỗ chết: không tính thành chạy
-    // Bất tử: nhấp nháy mờ
+    } else a.anim.hasLast = false   // respawned far from where it died: not counted as running
+    // Invulnerable: faint flashing
     const op = (p.flags & NetFlag.Invuln) ? 0.55 + 0.3 * Math.sin(nowMs / 70) : 1
     if (rig.mats[0]!.opacity !== op || op !== 1) for (const m of rig.mats) m.opacity = op
     dressGun(a, weapon)
@@ -546,8 +548,10 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
   }
 
   return {
-    // Vẽ đúng danh sách người chơi trong snapshot; ai không còn trong danh sách thì xoá.
-    // Không vẽ chính mình: camera nằm trong thân, lệch vài frame (jitter) là lộ ra.
+    /** Loaded gun template (shared geometry/materials, clone it): for guns lying on the floor. null until loaded. */
+    gunModel(id: number): THREE.Object3D | null { return gunModels.get(id) ?? null },
+    // Draw exactly the players in the snapshot; anyone no longer listed is removed.
+    // Do not draw yourself: the camera is inside the body and a few frames of jitter would show it.
     update(players: RenderPlayer[], selfId = -1) {
       frame++
       const now = performance.now()
@@ -555,7 +559,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
       lastNow = now
       if (!zombiesRequested && info?.zombieMode?.()) { zombiesRequested = true; requestZombieModels(ZOMBIE_LOOK.models.map(m => m.file)) }
       const want = info?.characterSet?.() ?? ''
-      if (want !== setId) {   // đổi bộ nhân vật (vào phòng khác): dựng lại tất cả
+      if (want !== setId) {   // character set changed (joined another room): rebuild everything
         setId = want
         requestSkin(setId)
         for (const [id, a] of actors) dropActor(id, a)
@@ -576,7 +580,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
       for (const a of actors.values()) if (a.drop) updateDrop(a, dt)
       deathFx.update(dt)
     },
-    // GrenadeAnim của người khác: rút chốt (tay trái chạm vòng chốt), ném (clip thân trên), huỷ
+    // Other players' GrenadeAnim: pull the pin (left hand touches the pin ring), throw (upper-body clip), cancel
     grenadeAnim(id: number, phase: 'pulling' | 'throw' | 'cancel', mode: 'strong' | 'lob' = 'strong') {
       const a = actors.get(id); const sk = a?.rig.skel
       if (!a || !sk) return
@@ -584,16 +588,16 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
       else if (phase === 'throw') { sk.playThrow(mode); a.thrown = true; a.pulling = false }
       else { sk.cancelThrow(); a.pulling = false; a.pinOff = false }
     },
-    /** Độ trễ (ms) từ lúc nhận GrenadeSpawn tới lúc quả rời tay trong animation của người ném; 0 nếu không có animation */
+    /** Delay (ms) from receiving GrenadeSpawn to the grenade leaving the hand in the thrower's animation; 0 if there is no animation */
     grenadeReleaseDelayMs(id: number, mode: 'strong' | 'lob'): number { return actors.get(id)?.rig.skel?.releaseDelayMs(mode) ?? 0 },
-    // Tin Kill: chọn kiểu chết (headshot → death_2) cho nhân vật có xương; đến trước hay sau snapshot chết đều dùng được
+    // Kill message: choose the death style (headshot -> death_2) for skinned characters; usable whether it arrives before or after the death snapshot
     markKill(victimId: number, headshot: boolean) {
       killMemory.set(victimId, { headshot, t: performance.now() })
       actors.get(victimId)?.rig.skel?.setDeathVariant(headshot)
     },
-    // Zombie cào (ShotFx của vuốt): clip thân trên
+    // Zombie claw (the claw's ShotFx): upper-body clip
     zombieAttack(id: number, heavy: boolean) { actors.get(id)?.rig.skel?.playZombie(heavy ? 'heavy' : 'light') },
-    // Lửa đầu nòng khi nhận ShotFx của người này
+    // Muzzle flash when receiving this player's ShotFx
     muzzleFlash(id: number) {
       const a = actors.get(id)
       if (a) a.flashUntil = performance.now() + FLASH_MS

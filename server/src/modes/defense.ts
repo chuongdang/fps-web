@@ -1,11 +1,11 @@
-// Thủ Thành (plan 17): cả phòng cùng phe người giữ căn cứ A chống zombie NPC kéo tới theo đợt (waves.json), đợt cuối có boss.
+// Defense (plan 17): the whole room is one human team holding base A against NPC zombies that arrive in waves (waves.json); the last wave has a boss.
 //
-// WARMUP ─(có người)→ PREP (prepSec) ─→ WAVE n ─→ INTERMISSION ─→ WAVE n+1 … ─→ WAVE N (boss) ─→ VICTORY
-//                                                      WAVE (mọi người đều chết/gục cùng lúc) ─→ DEFEAT
-// VICTORY / DEFEAT ─(endSec)→ WARMUP (vào lại PREP ngay nếu còn người). MatchPhase: PREP/INTERMISSION = Prep, WAVE = Playing, VICTORY/DEFEAT = Ended.
-// Zombie là Player NPC (room.addNpc) dùng chung stepPlayer/stepMovement/resolveShot; xem zombies/npc.ts.
+// WARMUP ─(players present)→ PREP (prepSec) ─→ WAVE n ─→ INTERMISSION ─→ WAVE n+1 … ─→ WAVE N (boss) ─→ VICTORY
+//                                                      WAVE (everyone dead/downed at once) ─→ DEFEAT
+// VICTORY / DEFEAT ─(endSec)→ WARMUP (goes straight back to PREP if players remain). MatchPhase: PREP/INTERMISSION = Prep, WAVE = Playing, VICTORY/DEFEAT = Ended.
+// Zombies are NPC Players (room.addNpc) sharing stepPlayer/stepMovement/resolveShot; see zombies/npc.ts.
 import {
-  DEFENSE, ECONOMY_DEFENSE, downedSpeedMul, MatchPhase, MsgType, WAVES, ZOMBIE_TYPES, addMoney, scaledCount, waveClearBonus, zombieStatsFor, inBuyZone,
+  type RoomStatus, DEFENSE, ECONOMY_DEFENSE, downedSpeedMul, MatchPhase, MsgType, WAVES, ZOMBIE_TYPES, addMoney, scaledCount, waveClearBonus, zombieStatsFor, inBuyZone,
   type DefenseEndMsg, type DefensePhase, type DefenseSettings, type MatchStateMsg, type ScoreboardRow, type SpawnLane, type TeamId, type Vec3,
 } from '@fps/shared'
 import type { Player, Room } from '../room'
@@ -63,7 +63,7 @@ export class DefenseMode implements MatchMode {
     for (const p of room.players.values()) if (p.npc && p.alive) n++
     return n
   }
-  /** Số zombie còn phải hạ trong đợt: đang sống + còn chờ sinh */
+  /** Zombies still to kill in the wave: alive + waiting to spawn */
   zombiesLeft(room: Room): number { return this.aliveZombies(room) + this.queue.length }
 
   private st(p: Player): Stat {
@@ -77,7 +77,7 @@ export class DefenseMode implements MatchMode {
     return n
   }
 
-  // ── Máy trạng thái ────────────────────────────────────────────────────────────
+  // ── State machine ────────────────────────────────────────────────────────────
   tick(room: Room, now: number): void {
     this.room = room
     const humans = this.humans(room).length
@@ -123,7 +123,7 @@ export class DefenseMode implements MatchMode {
     this.sendState(room)
   }
 
-  // Đầu trận: tiền/súng về ban đầu, mọi người ở căn cứ A
+  // Match start: money/weapons reset, everyone in base A
   private startPrep(room: Room, now: number): void {
     this.clearZombies(room)
     this.stats.clear()
@@ -166,13 +166,13 @@ export class DefenseMode implements MatchMode {
   }
 
   private waveTick(room: Room, now: number): void {
-    // sinh zombie đến hạn (tạm dừng khi đã đủ maxAlive)
+    // spawn zombies that are due (paused once maxAlive is reached)
     let alive = this.aliveZombies(room)
     while (this.queue.length > 0 && this.queue[0]!.at <= now && alive < WAVES.maxAlive) {
       const q = this.queue.shift()!
       if (this.spawnLane(room, q.type, q.lanes)) alive++
     }
-    // rơi khỏi map: bỏ, không tính tiền
+    // fell off the map: discard, no money awarded
     for (const z of this.zombies(room)) if (z.alive && z.state.pos[1] < DEFENSE.voidKillY) room.removeNpc(z.id)
     this.tickDowned(room, now)
     if (this.humans(room).length > 0 && this.standing(room) === 0) { this.endGame(room, now, 'defeat'); return }
@@ -187,7 +187,7 @@ export class DefenseMode implements MatchMode {
       p.transport.send({ t: MsgType.WaveClear, wave: this.wave, bonus })
     }
     if (this.wave >= this.waves) { this.endGame(room, now, 'victory'); return }
-    // nghỉ: hồi sinh và cứu mọi đồng đội, máu đầy
+    // intermission: respawn and rescue every teammate, full health
     this.kind = 'intermission'
     for (const p of this.humans(room)) {
       if (!p.alive) room.respawn(p, room.pickSpawn(p.team, p), true)
@@ -231,7 +231,7 @@ export class DefenseMode implements MatchMode {
     return lanes
   }
 
-  /** Chọn điểm sinh không nằm trong tầm nhìn người chơi nào (raycast); không được thì lấy điểm cuối cùng thử */
+  /** Pick a spawn point outside every player's line of sight (raycast); if none works, use the last one tried */
   private pickSpawnPoint(room: Room, lanes: SpawnLane[]): Vec3 | null {
     const nav = room.nav
     const humans = this.ctx.humans(room)
@@ -286,7 +286,7 @@ export class DefenseMode implements MatchMode {
     for (const z of this.zombies(room)) {
       if (!z.alive && !this.corpses.some(c => c.id === z.id)) this.corpses.push({ id: z.id, at: now })
     }
-    // xác cũ hết hạn chìm → xoá; quá maxCorpses thì xoá xác cũ nhất trước
+    // expired corpses sink -> remove; beyond maxCorpses remove the oldest first
     this.corpses = this.corpses.filter(c => room.players.has(c.id))
     while (this.corpses.length > DEFENSE.maxCorpses) room.removeNpc(this.corpses.shift()!.id)
     this.corpses = this.corpses.filter(c => {
@@ -296,10 +296,10 @@ export class DefenseMode implements MatchMode {
     })
   }
 
-  // ── Gục và cứu (T.6) ──────────────────────────────────────────────────────────
+  // ── Downed and rescue (T.6) ──────────────────────────────────────────────────────────
   onLethal(room: Room, p: Player): boolean {
-    if (p.npc || this.kind !== 'wave' || p.downed || p.downUntil < 0) return false   // downUntil < 0: đã chảy máu tới chết
-    // Chỉ gục khi còn đồng đội đứng được để cứu; một mình / đồng đội đã chết hoặc đang gục: chết luôn (thua ngay)
+    if (p.npc || this.kind !== 'wave' || p.downed || p.downUntil < 0) return false   // downUntil < 0: already bled out
+    // Only go downed if a standing teammate remains to rescue; alone / teammates dead or downed: die outright (immediate defeat)
     let rescuers = 0
     for (const o of this.humans(room)) if (o !== p && o.alive && !o.downed) rescuers++
     if (rescuers === 0) return false
@@ -317,8 +317,8 @@ export class DefenseMode implements MatchMode {
     const humans = this.humans(room)
     for (const d of humans) {
       if (!d.downed) continue
-      if (now >= d.downUntil) { d.downed = false; d.speedMult = 1; d.hp = 0; d.killerId = d.id; d.downUntil = -1; continue }   // chết hẳn
-      // cứu: đồng đội đứng cạnh giữ E
+      if (now >= d.downUntil) { d.downed = false; d.speedMult = 1; d.hp = 0; d.killerId = d.id; d.downUntil = -1; continue }   // dead for good
+      // rescue: a teammate standing next to them holds E
       let rescuer: Player | null = null
       for (const r of humans) {
         if (r === d || !r.alive || r.downed || !r.lastCmd) continue
@@ -327,7 +327,7 @@ export class DefenseMode implements MatchMode {
         rescuer = r; break
       }
       if (!rescuer) { d.reviveProgressMs = 0; continue }
-      if (now - rescuer.lastHurtAt < 100) { d.reviveProgressMs = 0; continue }   // bị đánh trúng thì phải giữ lại từ đầu
+      if (now - rescuer.lastHurtAt < 100) { d.reviveProgressMs = 0; continue }   // if hit, the rescuer must restart the hold
       d.reviveProgressMs += 1000 / 60
       if (d.reviveProgressMs >= DEFENSE.down.reviveMs) {
         d.downed = false; d.speedMult = 1; d.hp = DEFENSE.down.reviveHp; d.reviveProgressMs = 0
@@ -336,7 +336,7 @@ export class DefenseMode implements MatchMode {
     }
   }
 
-  // ── Móc của MatchMode ─────────────────────────────────────────────────────────
+  // ── MatchMode hooks ─────────────────────────────────────────────────────────
   onPlayerJoin(room: Room, p: Player): void {
     this.room = room
     this.st(p)
@@ -362,11 +362,11 @@ export class DefenseMode implements MatchMode {
     return 0
   }
 
-  afterDeaths(): void { /* không đổi đội */ }
+  afterDeaths(): void { /* no team change */ }
 
   respawnDelayMs(room: Room, p?: Player): number | null {
     if (p?.npc) return null
-    if (this.kind === 'wave') return null   // chết trong đợt: chờ tới giờ nghỉ (hồi sinh trong clearWave)
+    if (this.kind === 'wave') return null   // died during a wave: wait for intermission (respawn happens in clearWave)
     return 0
   }
 
@@ -379,9 +379,9 @@ export class DefenseMode implements MatchMode {
     row.zk = s.kills; row.dmg = Math.round(s.damage); row.rev = s.revives; row.role = 'human'
   }
 
-  statusText(room: Room): string {
-    if (this.kind === 'waiting') return 'Đang chờ'
-    return `Đợt ${Math.max(1, this.wave)}/${this.waves} · ${this.humans(room).length} người`
+  roomStatus(room: Room): RoomStatus {
+    if (this.kind === 'waiting') return { code: 'waiting' }
+    return { code: 'wave', wave: Math.max(1, this.wave), maxWaves: this.waves, players: this.humans(room).length }
   }
 
   stateMessage(room: Room): MatchStateMsg {
@@ -394,7 +394,7 @@ export class DefenseMode implements MatchMode {
     }
   }
 
-  // ── Lệnh debug ────────────────────────────────────────────────────────────────
+  // ── Debug commands ────────────────────────────────────────────────────────────────
   devSetWave(room: Room, n: number): boolean {
     const w = Math.max(1, Math.min(this.waves, Math.round(n)))
     this.clearZombies(room)

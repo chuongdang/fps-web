@@ -1,11 +1,11 @@
-// Thêm / xoá bot trong phòng (plan 15, B.2). Bot là Player bình thường có transport rỗng chuyển tin cho BotController.
+// Add / remove bots in a room (plan 15, B.2). A bot is a normal Player whose empty transport forwards messages to the BotController.
 import { MsgType, defaultMovement, type BotDifficulty, type OfflineBotInfo, type TeamId } from '@fps/shared'
 import { createWorld } from '@fps/shared/physics/world'
 import type { Player, Room } from '../room'
 import { BotController } from './controller'
 import { pickBotName } from './names'
 
-/** Thêm bot vào `team` (hoặc đội ít người hơn nếu 'auto'). Trả null khi phòng đầy. */
+/** Add a bot to `team` (or to the smaller team if 'auto'). Returns null when the room is full. */
 export function addBot(room: Room, difficulty: BotDifficulty, team: TeamId | 'auto', rng: () => number = Math.random): Player | null {
   const ctl = new BotController(difficulty, rng)
   const name = pickBotName([...room.players.values()].map(p => p.name), difficulty, rng)

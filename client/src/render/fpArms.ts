@@ -5,8 +5,8 @@ import { poses, type Vec3 } from './poses'
 import { forcedTeam, type SkinId } from './characterRig'
 import { SkeletonArm, type FingerBones } from './skeletonArm'
 
-// Tay viewmodel bằng chính hai cánh tay của model nhân vật (plan 11, C.6): <team>_fparms.glb chỉ có bắp tay → bàn tay,
-// vẫn đủ xương Mixamo nên dùng lại SkeletonArm (IK + ngón) y như góc 3. Mọi toạ độ trong không gian camera của viewmodel.
+// Viewmodel arms built from the character model's own two arms (plan 11, C.6): <team>_fparms.glb only has upper arm -> hand,
+// but still has the full Mixamo bones, so SkeletonArm (IK + fingers) is reused exactly as in third person. All coordinates are in the viewmodel camera space.
 const FILES: Record<SkinId, Record<TeamId, string>> = {
   classic: { A: '/models/characters/cop_fparms.glb', B: '/models/characters/robber_fparms.glb' },
   saber: { A: '/models/characters/saber_ct_fparms.glb', B: '/models/characters/saber_t_fparms.glb' },
@@ -21,7 +21,7 @@ const _pole = new THREE.Vector3(), _sh = new THREE.Vector3()
 
 export class FpArms {
   readonly root = new THREE.Group()
-  sets = new Map<string, Set>()   // khoá `${skin}:${team}`
+  sets = new Map<string, Set>()   // key `${skin}:${team}`
   private team: TeamId = forcedTeam() ?? 'A'
   private skin: SkinId = 'saber'
   private requested = new Set<SkinId>()
@@ -29,7 +29,7 @@ export class FpArms {
 
   constructor() {
     this.root.visible = false
-    if (import.meta.env?.DEV) (globalThis as { __fpArms?: FpArms }).__fpArms = this   // debug: script kiểm tra từ trình duyệt
+    if (import.meta.env?.DEV) (globalThis as { __fpArms?: FpArms }).__fpArms = this   // debug: for check scripts run from the browser
   }
 
   load(skin: SkinId): void {
@@ -39,7 +39,7 @@ export class FpArms {
     for (const team of ['A', 'B'] as TeamId[]) {
       loader.loadAsync(FILES[skin][team]).then(gltf => this.add(skin, team, gltf.scene)).catch(err => {
         this.failed = true
-        console.warn(`fpArms: không load được ${FILES[skin][team]}, dùng tay khối`, err)
+        console.warn(`fpArms: failed to load ${FILES[skin][team]}, using blocky arms`, err)
       })
     }
   }
@@ -47,7 +47,7 @@ export class FpArms {
   private add(skin: SkinId, team: TeamId, scene: THREE.Object3D): void {
     const obj = new THREE.Group()
     const model = scene
-    model.rotation.y = Math.PI   // model nhìn +Z; camera viewmodel nhìn −Z
+    model.rotation.y = Math.PI   // the model faces +Z; the viewmodel camera faces −Z
     obj.add(model)
     const mats: THREE.Material[] = []
     model.traverse(o => {
@@ -58,8 +58,8 @@ export class FpArms {
       mats.push(o.material)
     })
     obj.visible = false
-    // Đo xương (độ dài, khung bàn tay, trung điểm vai) phải làm khi root ở trạng thái gốc: model của phe thứ hai có thể tải xong
-    // sau khi place() đã xoay/scale root cho phe đầu → đo lệch → tay phình to, khuỷu chĩa lên (thứ tự tải đổi theo cache trình duyệt)
+    // Bone measurements (lengths, hand frame, shoulder midpoint) must be taken while root is in its original state: the second team's model may finish loading
+    // after place() has already rotated/scaled root for the first team -> wrong measurements -> bloated arms, elbows pointing up (load order varies with the browser cache)
     const keepP = this.root.position.clone(), keepQ = this.root.quaternion.clone(), keepS = this.root.scale.clone()
     this.root.position.set(0, 0, 0); this.root.quaternion.identity(); this.root.scale.set(1, 1, 1)
     this.root.add(obj)
@@ -77,12 +77,12 @@ export class FpArms {
     this.root.updateMatrixWorld(true)
   }
 
-  /** Dùng được khi model của đội hiện tại đã load; chưa thì viewmodel vẫn vẽ tay khối. */
+  /** Usable once the current team's model has loaded; until then the viewmodel still draws blocky arms. */
   get ready(): boolean { return this.sets.has(this.key) }
   private get key(): string { return `${this.skin}:${this.team}` }
   get hasFailed(): boolean { return this.failed }
 
-  /** Đổi skin tay (theo bộ nhân vật của phòng) và tải nếu chưa có */
+  /** Switch the arm skin (per the room's character set) and load it if missing */
   setSkin(skin: SkinId): void {
     if (skin === this.skin && this.requested.has(skin)) return
     this.skin = skin
@@ -101,22 +101,22 @@ export class FpArms {
     for (const [k, set] of this.sets) set.obj.visible = v && k === this.key && !!s
   }
 
-  /** Đặt cả hai cánh tay: trung điểm hai vai nằm ở armsRootOffset, xoay armsRootRotDeg, scale armsScale. */
+  /** Place both arms: the midpoint of the two shoulders sits at armsRootOffset, rotated by armsRootRotDeg, scaled by armsScale. */
   place(): void {
     const s = this.sets.get(this.key)
     if (!s) return
     const f = poses.first
     this.root.scale.setScalar(f.armsScale)
     this.root.quaternion.setFromEuler(_e.set(f.armsRootRotDeg[0] * DEG, f.armsRootRotDeg[1] * DEG, f.armsRootRotDeg[2] * DEG, 'XYZ'))
-    // trung điểm vai trong hệ root (model xoay π quanh Y) rồi nhân scale + xoay, lùi root cho trùng offset
+    // shoulder midpoint in root space (model rotated π about Y), then apply scale + rotation, and shift root back so it matches the offset
     _v.set(-s.mid.x, s.mid.y, -s.mid.z).multiplyScalar(f.armsScale).applyQuaternion(this.root.quaternion)
     this.root.position.set(f.armsRootOffset[0] - _v.x, f.armsRootOffset[1] - _v.y, f.armsRootOffset[2] - _v.z)
     this.root.updateMatrixWorld(true)
   }
 
   /**
-   * Giải IK sau khi súng đã đặt. gunQuat = hướng súng trong không gian camera; targetL null = tay trái không giải
-   * (súng 1 tay): tay đó giữ tư thế T-pose nên được ẩn.
+   * Solve IK after the gun has been placed. gunQuat = gun orientation in camera space; targetL null = left arm is not solved
+   * (one-handed gun): that arm stays in T-pose, so it is hidden.
    */
   solve(targetR: THREE.Vector3, targetL: THREE.Vector3 | null, gunQuat: THREE.Quaternion, rotDegR?: Vec3, rotDegL?: Vec3): void {
     const s = this.sets.get(this.key)
@@ -124,9 +124,9 @@ export class FpArms {
     const f = poses.first
     for (const [arm, target, pole, rot] of [[s.armR, targetR, f.armsPoleR, rotDegR], [s.armL, targetL, f.armsPoleL, rotDegL]] as const) {
       if (!target) continue
-      // lựu đạn: mỗi tay có thể xoay riêng so với hướng quả (poses: first.grenade.handRotDegR/L)
+      // grenade: each hand can rotate independently relative to the grenade direction (poses: first.grenade.handRotDegR/L)
       const q = rot ? _hq.copy(gunQuat).multiply(_hq2.setFromEuler(_he.set(rot[0] * DEG, rot[1] * DEG, rot[2] * DEG, 'XYZ'))) : gunQuat
-      arm.resetPose()   // không có mixer: tự reset để IK/ngón không cộng dồn qua các frame
+      arm.resetPose()   // no mixer: reset manually so IK/fingers do not accumulate across frames
       arm.slideToReach(target, f.armsMaxExtension)
       arm.upper.getWorldPosition(_sh)
       _pole.set(pole[0], pole[1], pole[2]).add(_sh)
@@ -135,13 +135,13 @@ export class FpArms {
     }
   }
 
-  /** Bàn tay trái (để băng đạn đi theo khi nạp) */
+  /** Left hand (so the magazine follows it while reloading) */
   leftHand(): THREE.Object3D | null { return this.sets.get(this.key)?.armL.hand ?? null }
 
-  /** Ẩn tay trái khi súng 1 tay (xương T-pose duỗi ngang trông rất lạ) */
+  /** Hide the left arm for one-handed guns (a T-pose bone stretched sideways looks very odd) */
   setLeftVisible(v: boolean): void {
     const s = this.sets.get(this.key)
     if (!s) return
-    s.armL.upper.scale.setScalar(v ? 1 : 1e-4)   // thu nhỏ xương → mesh tay trái co lại thành điểm
+    s.armL.upper.scale.setScalar(v ? 1 : 1e-4)   // shrink the bone -> the left arm mesh collapses to a point
   }
 }

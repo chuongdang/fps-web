@@ -18,7 +18,7 @@ describe('withNetsim', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('trễ mỗi chiều latencyMs', () => {
+  it('each direction is delayed by latencyMs', () => {
     const { t, sent, emit } = fakeInner()
     const ns = withNetsim(t, { latencyMs: 80, jitterMs: 0, now: () => Date.now() })
     const got: AnyMsg[] = []
@@ -33,9 +33,9 @@ describe('withNetsim', () => {
     expect(got.length).toBe(1)
   })
 
-  it('jitter lớn vẫn giữ đúng thứ tự', () => {
+  it('large jitter still keeps the order', () => {
     const { t, sent, emit } = fakeInner()
-    // random xen kẽ 0 và 1 → trễ xen kẽ nhỏ/lớn nhất
+    // random alternates 0 and 1 → delay alternates smallest/largest
     let i = 0
     const random = () => (i++ % 2 === 0 ? 1 : 0)
     const ns = withNetsim(t, { latencyMs: 50, jitterMs: 40, now: () => Date.now(), random })

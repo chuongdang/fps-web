@@ -4,7 +4,7 @@ import { ECONOMY, ECONOMY_ELIM, GRENADE, roundIncome, addMoney, applyBuy, consum
 const owned = (l: Loadout, slot: number) => l.slots[slot]
 
 describe('economy (H.2)', () => {
-  it('bộ mặc định: Cớm Dao+Colt+M16, Cướp Dao+Rulô+AK47; ô vừa trống; súng cấp sẵn bán lại $0', () => {
+  it('default loadout: Cops Knife+Colt+M16, Terrorists Knife+Revolver+AK47; medium slot empty; starting guns resell for $0', () => {
     const a = defaultLoadout('A'), b = defaultLoadout('B')
     expect(a.slots.map(w => w?.key ?? null)).toEqual(['knife', 'colt', null, 'm16', null])
     expect(b.slots.map(w => w?.key ?? null)).toEqual(['knife', 'rulo', null, 'ak47', null])
@@ -12,7 +12,7 @@ describe('economy (H.2)', () => {
     expect(loadoutWeaponIds(a)).toEqual([weaponByKey('knife')!.id, weaponByKey('colt')!.id, -1, weaponByKey('m16')!.id, -1])
   })
 
-  it('Cớm $2000 mua SMG: còn $750, ô vừa = SMG (paid 1250); mua tiếp Shotgun: refund 1000, net 100, còn $650', () => {
+  it('Cop with $2000 buys SMG: $750 left, medium slot = SMG (paid 1250); then buys Shotgun: refund 1000, net 100, $650 left', () => {
     const l0 = defaultLoadout('A')
     const r1 = applyBuy(2000, l0, 'smg')!
     expect(r1.money).toBe(750)
@@ -24,31 +24,31 @@ describe('economy (H.2)', () => {
     expect(owned(r2.loadout, 2)).toEqual({ key: 'shotgun', paid: 1100 })
   })
 
-  it('không sửa object đầu vào', () => {
+  it('does not mutate the input object', () => {
     const l0 = defaultLoadout('A')
     applyBuy(2000, l0, 'smg')
     expect(owned(l0, 2)).toBeNull()
   })
 
-  it('Cớm $2000 mua Sniper: not_enough_money (M16 cấp sẵn bán được $0, net 4750)', () => {
+  it('Cop with $2000 buys Sniper: not_enough_money (starting M16 resells for $0, net 4750)', () => {
     expect(quoteBuy(2000, defaultLoadout('A'), 'sniper')).toMatchObject({ ok: false, reason: 'not_enough_money', net: 4750, refund: 0 })
     expect(applyBuy(2000, defaultLoadout('A'), 'sniper')).toBeNull()
   })
 
-  it('Cướp mua AK47 khi đang có AK47: already_owned; mua dao: not_buyable; key lạ: not_buyable', () => {
+  it('Terrorist buys AK47 while owning AK47: already_owned; buys knife: not_buyable; unknown key: not_buyable', () => {
     expect(quoteBuy(2000, defaultLoadout('B'), 'ak47')).toMatchObject({ ok: false, reason: 'already_owned' })
     expect(quoteBuy(2000, defaultLoadout('B'), 'knife')).toMatchObject({ ok: false, reason: 'not_buyable' })
     expect(quoteBuy(2000, defaultLoadout('B'), 'rpg')).toMatchObject({ ok: false, reason: 'not_buyable' })
   })
 
-  it('$15800 + Sniper (paid 4750 → refund 3800), mua M16 ($3100): net −700, tiền kẹp ở $16000', () => {
+  it('$15800 + Sniper (paid 4750 → refund 3800), buys M16 ($3100): net −700, money clamped at $16000', () => {
     const l: Loadout = { slots: [{ key: 'knife', paid: 0 }, { key: 'colt', paid: 0 }, null, { key: 'sniper', paid: 4750 }] }
     const q = quoteBuy(15800, l, 'm16')
     expect(q).toMatchObject({ ok: true, refund: 3800, net: -700 })
     expect(applyBuy(15800, l, 'm16')!.money).toBe(ECONOMY.maxMoney)
   })
 
-  it('đủ tiền khi tính cả tiền bán súng cũ', () => {
+  it('enough money when counting the resale of the old gun', () => {
     const l: Loadout = { slots: [{ key: 'knife', paid: 0 }, { key: 'colt', paid: 0 }, { key: 'smg', paid: 1250 }, { key: 'm16', paid: 0 }] }
     expect(quoteBuy(100, l, 'shotgun').ok).toBe(true)    // net 100
     expect(quoteBuy(99, l, 'shotgun')).toMatchObject({ ok: false, reason: 'not_enough_money' })
@@ -62,17 +62,17 @@ describe('economy (H.2)', () => {
   })
 })
 
-describe('lựu đạn M67 (G.1)', () => {
+describe('M67 grenade (G.1)', () => {
   const m67 = () => weaponByKey('m67')!
-  it('m67: ô 5 (index 4), $300, mua được, không phải súng', () => {
+  it('m67: slot 5 (index 4), $300, buyable, not a gun', () => {
     expect(m67().category).toBe('grenade'); expect(m67().price).toBe(GRENADE.price); expect(m67().buyable).toBe(true)
     expect(defaultLoadout('A').slots).toHaveLength(5)
     expect(defaultLoadout('A').slots[4]).toBeNull(); expect(defaultLoadout('B').slots[4]).toBeNull()
   })
 
-  it('$2000 mua lựu đạn: $1700, count 1; mua tiếp: $1400, count 2; lần 3: max_carry', () => {
+  it('$2000 buys a grenade: $1700, count 1; buys another: $1400, count 2; 3rd time: max_carry', () => {
     const r1 = applyBuy(2000, defaultLoadout('A'), 'm67')!
-    expect(r1.money).toBe(1700); expect(r1.loadout.slots[4]).toEqual({ key: 'm67', paid: 300, count: 1 })
+    expect(r1.money).toBe(1700); expect(r1.loadout.slots[4]).toEqual({ key: 'm67', paid: 300, count: 1, counts: { m67: 1 } })
     expect(grenadeCount(r1.loadout)).toBe(1)
     const r2 = applyBuy(r1.money, r1.loadout, 'm67')!
     expect(r2.money).toBe(1400); expect(grenadeCount(r2.loadout)).toBe(2)
@@ -81,7 +81,7 @@ describe('lựu đạn M67 (G.1)', () => {
     expect(applyBuy(r2.money, r2.loadout, 'm67')).toBeNull()
   })
 
-  it('không đủ tiền → not_enough_money; không bán lại (refund luôn 0, resale 0)', () => {
+  it('not enough money → not_enough_money; no resale (refund always 0, resale 0)', () => {
     const q = quoteBuy(299, defaultLoadout('A'), 'm67')
     expect(q.ok).toBe(false); if (!q.ok) expect(q.reason).toBe('not_enough_money')
     const r = applyBuy(2000, defaultLoadout('A'), 'm67')!
@@ -89,14 +89,14 @@ describe('lựu đạn M67 (G.1)', () => {
     const q2 = quoteBuy(2000, r.loadout, 'm67'); expect(q2.ok && q2.refund).toBe(0)
   })
 
-  it('mua lựu đạn không đụng tới 4 ô súng', () => {
+  it('buying a grenade does not touch the 4 gun slots', () => {
     const l0 = defaultLoadout('B')
     const r = applyBuy(2000, l0, 'm67')!
     expect(r.loadout.slots.slice(0, 4)).toEqual(l0.slots.slice(0, 4))
     expect(loadoutWeaponIds(r.loadout)).toEqual([weaponByKey('knife')!.id, weaponByKey('rulo')!.id, -1, weaponByKey('ak47')!.id, m67().id])
   })
 
-  it('consumeGrenade 2 lần → ô trống; không sửa đầu vào; hết rồi thì không đổi', () => {
+  it('consumeGrenade twice → slot empty; does not mutate the input; once empty it changes nothing', () => {
     const r2 = applyBuy(applyBuy(2000, defaultLoadout('A'), 'm67')!.money, applyBuy(2000, defaultLoadout('A'), 'm67')!.loadout, 'm67')!
     const a = consumeGrenade(r2.loadout)
     expect(grenadeCount(a)).toBe(1); expect(grenadeCount(r2.loadout)).toBe(2)
@@ -106,24 +106,24 @@ describe('lựu đạn M67 (G.1)', () => {
   })
 })
 
-describe('roundIncome (Sinh Tử)', () => {
+describe('roundIncome (Elimination)', () => {
   const lossRun = (n: number) => { let st = 0; const out: number[] = []; for (let i = 0; i < n; i++) { const r = roundIncome('loss', st); st = r.lossStreak; out.push(r.amount) } return out }
-  it('thua 1..6 ván liên tiếp: 1500, 1900, 2300, 2700, 3000, 3000', () => {
+  it('losing 1..6 rounds in a row: 1500, 1900, 2300, 2700, 3000, 3000', () => {
     expect(lossRun(6)).toEqual([1500, 1900, 2300, 2700, 3000, 3000])
   })
-  it('thua 2, thắng 1, thua 1: lần thua cuối nhận 1500', () => {
+  it('lose 2, win 1, lose 1: the last loss earns 1500', () => {
     let st = roundIncome('loss', 0).lossStreak
     st = roundIncome('loss', st).lossStreak
     const w = roundIncome('win', st)
     expect(w.amount).toBe(3000)
     expect(roundIncome('loss', w.lossStreak).amount).toBe(1500)
   })
-  it('hoà giữa chuỗi thua 2: nhận 1500, ván thua kế nhận 2300', () => {
+  it('draw in the middle of a 2-loss streak: earns 1500, the next lost round earns 2300', () => {
     const d = roundIncome('draw', 2)
     expect(d).toEqual({ amount: 1500, lossStreak: 2 })
     expect(roundIncome('loss', d.lossStreak).amount).toBe(2300)
   })
-  it('tiền không vượt 16000', () => {
+  it('money does not exceed 16000', () => {
     expect(addMoney(15000, 3000, ECONOMY_ELIM)).toBe(16000)
   })
 })

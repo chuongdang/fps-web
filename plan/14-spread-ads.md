@@ -1,39 +1,39 @@
-# 14 – Độ toé mới (theo tốc độ + bloom), tâm ngắm động, ngắm qua ống (tuỳ chọn)
+# 14 – New spread (speed-based + bloom), dynamic crosshair, aim down sights (optional)
 
-Vấn đề hiện tại: spread chỉ có 4 mức cứng (`stand/move/air/crouch`), tốc độ > 1 m/s là nhảy thẳng lên mức `move` → nhích nhẹ cũng toé như đang chạy hết tốc.
+Current problem: spread only has 4 hard levels (`stand/move/air/crouch`); once speed exceeds 1 m/s it jumps straight to the `move` level -> a slight nudge spreads as much as running at full speed.
 
-Mục tiêu:
-- Toé **tăng dần theo tốc độ**, đi chậm (≤ 3 m/s) gần như không bị phạt.
-- **Viên đầu chính xác**, xả liên tục toé dần (**bloom**), ngừng bắn thì hồi.
-- Trượt bắn chính xác như ngồi (thưởng chiêu trượt ra bắn).
-- Chuyển một phần "phạt" sang độ giật (kiểm soát được) thay vì toé ngẫu nhiên.
-- Tâm ngắm hiển thị **đúng** độ toé thật.
-- (Tuỳ chọn, phần ADS) chuột phải ngắm qua ống cho mọi súng.
+Goals:
+- Spread **grows gradually with speed**; walking slowly (<= 3 m/s) is almost unpenalized.
+- **First shot is accurate**, sustained fire spreads progressively (**bloom**), and bloom recovers once you stop firing.
+- Sliding shoots as accurately as crouching (rewards the slide-out-and-shoot move).
+- Shift part of the "penalty" into recoil (controllable) instead of random spread.
+- The crosshair displays the **true** spread.
+- (Optional, ADS part) right mouse button aims down sights for every gun.
 
-Thứ tự: S.1 → S.2 → S.3 → S.4 → S.5. Phần ADS (D.1 → D.3) làm sau, có thể bỏ qua.
+Order: S.1 → S.2 → S.3 → S.4 → S.5. The ADS part (D.1 → D.3) comes later and can be skipped.
 
 ---
 
-## Task S.1 – Mô hình spread mới (shared) ⚠️
+## Task S.1 – New spread model (shared) ⚠️
 
-### Trường mới trong `WeaponDef` (thay `spreadDeg` cũ)
+### New fields in `WeaponDef` (replacing the old `spreadDeg`)
 
 ```ts
 interface SpreadDef {
-  standDeg: number;       // đứng yên, không bloom
-  crouchDeg: number;      // ngồi hoặc đang trượt
-  moveDeg: number;        // cộng thêm khi chạy hết tốc (runSpeed)
-  accurateSpeed: number;  // m/s, dưới mức này không bị phạt di chuyển
-  airDeg: number;         // cộng thêm khi trên không (thay cho moveDeg)
+  standDeg: number;       // standing still, no bloom
+  crouchDeg: number;      // crouching or sliding
+  moveDeg: number;        // added when running at full speed (runSpeed)
+  accurateSpeed: number;  // m/s, below this speed there is no movement penalty
+  airDeg: number;         // added while airborne (replaces moveDeg)
   bloomPerShotDeg: number;
   bloomMaxDeg: number;
   bloomRecoverDegPerSec: number;
-  bloomRecoverDelayMs: number; // ngừng bắn bao lâu thì bloom mới bắt đầu hồi
+  bloomRecoverDelayMs: number; // how long after you stop firing before bloom starts to recover
 }
 interface WeaponDef { /* ... */ spread: SpreadDef; }
 ```
 
-Giá trị khởi điểm:
+Starting values:
 
 | key | standDeg | crouchDeg | moveDeg | accurateSpeed | airDeg | bloomPerShot | bloomMax | bloomRecover | recoverDelayMs |
 |---|---|---|---|---|---|---|---|---|---|
@@ -43,25 +43,25 @@ Giá trị khởi điểm:
 | shotgun | 0.0 | 0.0 | 0.6 | 3.0 | 2.0 | 0.0 | 0.0 | 0 | 0 |
 | colt | 0.25 | 0.15 | 0.6 | 3.0 | 2.0 | 0.40 | 1.6 | 5 | 250 |
 | rulo | 0.15 | 0.10 | 1.0 | 3.0 | 3.0 | 0.80 | 2.4 | 4 | 500 |
-| sniper | xem dưới | | | | | | | | |
+| sniper | see below | | | | | | | | |
 
-`recoverDelayMs` phải **lớn hơn khoảng cách giữa 2 phát** của súng tự động (AK 100ms, M16 85ms, SMG 70ms), nếu không bloom hồi kịp giữa 2 phát và xả liên tục không bao giờ toé thêm. Súng bán tự động đặt delay sao cho bấm nhanh hết cỡ vẫn tích bloom một chút.
+`recoverDelayMs` must be **greater than the interval between two shots** of automatic guns (AK 100ms, M16 85ms, SMG 70ms); otherwise bloom recovers between two shots and sustained fire never spreads any further. For semi-automatic guns, set the delay so that clicking as fast as possible still builds up a little bloom.
 
-- **Shotgun**: thêm `pelletConeDeg: 4.5` (hình nón cố định của các viên chì, không đổi theo di chuyển). Toé di chuyển ở bảng trên **dịch tâm** của cả chùm, không làm chùm to ra.
-- **Sniper**: giữ cơ chế scope của task H.1: ngắm → `scope.spreadDeg` (0.05) + `moveDeg 3.0` theo tốc độ + `airDeg 10`; không ngắm → `unscopedSpreadDeg` (8) cố định. Không bloom (bắn 1 phát lại kéo khoá nòng).
-- **Dao, lựu đạn**: không có `spread`.
+- **Shotgun**: add `pelletConeDeg: 4.5` (a fixed cone for the pellets, not changed by movement). The movement spread in the table above **shifts the center** of the whole pattern; it does not make the pattern bigger.
+- **Sniper**: keep the scope mechanic from task H.1: aiming -> `scope.spreadDeg` (0.05) + `moveDeg 3.0` by speed + `airDeg 10`; not aiming -> fixed `unscopedSpreadDeg` (8). No bloom (each shot is followed by working the bolt).
+- **Knife, grenades**: no `spread`.
 
-### Trạng thái bloom trong `WeaponState`
+### Bloom state in `WeaponState`
 
 ```ts
 interface WeaponState {
   // ...
-  bloomDeg: number;       // giá trị bloom ngay sau phát bắn gần nhất
-  lastShotMs: number;     // thời điểm mô phỏng của phát gần nhất (từ seq, như task 4.1)
+  bloomDeg: number;       // bloom value right after the most recent shot
+  lastShotMs: number;     // simulation time of the most recent shot (from seq, as in task 4.1)
 }
 ```
 
-### Hàm tính (`shared/src/spread.ts`), thuần, không đọc thời gian thực
+### Calculation functions (`shared/src/spread.ts`), pure, never reading real time
 
 ```ts
 export function currentBloom(ws: WeaponState, def: WeaponDef, nowMs: number): number {
@@ -85,137 +85,137 @@ export function computeSpreadDeg(p: PlayerState, ws: WeaponState, def: WeaponDef
 }
 
 export function onShotBloom(ws: WeaponState, def: WeaponDef, nowMs: number): void {
-  // gọi SAU khi đã lấy spread cho phát bắn này → viên đầu không bị bloom của chính nó
+  // call AFTER the spread for this shot has been taken -> the first shot is not affected by its own bloom
   ws.bloomDeg = Math.min(def.spread.bloomMaxDeg, currentBloom(ws, def, nowMs) + def.spread.bloomPerShotDeg);
   ws.lastShotMs = nowMs;
 }
 ```
 
-- Thứ tự trong `tryFire` (client và server): tính `spread = computeSpreadDeg(...)` → tạo hướng đạn với rng seed như cũ → `onShotBloom`.
-- Đổi súng / nạp đạn: **không** reset bloom (nó tự hồi theo thời gian). Mỗi súng giữ bloom riêng.
-- `runSpeed` dùng **sau khi** nhân `moveSpeedMul` của súng (task H.1), để chạy hết tốc với súng nào cũng ra `t = 1`.
-- Xoá mọi chỗ dùng `spreadDeg.stand/move/air/crouch` cũ.
+- Order in `tryFire` (client and server): compute `spread = computeSpreadDeg(...)` → build the bullet direction with the rng seed as before → `onShotBloom`.
+- Switching weapons / reloading: **do not** reset bloom (it recovers by itself over time). Each gun keeps its own bloom.
+- `runSpeed` is used **after** multiplying by the gun's `moveSpeedMul` (task H.1), so that running at full speed with any gun gives `t = 1`.
+- Remove every use of the old `spreadDeg.stand/move/air/crouch`.
 
-Nghiệm thu (vitest):
-- [ ] AK47 đứng yên, chưa bắn: 0.35°. Đi 2,5 m/s: vẫn 0.35°. Chạy hết tốc: 1.35°. Trên không: 3.35°. Đang trượt: 0.20° + phần di chuyển.
-- [ ] AK47 đứng yên bắn liên tục (100ms/phát): phát 1 = 0.35°, phát 2 = 0.60°, phát 3 = 0.85°, … từ phát 9 trở đi giữ ở 2.35° (bloom chạm trần 2.0°).
-- [ ] Ngừng bắn 0,5s: bloom giảm (0.5 − 0.15) × 6 = 2.1° → về 0.
-- [ ] Ngừng bắn 0,1s rồi bắn tiếp: bloom **chưa** hồi (vì còn trong `recoverDelayMs`).
-- [ ] Shotgun chạy: tâm chùm lệch, nhưng góc giữa các viên chì so với tâm chùm vẫn ≤ 4.5°.
-- [ ] Cùng chuỗi InputCmd, client và server tính ra **cùng hướng đạn** cho từng phát (test chạy hàm shared 2 lần với 2 bản state riêng).
+Acceptance (vitest):
+- [ ] AK47 standing still, not yet fired: 0.35°. Walking at 2.5 m/s: still 0.35°. Running at full speed: 1.35°. Airborne: 3.35°. Sliding: 0.20° + the movement part.
+- [ ] AK47 standing still, firing continuously (100ms/shot): shot 1 = 0.35°, shot 2 = 0.60°, shot 3 = 0.85°, ... from shot 9 onward it stays at 2.35° (bloom hits the 2.0° cap).
+- [ ] Stop firing for 0.5s: bloom drops by (0.5 − 0.15) × 6 = 2.1° → back to 0.
+- [ ] Stop firing for 0.1s then fire again: bloom has **not** recovered (still within `recoverDelayMs`).
+- [ ] Shotgun while running: the pattern center is offset, but the angle between each pellet and the pattern center is still <= 4.5°.
+- [ ] Given the same InputCmd sequence, client and server compute the **same bullet direction** for every shot (the test runs the shared functions twice with two separate copies of the state).
 
 ---
 
-## Task S.2 – Chỉnh độ giật
+## Task S.2 – Adjust recoil
 
-Tăng `recoilPitchDeg` khoảng 12% cho súng tự động (bù phần toé đã giảm, để xả liên tục vẫn phải kéo chuột):
+Increase `recoilPitchDeg` by about 12% for automatic guns (to compensate for the reduced spread, so that sustained fire still requires pulling the mouse down):
 
-| key | recoilPitchDeg cũ | mới |
+| key | old recoilPitchDeg | new |
 |---|---|---|
 | ak47 | 0.85 | 0.95 |
 | m16 | 0.50 | 0.56 |
 | smg | 0.40 | 0.45 |
 
-Súng bán tự động giữ nguyên. Không đổi `recoilYawDeg`, `recoilRecoverDegPerSec`.
+Semi-automatic guns stay unchanged. Do not change `recoilYawDeg` or `recoilRecoverDegPerSec`.
 
-Nghiệm thu:
-- [ ] Xả AK47 30 viên vào tường 15m không kéo chuột: vết đạn leo lên rõ; kéo chuột xuống đều tay thì gom được thành cụm.
+Acceptance:
+- [ ] Spray 30 AK47 rounds at a wall 15m away without pulling the mouse: the bullet marks clearly climb; pulling the mouse down steadily groups them into a cluster.
 
 ---
 
-## Task S.3 – Tâm ngắm động khớp độ toé thật
+## Task S.3 – Dynamic crosshair matching the true spread
 
-- Mỗi frame client tính `spreadDeg` hiện tại bằng **cùng hàm** `computeSpreadDeg` (state dự đoán của mình, `nowMs` = thời gian mô phỏng hiện tại).
-- Khoảng hở từ tâm tới mỗi vạch (pixel):
+- Every frame the client computes the current `spreadDeg` using the **same function** `computeSpreadDeg` (own predicted state, `nowMs` = current simulation time).
+- Gap from the center to each crosshair line (pixels):
   ```ts
   const halfH = canvas.clientHeight / 2;
   const gapPx = Math.tan(deg2rad(spreadDeg)) * halfH / Math.tan(deg2rad(camera.fov / 2));
   ```
-  cộng thêm khoảng hở tối thiểu 3px (để tâm không dính lại khi spread ≈ 0).
-- Làm mượt hiển thị: nội suy tới giá trị mới với hằng số thời gian 30ms (chỉ cho đẹp, không ảnh hưởng đạn).
-- Shotgun: vẽ thêm một **vòng tròn mờ** bán kính tương ứng `pelletConeDeg` + toé hiện tại.
-- Sniper không ngắm: ẩn 4 vạch, chỉ hiện một chấm nhỏ (bắn không ngắm là may rủi). Đang ngắm: ẩn tâm ngắm HUD (đã có khung scope).
-- Setting: "Tâm ngắm động" bật/tắt (tắt thì vạch đứng yên, khoảng hở cố định 6px).
+  plus a minimum gap of 3px (so the crosshair does not collapse together when spread ≈ 0).
+- Smooth the display: interpolate toward the new value with a 30ms time constant (cosmetic only, does not affect bullets).
+- Shotgun: additionally draw a faint **circle** whose radius corresponds to `pelletConeDeg` + the current spread.
+- Sniper not aiming: hide the 4 lines and show only a small dot (unscoped fire is a gamble). While aiming: hide the HUD crosshair (the scope frame already exists).
+- Setting: "Dynamic crosshair" on/off (when off the lines stay still, with a fixed gap of 6px).
 
-Nghiệm thu:
-- [ ] Đứng bắn từng phát vào tường: vết đạn luôn nằm **trong** vòng do 4 vạch tạo thành.
-- [ ] Chạy rồi dừng: vạch co lại mượt theo tốc độ giảm, không giật.
-- [ ] Đổi FOV trong setting: khoảng hở vẫn khớp vết đạn.
-
----
-
-## Task S.4 – Bảng chỉnh + công cụ thử
-
-- Bảng F6: thêm tab **Spread**, chọn súng, slider cho mọi trường của `SpreadDef` và `recoilPitchDeg`, nút "Copy JSON súng này".
-- Overlay F3 thêm dòng: `spread 0.54° = base 0.35 + move 0.00 + air 0.00 + bloom 0.19`.
-- `?dummies=1`: thêm **bia tập bắn**: một tấm bảng 2×2m có vòng tròn đồng tâm ở 10m, 20m, 40m trong khu giữa; nút R + giữ Shift (dev) xoá hết vết đạn trên bảng.
-
-Nghiệm thu:
-- [ ] Kéo slider `moveDeg` của AK về 0: chạy bắn không toé thêm (thấy ngay trên bảng tập).
+Acceptance:
+- [ ] Standing and firing single shots at a wall: bullet marks always land **inside** the ring formed by the 4 lines.
+- [ ] Run then stop: the lines contract smoothly as speed decreases, without jerking.
+- [ ] Change the FOV in settings: the gap still matches the bullet marks.
 
 ---
 
-## Task S.5 – Kiểm tra đồng bộ online
+## Task S.4 – Tuning panel + testing tools
 
-- Chạy lại nghiệm thu cuối của phase 4 (3 tab, ping 20/80/150, bắn nhau 5 phút) với spread mới.
-- F7 (debug tia bắn của server): tia server và vết đạn client **trùng hướng** cả khi đang chạy và đang xả liên tục.
+- F6 panel: add a **Spread** tab, pick a gun, sliders for every field of `SpreadDef` and `recoilPitchDeg`, and a "Copy JSON for this gun" button.
+- F3 overlay gets an extra line: `spread 0.54° = base 0.35 + move 0.00 + air 0.00 + bloom 0.19`.
+- `?dummies=1`: add a **shooting-range target**: a 2×2m board with concentric circles at 10m, 20m, 40m in the middle area; the R key + holding Shift (dev) clears all bullet marks on the board.
 
-Nghiệm thu:
-- [ ] Không có ca vết đạn client một chỗ, tia server một nẻo.
+Acceptance:
+- [ ] Drag the AK's `moveDeg` slider to 0: running and shooting adds no extra spread (visible right away on the range board).
 
 ---
 
-# Phần tuỳ chọn: ngắm qua ống (ADS)
+## Task S.5 – Online sync check
 
-Làm khi S.1–S.5 đã ổn và bạn muốn cảm giác Krunker/CoD hơn. Sniper đã có scope, phần này mở rộng cho mọi súng.
+- Re-run the final acceptance of phase 4 (3 tabs, ping 20/80/150, shooting each other for 5 minutes) with the new spread.
+- F7 (server shot ray debug): server rays and client bullet marks **point the same way**, both while running and during sustained fire.
 
-## Task D.1 – Logic ADS (shared) ⚠️
+Acceptance:
+- [ ] No case where the client bullet mark is in one place and the server ray in another.
 
-- Đổi tên bit `Btn.Scope` thành `Btn.Aim` (chuột phải). Cầm lựu đạn thì chuột phải vẫn là ném thấp (task G.3), không bị ảnh hưởng.
-- `WeaponDef` thêm:
+---
+
+# Optional part: aim down sights (ADS)
+
+Do this once S.1–S.5 are stable and you want a more Krunker/CoD feel. The sniper already has a scope; this part extends it to every gun.
+
+## Task D.1 – ADS logic (shared) ⚠️
+
+- Rename the `Btn.Scope` bit to `Btn.Aim` (right mouse button). When holding a grenade, right mouse button is still the low throw (task G.3) and is not affected.
+- Add to `WeaponDef`:
   ```ts
   ads?: {
-    spreadMult: number;   // nhân vào toàn bộ spread khi ngắm hẳn (ví dụ 0.25)
-    moveMult: number;     // nhân tốc độ chạy khi ngắm (ví dụ 0.7)
-    fovMult: number;      // FOV camera chính khi ngắm (ví dụ 0.8 = zoom nhẹ)
-    inMs: number;         // thời gian vào ngắm
+    spreadMult: number;   // multiplies all spread when fully aimed (for example 0.25)
+    moveMult: number;     // multiplies run speed while aiming (for example 0.7)
+    fovMult: number;      // main camera FOV while aiming (for example 0.8 = slight zoom)
+    inMs: number;         // time to enter ADS
     outMs: number;
   };
   ```
-  Giá trị gợi ý: AK47/M16 `{0.25, 0.7, 0.8, 180, 120}`; SMG `{0.35, 0.8, 0.85, 140, 100}`; Colt/Rulô `{0.4, 0.85, 0.88, 120, 90}`; Shotgun `{0.7, 0.8, 0.9, 160, 120}` (chỉ thu nhỏ chùm chút ít). Sniper chuyển cơ chế scope cũ sang dùng `ads` (`spreadMult` đưa spread về 0.05°, `fovMult` = 25/FOV).
-- `PlayerState` thêm `adsT` (0..1): mỗi tick tăng `DT×1000/inMs` khi giữ Aim, giảm `DT×1000/outMs` khi thả. Đây là state của **movement** (vì đổi tốc độ chạy) → nằm trong `stepMovement`, gửi trong snapshot, có test determinism.
-- Hiệu lực theo `adsT`: `spread × lerp(1, spreadMult, adsT)`, `runSpeed × lerp(1, moveMult, adsT)`.
-- Không ngắm được khi: đang nạp đạn, đang trượt, trên không (adsT tự giảm), đang đổi súng.
+  Suggested values: AK47/M16 `{0.25, 0.7, 0.8, 180, 120}`; SMG `{0.35, 0.8, 0.85, 140, 100}`; Colt/Rulo `{0.4, 0.85, 0.88, 120, 90}`; Shotgun `{0.7, 0.8, 0.9, 160, 120}` (only shrinks the pattern slightly). The sniper moves its old scope mechanic over to `ads` (`spreadMult` brings spread down to 0.05°, `fovMult` = 25/FOV).
+- `PlayerState` gets `adsT` (0..1): each tick it increases by `DT×1000/inMs` while Aim is held and decreases by `DT×1000/outMs` when released. This is **movement** state (since it changes run speed) → it lives in `stepMovement`, is sent in the snapshot, and has a determinism test.
+- Effect by `adsT`: `spread × lerp(1, spreadMult, adsT)`, `runSpeed × lerp(1, moveMult, adsT)`.
+- Cannot aim while: reloading, sliding, airborne (adsT decreases on its own), switching weapons.
 
-Nghiệm thu:
-- [ ] Test determinism movement vẫn pass với Aim bật tắt ngẫu nhiên.
-- [ ] AK47 ngắm hẳn khi đứng: spread 0.09°; ngắm khi chạy: chạy chậm lại, spread nhỏ hơn hẳn chạy không ngắm.
+Acceptance:
+- [ ] The movement determinism test still passes with Aim randomly toggled on and off.
+- [ ] AK47 fully aimed while standing: spread 0.09°; aiming while running: you run slower, and spread is clearly smaller than running without aiming.
 
-## Task D.2 – Viewmodel và camera khi ngắm
+## Task D.2 – Viewmodel and camera while aiming
 
-- Mỗi súng cần thêm điểm neo `sight` (điểm ngắm, trên khe ngắm/điểm ruồi phía sau) — thêm vào params của `gun_tool.py` (task P.1).
-- `poses.json → weapons.<key>.first` thêm `adsEyeDist` (khoảng cách từ mắt tới `sight`, ví dụ 0.12m) và `adsRotDeg` (thường `[0,0,0]`). Vị trí súng khi ngắm tính sao cho `sight` nằm đúng trên **trục giữa camera** tại `(0, 0, −adsEyeDist)`; nội suy giữa vị trí thường và vị trí ngắm theo `adsT` (smoothstep).
-- Khi ngắm: tay vẫn bám súng bằng IK (task 10/11), sway khi đi giảm 70%, recoil hình (lùi súng) giảm 50%.
-- FOV camera chính: `lerp(fov, fov × fovMult, adsT)`; sensitivity nhân tỉ lệ `tan(fovHiện/2) / tan(fov/2)` để cảm giác kéo chuột không đổi.
-- Tâm ngắm HUD mờ dần theo `adsT` (ngắm hẳn thì ẩn, nhìn qua khe ngắm của súng).
-- Sniper: khi `adsT > 0.9` chuyển sang khung scope đen như cũ, ẩn viewmodel.
+- Each gun needs an extra `sight` anchor point (the aiming point, on the rear sight / front sight bead) — add it to the params of `gun_tool.py` (task P.1).
+- `poses.json → weapons.<key>.first` gets `adsEyeDist` (distance from the eye to `sight`, for example 0.12m) and `adsRotDeg` (usually `[0,0,0]`). The gun position while aiming is computed so that `sight` lies exactly on the **camera's center axis** at `(0, 0, −adsEyeDist)`; interpolate between the normal position and the aimed position by `adsT` (smoothstep).
+- While aiming: the hands still follow the gun via IK (task 10/11), walking sway is reduced by 70%, and the visual recoil (gun kickback) by 50%.
+- Main camera FOV: `lerp(fov, fov × fovMult, adsT)`; sensitivity is scaled by `tan(currentFov/2) / tan(fov/2)` so the mouse feel stays the same.
+- The HUD crosshair fades out with `adsT` (fully aimed it is hidden, you look through the gun's sights).
+- Sniper: when `adsT > 0.9` switch to the black scope frame as before and hide the viewmodel.
 
-Nghiệm thu:
-- [ ] Giữ chuột phải với AK47: súng đưa vào giữa, khe ngắm thẳng tâm màn hình, viên đạn trúng đúng chỗ khe ngắm chỉ.
-- [ ] Bảng F9 có slider `adsEyeDist`, `adsRotDeg`, chấm debug tại `sight`.
+Acceptance:
+- [ ] Hold right mouse button with the AK47: the gun moves to the center, the sight lines up with the screen center, and the bullet lands exactly where the sight points.
+- [ ] The F9 panel has `adsEyeDist` and `adsRotDeg` sliders, and a debug dot at `sight`.
 
-## Task D.3 – Người khác thấy mình ngắm
+## Task D.3 – Other players see you aiming
 
-- `NetPlayer` gửi `adsT` (làm tròn 0.1).
-- Góc 3: khi `adsT > 0.5` đưa súng lên cao hơn và sát má (`poses.json → weapons.<key>.third.adsGunPos/adsGunRotDeg`), tay IK tự theo.
+- `NetPlayer` sends `adsT` (rounded to 0.1).
+- Third person: when `adsT > 0.5`, raise the gun higher and bring it close to the cheek (`poses.json → weapons.<key>.third.adsGunPos/adsGunRotDeg`); the IK hands follow automatically.
 
-Nghiệm thu:
-- [ ] F10: thấy nhân vật đưa súng lên má khi ngắm.
+Acceptance:
+- [ ] F10: you see the character raise the gun to the cheek when aiming.
 
 ---
 
-## Ghi chú cho người dùng
+## Notes for the user
 
-- Chỉnh theo thứ tự: `standDeg` (độ chuẩn viên đầu) → `bloomPerShot` + `bloomRecover` + `recoverDelayMs` (xả liên tục khó cỡ nào, bắn từng loạt ngắn được thưởng cỡ nào) → `moveDeg` + `accurateSpeed` (chạy bắn bị phạt cỡ nào) → `airDeg`.
-- Muốn giống CS hơn: tăng `moveDeg` lên 3–5°, giảm `accurateSpeed` xuống 2. Muốn giống Krunker hơn: làm thêm phần ADS và giữ `moveDeg` thấp.
-- Có ADS rồi thì có thể tăng nhẹ toé khi không ngắm (bắn không ngắm cho tầm gần, ngắm cho tầm xa), như CoD.
+- Tune in this order: `standDeg` (first-shot accuracy) → `bloomPerShot` + `bloomRecover` + `recoverDelayMs` (how hard sustained fire is, and how much short bursts are rewarded) → `moveDeg` + `accurateSpeed` (how much run-and-gun is penalized) → `airDeg`.
+- For a more CS-like feel: raise `moveDeg` to 3–5° and lower `accurateSpeed` to 2. For a more Krunker-like feel: build the ADS part and keep `moveDeg` low.
+- Once ADS exists you can slightly increase the spread when not aiming (hip fire for close range, ADS for long range), like CoD.

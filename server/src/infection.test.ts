@@ -44,7 +44,7 @@ const sent = (msgs: Map<number, AnyMsg[]>, id: number, t: number) => msgs.get(id
 const zombiesOf = (room: Room) => [...room.players.values()].filter(p => p.role === 'zombie')
 const humansOf = (room: Room) => [...room.players.values()].filter(p => p.role === 'human')
 
-/** Vào LIVE: PREP 2s rồi chọn mẹ; chờ hết bất tử/biến hình */
+/** Enter LIVE: PREP 2s then the mother is picked; wait out invulnerability/transformation */
 function toLive() {
   const s = setup()
   run(s.room, 100)
@@ -56,8 +56,8 @@ function toLive() {
 }
 const claw = (z: Player, seq: number, extra = 0) => enqueueCmds(z, [{ seq, buttons: Btn.Fire | extra, yaw: 0, pitch: 0, weapon: 0 }], 0)
 
-describe('Lây Nhiễm – các pha (I.1)', () => {
-  it('cần ≥ 3 người: 2 người vẫn WARMUP, người thứ 3 vào → PREP', () => {
+describe('Infection - phases (I.1)', () => {
+  it('needs >= 3 players: 2 players stay in WARMUP, the 3rd joins -> PREP', () => {
     const s = setup(2)
     run(s.room, 100)
     expect(s.room.phase).toBe(MatchPhase.Waiting)
@@ -66,7 +66,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(s.room.phase).toBe(MatchPhase.Prep)
   })
 
-  it('PREP: mọi người là người cùng phe A, tiền $6000, rải khắp nơi; mua ở bất cứ đâu', () => {
+  it('PREP: everyone is a human on team A, money $6000, scattered everywhere; can buy anywhere', () => {
     const s = setup()
     run(s.room, 100)
     for (const p of s.players) { expect(p.role).toBe('human'); expect(p.team).toBe('A'); expect(p.money).toBe(INFECTION.startMoney) }
@@ -77,7 +77,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(sent(s.msgs, p.id, MsgType.BuyResult).pop()).toMatchObject({ ok: true })
   })
 
-  it('hết PREP: 1 zombie mẹ (3 người), cả phòng nhận Infected(mother), mẹ bất tử lúc biến hình, máu theo số người', () => {
+  it('PREP over: 1 mother zombie (3 players), whole room receives Infected(mother), mother is invulnerable while transforming, hp scales with player count', () => {
     const s = setup()
     run(s.room, 2200)
     const zs = zombiesOf(s.room)
@@ -90,32 +90,32 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(s.room.serverNow).toBeLessThan(mom.invulnUntil)
   })
 
-  it('không chọn lại người vừa làm mẹ ván trước', () => {
+  it('does not re-pick the previous round mother', () => {
     const s = setup(3)
     run(s.room, 2200)
     const first = zombiesOf(s.room)[0]!.id
-    // ép sang ván sau
+    // force the next round
     s.m.devEndRound(s.room, 'A')
-    run(s.room, 1100)   // RoundEnd → PREP ván 2
+    run(s.room, 1100)   // RoundEnd -> PREP round 2
     expect(s.room.phase).toBe(MatchPhase.Prep)
     run(s.room, 2100)
     expect(zombiesOf(s.room)[0]!.id).not.toBe(first)
   })
 
-  it('zombie cào đủ nhát → người thành zombie tại chỗ, đứng dậy sau transformMs, cào được người khác', () => {
+  it('zombie claws enough times -> the human turns into a zombie in place, stands up after transformMs, can claw others', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     const [v1, v2] = humansOf(s.room)
     mom.state.pos = [0, 0, 0]; v1!.state.pos = [0, 0, -1.5]; v2!.state.pos = [30, 0, 30]
     let seq = 1000
-    const hits = Math.ceil(100 / INFECTION.mother.clawDamage)   // số nhát để hạ 100 máu
+    const hits = Math.ceil(100 / INFECTION.mother.clawDamage)   // number of hits to take 100 hp
     for (let i = 0; i < hits; i++) {
-      v1!.state.pos = [0, 0, -1.5]; v1!.state.vel = [0, 0, 0]   // vuốt có đẩy lùi: đặt lại chỗ đứng cho mỗi nhát
-      enqueueCmds(mom, [{ seq: seq++, buttons: Btn.Fire, yaw: 0, pitch: 0, weapon: 0 }], s.room.serverNow); run(s.room, 16)   // nowMs thật: server chặn cmd đi trước đồng hồ quá xa
+      v1!.state.pos = [0, 0, -1.5]; v1!.state.vel = [0, 0, 0]   // claws knock back: reset the position for each hit
+      enqueueCmds(mom, [{ seq: seq++, buttons: Btn.Fire, yaw: 0, pitch: 0, weapon: 0 }], s.room.serverNow); run(s.room, 16)   // real nowMs: the server rejects cmds too far ahead of the clock
       if (i === 0) expect(v1!.hp).toBe(100 - INFECTION.mother.clawDamage)
-      if (i < hits - 1) { run(s.room, 750); seq += 45 }   // thời gian của súng tính theo seq (60 cmd/s)
+      if (i < hits - 1) { run(s.room, 750); seq += 45 }   // weapon timing is based on seq (60 cmd/s)
     }
-    expect(v1!.role).toBe('zombie')                     // bị lây tại chỗ, không chết
+    expect(v1!.role).toBe('zombie')                     // infected in place, not dead
     expect(v1!.alive).toBe(true)
     expect(v1!.state.pos[2]).toBeCloseTo(-1.5, 1)
     expect(v1!.zstats!.type).toBe('normal')
@@ -123,19 +123,19 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(s.m.humans(s.room)).toBe(1)
     expect(sent(s.msgs, v2!.id, MsgType.Infected).some(m => (m as { kind: string }).kind === 'infected' && (m as { byId: number }).byId === mom.id)).toBe(true)
     expect(s.room.serverNow).toBeLessThan(v1!.transformUntil)
-    // đang biến hình thì không cào được
+    // cannot claw while transforming
     v2!.state.pos = [0, 0, -3]; v1!.state.pos = [0, 0, -1.5]; mom.state.pos = [0, 0, 0]
     claw(v1!, 5000); run(s.room, 16)
-    expect(v2!.hp).toBe(INFECTION.hero.hp)   // v2 là người cuối → anh hùng
+    expect(v2!.hp).toBe(INFECTION.hero.hp)   // v2 is the last human -> hero
     run(s.room, INFECTION.transformMs + 100)
     claw(v1!, 5050)
-    v2!.state.pos = [0, 0, -3 + v1!.state.pos[2] + 1.5]   // đặt trong tầm cào của v1
+    v2!.state.pos = [0, 0, -3 + v1!.state.pos[2] + 1.5]   // placed within v1's claw range
     v2!.state.pos = [v1!.state.pos[0], 0, v1!.state.pos[2] - 1.5]
     run(s.room, 16)
     expect(v2!.hp).toBeLessThan(INFECTION.hero.hp)
   })
 
-  it('điểm lây nhiễm: người lây được +1 (+1 nếu zombie mẹ); bảng điểm có cột pts/inf/role', () => {
+  it('infection points: the infector gets +1 (+1 more if mother zombie); scoreboard has pts/inf/role columns', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     const v = humansOf(s.room)[0]!
@@ -149,7 +149,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(row.role).toBe('zombie')
   })
 
-  it('bắn zombie tới chết: người được +2 điểm; 5s sau zombie hồi sinh xa người nhất', () => {
+  it('shooting a zombie dead: the human gets +2 points; 5s later the zombie respawns farthest from humans', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     const [h1, h2] = humansOf(s.room)
@@ -171,7 +171,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(dNear).toBeGreaterThan(3)
   })
 
-  it('còn đúng 1 người → anh hùng: máu 200, flag Hero; máu zombie co lại theo số người', () => {
+  it('exactly 1 human left -> hero: hp 200, Hero flag; zombie hp shrinks with player count', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     const [v1, v2] = humansOf(s.room)
@@ -188,7 +188,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(snap.players.find(p => p.id === v2!.id)!.flags & NetFlag.Hero).toBeTruthy()
   })
 
-  it('lây hết → zombie thắng ván (RoundEnd winner B); hết giờ còn người → người thắng, +3 điểm mỗi người sống', () => {
+  it('everyone infected -> zombies win the round (RoundEnd winner B); time up with humans left -> humans win, +3 points per survivor', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     for (const h of humansOf(s.room)) { h.hp = 0; h.killerId = mom.id }
@@ -207,13 +207,13 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(row.pts).toBe(INFECTION.points.surviveRound)
   })
 
-  it('hết số ván: MATCH_END với người nhiều điểm nhất; sau đó ván mới', () => {
+  it('out of rounds: MATCH_END with the top scorer; then a new round', () => {
     const s = toLive()
     s.m.devEndRound(s.room, 'A')
-    run(s.room, 1100)               // → PREP ván 2
+    run(s.room, 1100)               // -> PREP round 2
     run(s.room, 2200)               // → LIVE
     s.m.devEndRound(s.room, 'A')
-    run(s.room, 1100)               // hết 2 ván → MATCH_END
+    run(s.room, 1100)               // both rounds done -> MATCH_END
     expect(s.room.phase).toBe(MatchPhase.Ended)
     expect(sent(s.msgs, s.players[0]!.id, MsgType.MatchEnd).length).toBe(1)
     run(s.room, 1100)
@@ -221,7 +221,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(s.m.round).toBe(1)
   })
 
-  it('người vào giữa ván LIVE → vào luôn với vai zombie', () => {
+  it('joining mid-LIVE round -> enters directly as a zombie', () => {
     const s = toLive()
     const j = s.join('late')
     expect(j.role).toBe('zombie')
@@ -229,7 +229,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(j.alive).toBe(true)
   })
 
-  it('zombie mẹ duy nhất rời → chọn ngay một người làm mẹ mới', () => {
+  it('the only mother zombie leaves -> a new mother is picked immediately', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     s.room.leave(mom.id)
@@ -238,7 +238,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(zombiesOf(s.room)[0]!.zstats!.type).toBe('mother')
   })
 
-  it('/zombie và /human đổi vai; người không bắn trúng người (không friendly fire)', () => {
+  it('/zombie and /human switch roles; humans cannot hit humans (no friendly fire)', () => {
     const s = setup()
     const p = s.players[0]!
     expect(handleDebugCmd(s.room, p, '/zombie')).toBe(true)
@@ -248,7 +248,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(p.team).toBe('A')
   })
 
-  it('đánh hơi (I.3): Q → người trong 18m nhận Sniffed, ngoài 18m không; hồi chiêu 15s; snapshot báo thời gian còn lại', () => {
+  it('sniff (I.3): Q -> humans within 18m receive Sniffed, beyond 18m do not; 15s cooldown; snapshot reports remaining time', () => {
     const s = toLive()
     const mom = zombiesOf(s.room)[0]!
     const [near, far] = humansOf(s.room)
@@ -258,7 +258,7 @@ describe('Lây Nhiễm – các pha (I.1)', () => {
     expect(sent(s.msgs, near!.id, MsgType.Sniffed).length).toBe(1)
     expect(sent(s.msgs, far!.id, MsgType.Sniffed).length).toBe(0)
     expect(mom.sniffReadyAt).toBeGreaterThan(s.room.serverNow + 14_000)
-    enqueueCmds(mom, [{ seq: 9010, buttons: Btn.Sniff, yaw: 0, pitch: 0, weapon: 0 }], 0)   // còn hồi chiêu
+    enqueueCmds(mom, [{ seq: 9010, buttons: Btn.Sniff, yaw: 0, pitch: 0, weapon: 0 }], 0)   // still on cooldown
     run(s.room, 64)
     expect(sent(s.msgs, near!.id, MsgType.Sniffed).length).toBe(1)
     sendSnapshots(s.room, 0, s.room.serverNow)

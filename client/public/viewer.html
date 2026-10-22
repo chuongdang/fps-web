@@ -33,11 +33,11 @@
 <div id="ui">
   <b id="model-name">–</b>
   <ul id="checklist">
-    <li id="ck-dir"  class="unk">[ ] Nòng chĩa −Z</li>
-    <li id="ck-len"  class="unk">[ ] Chiều dài đúng</li>
-    <li id="ck-muz"  class="unk">[ ] Muzzle node tồn tại</li>
-    <li id="ck-grip" class="unk">[ ] Gốc toạ độ ở tay cầm</li>
-    <li id="ck-mat"  class="unk">[ ] Màu hiện đúng</li>
+    <li id="ck-dir"  class="unk">[ ] Barrel points −Z</li>
+    <li id="ck-len"  class="unk">[ ] Correct length</li>
+    <li id="ck-muz"  class="unk">[ ] Muzzle node exists</li>
+    <li id="ck-grip" class="unk">[ ] Origin at the grip</li>
+    <li id="ck-mat"  class="unk">[ ] Colors show correctly</li>
   </ul>
   <div id="info" style="margin-top:6px;font-size:11px;color:#888"></div>
   <div id="anim-box" style="display:none;margin-top:6px;pointer-events:auto">
@@ -124,26 +124,26 @@ loader.load(
     const longest = Math.max(size.x, size.y, size.z);
     const ckDir = document.getElementById('ck-dir');
     if (size.z === longest) {
-      ckDir.className = 'ok'; ckDir.textContent = '[✓] Nòng chĩa −Z';
+      ckDir.className = 'ok'; ckDir.textContent = '[✓] Barrel points −Z';
     } else {
       ckDir.className = 'bad';
-      ckDir.textContent = `[✗] Nòng chĩa −Z  (longest: ${['X','Y','Z'][['x','y','z'].indexOf(Object.keys({x:size.x,y:size.y,z:size.z}).sort((a,b)=>size[b]-size[a])[0])]})`;
+      ckDir.textContent = `[✗] Barrel points −Z  (longest: ${['X','Y','Z'][['x','y','z'].indexOf(Object.keys({x:size.x,y:size.y,z:size.z}).sort((a,b)=>size[b]-size[a])[0])]})`;
     }
 
     // check 2: length
     const ckLen = document.getElementById('ck-len');
     const len = size.z.toFixed(3);
     if (size.z >= 0.7 && size.z <= 1.1) {
-      ckLen.className = 'ok'; ckLen.textContent = `[✓] Dài ${len}m (0.7–1.1m)`;
+      ckLen.className = 'ok'; ckLen.textContent = `[✓] Length ${len}m (0.7–1.1m)`;
     } else {
-      ckLen.className = 'bad'; ckLen.textContent = `[✗] Dài ${len}m (ngoài 0.7–1.1m)`;
+      ckLen.className = 'bad'; ckLen.textContent = `[✗] Length ${len}m (outside 0.7–1.1m)`;
     }
 
     // check 3: muzzle node
     const muzzleObj = model.getObjectByName('muzzle');
     const ckMuz = document.getElementById('ck-muz');
     if (muzzleObj) {
-      ckMuz.className = 'ok'; ckMuz.textContent = '[✓] Muzzle node tồn tại';
+      ckMuz.className = 'ok'; ckMuz.textContent = '[✓] Muzzle node exists';
 
       const muzzlePos = new THREE.Vector3();
       muzzleObj.getWorldPosition(muzzlePos);
@@ -155,7 +155,7 @@ loader.load(
       sphere.position.copy(muzzlePos);
       scene.add(sphere);
     } else {
-      ckMuz.className = 'bad'; ckMuz.textContent = '[✗] Muzzle node thiếu';
+      ckMuz.className = 'bad'; ckMuz.textContent = '[✗] Muzzle node missing';
     }
 
     // check 4: origin at grip (GunRoot near 0,0,0)
@@ -166,12 +166,12 @@ loader.load(
       gunRoot.getWorldPosition(wp);
       const dist = wp.length();
       if (dist < 0.01) {
-        ckGrip.className = 'ok'; ckGrip.textContent = '[✓] Gốc tại origin';
+        ckGrip.className = 'ok'; ckGrip.textContent = '[✓] Origin at the grip';
       } else {
         ckGrip.className = 'bad'; ckGrip.textContent = `[✗] GunRoot offset ${dist.toFixed(3)}m`;
       }
     } else {
-      ckGrip.className = 'unk'; ckGrip.textContent = '[?] Không tìm thấy GunRoot';
+      ckGrip.className = 'unk'; ckGrip.textContent = '[?] GunRoot not found';
     }
 
     // check 5: materials (not white)
@@ -188,7 +188,7 @@ loader.load(
       });
     });
     ckMat.className = hasColor ? 'ok' : 'bad';
-    ckMat.textContent = hasColor ? '[✓] Màu hiện đúng (không trắng)' : '[✗] Màu toàn trắng';
+    ckMat.textContent = hasColor ? '[✓] Colors show correctly (not white)' : '[✗] All white';
 
     // info
     document.getElementById('info').textContent =
@@ -202,11 +202,11 @@ loader.load(
   },
   undefined,
   (err) => {
-    document.getElementById('info').textContent = 'Lỗi load: ' + err.message;
+    document.getElementById('info').textContent = 'Load error: ' + err.message;
   }
 );
 
-// --- animation (nhân vật): dropdown chọn clip, đo trôi vị trí của Hips ---
+// --- animation (character): clip dropdown, measures Hips position drift ---
 let mixer = null;
 function setupAnimations(gltf, model) {
   document.getElementById('checklist').style.display = 'none';
@@ -237,7 +237,7 @@ function setupAnimations(gltf, model) {
       if (p0.lengthSq() === 0) p0.copy(p);
       maxDrift = Math.max(maxDrift, Math.hypot(p.x - p0.x, p.z - p0.z));
       document.getElementById('anim-info').textContent =
-        `hips y=${p.y.toFixed(2)}m  lệch ngang tối đa=${maxDrift.toFixed(2)}m`;
+        `hips y=${p.y.toFixed(2)}m  max horizontal drift=${maxDrift.toFixed(2)}m`;
     }
   };
 }
@@ -250,13 +250,13 @@ function showCharacterInfo(model) {
   camera.position.set(1.2, 1.2, 2.4);
   controls.update();
 }
-// --- vật nhỏ (lựu đạn): hộp tick bật/tắt từng node con, kích thước, camera gần ---
+// --- small object (grenade): checkboxes toggle each child node, size, close camera ---
 function showProp(model) {
   document.getElementById('checklist').style.display = 'none';
   const box = new THREE.Box3().setFromObject(model), size = new THREE.Vector3(), center = new THREE.Vector3();
   box.getSize(size); box.getCenter(center);
   const info = document.getElementById('info');
-  info.textContent = `tris: ${countTris(model)}  |  size: ${size.x.toFixed(3)}×${size.y.toFixed(3)}×${size.z.toFixed(3)}m  (cao ${(size.y * 100).toFixed(1)}cm)`;
+  info.textContent = `tris: ${countTris(model)}  |  size: ${size.x.toFixed(3)}×${size.y.toFixed(3)}×${size.z.toFixed(3)}m  (height ${(size.y * 100).toFixed(1)}cm)`;
   const wrap = document.getElementById('anim-box');
   wrap.style.display = 'block';
   wrap.innerHTML = 'Node:';

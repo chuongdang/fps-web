@@ -1,5 +1,5 @@
-// Âm thanh lựu đạn (plan 12, G.8): chốt, thìa, vung tay, nảy, nổ nhiều lớp, ù tai. Mỗi âm dùng file nếu có
-// (client/public/sounds/grenade/*.ogg) còn không thì tổng hợp. Mọi số nằm trong GSND (mutable) để chỉnh ở bảng F8 tab Grenade.
+// Grenade audio (plan 12, G.8): pin, spoon, throw swing, bounce, layered explosion, tinnitus. Each sound uses a file if available
+// (client/public/sounds/grenade/*.ogg) otherwise it is synthesized. All numbers live in GSND (mutable) for tuning in the F8 panel Grenade tab.
 import { dbToGain, distanceCutoff, randSpread } from './audioMath'
 import { getGraph, listenerPos, type AudioGraph } from './context'
 import { tone, noise } from './synth'
@@ -16,16 +16,16 @@ export const GSND = {
     crackHz: 1500, crackDb: 4, crackDecayMs: 90,
     bodyHz: 900, bodyDb: 6, bodyDecayMs: 900,
     thumpStartHz: 90, thumpEndHz: 24, thumpDb: 8, thumpDecayMs: 900,
-    boomHz: 220, boomDb: 6, boomDecayMs: 1600,   // lớp ầm trầm kéo dài
+    boomHz: 220, boomDb: 6, boomDecayMs: 1600,   // long, deep boom layer
     fileDb: 6,
     tailHz: 450, tailAttackMs: 40, tailDb: -4, tailDecayMs: 3800,
     debrisN: 8, debrisDb: -22, debrisMinS: 0.3, debrisMaxS: 1.2,
-    farM: 40,   // ngoài khoảng này chỉ còn thump + tail
+    farM: 40,   // beyond this range only thump + tail remain
   },
   tinnitus: { enabled: true, radiusM: 4, toneHz: 3500, toneDb: -18, durS: 2, muffleHz: 700 },
 }
 
-export const GRENADE_SOUND_FILES = ['pin', 'spoon', 'throw', 'bounce_01', 'bounce_02', 'explode_01', 'explode_02', 'explode_03'].map(n => `grenade/${n}`)
+export const GRENADE_SOUND_FILES = ['pin', 'spoon', 'throw', 'bounce_01', 'bounce_02', 'explode_01', 'explode_02', 'explode_03', 'smoke_burst'].map(n => `grenade/${n}`)
 
 const dist = (o: Vec3): number => Math.hypot(o[0] - listenerPos[0], o[1] - listenerPos[1], o[2] - listenerPos[2])
 
@@ -36,7 +36,7 @@ function panner(g: AudioGraph, o: Vec3): PannerNode {
   return pn
 }
 
-// Đích của một âm: của mình → master; ở vị trí → panner + lowpass theo khoảng cách → master
+// Destination of a sound: own → master; positional → panner + distance lowpass → master
 function sink(g: AudioGraph, pos: Vec3 | null, extraDb = 0): AudioNode {
   const gain = g.ctx.createGain()
   gain.gain.value = dbToGain(extraDb)
@@ -57,7 +57,7 @@ function playFile(g: AudioGraph, key: string, dest: AudioNode, when: number, db:
   return true
 }
 
-/** Rút chốt: chỉ mình nghe; người khác trong pin.nearM mét nghe nhỏ (pos của người rút) */
+/** Pull pin: only the local player hears it; others within pin.nearM meters hear it quietly (pos of the player pulling) */
 export function playPin(pos?: Vec3): void {
   const g = getGraph()
   if (!g) return
@@ -69,7 +69,7 @@ export function playPin(pos?: Vec3): void {
   noise(g.ctx, out, { filter: 'highpass', freq: p.noiseHz, gainDb: p.noiseDb, decayMs: p.noiseDecayMs, when: t })
 }
 
-/** Lựu đạn rời tay: thìa bật ra ("toinggg") */
+/** Grenade leaves the hand: spoon pops off ("toinggg") */
 export function playSpoon(pos?: Vec3): void {
   const g = getGraph()
   if (!g) return
@@ -79,7 +79,7 @@ export function playSpoon(pos?: Vec3): void {
   tone(g.ctx, out, { type: 'sine', freq: p.startHz, freqEnd: p.endHz, gainDb: p.db, decayMs: p.decayMs, when: t })
 }
 
-/** Vung tay ném: tiếng gió quét */
+/** Throwing swing: whoosh of wind */
 export function playThrowSwish(pos?: Vec3): void {
   const g = getGraph()
   if (!g) return
@@ -89,7 +89,7 @@ export function playThrowSwish(pos?: Vec3): void {
   noise(g.ctx, out, { filter: 'bandpass', freq: p.startHz, freqEnd: p.endHz, q: 1.2, gainDb: p.db, attackMs: 40, decayMs: p.durMs, when: t })
 }
 
-/** Mỗi lần nảy; âm lượng theo tốc độ va chạm (−24 → −10 dB) */
+/** Each bounce; volume scales with impact speed (−24 → −10 dB) */
 export function playBounce(pos: Vec3, speed: number): void {
   const g = getGraph()
   if (!g) return
@@ -103,7 +103,7 @@ export function playBounce(pos: Vec3, speed: number): void {
   tone(g.ctx, out, { type: 'sine', freq: p.toneHz * (1 + randSpread(0.1)), gainDb: db - 2, decayMs: p.toneDecayMs, when: t })
 }
 
-/** Tiếng nổ nhiều lớp. `alive`: người nghe còn sống (mới bị ù tai) */
+/** Layered explosion sound. `alive`: the listener is alive (only then tinnitus applies) */
 export function playExplode(pos: Vec3, alive = true): void {
   const g = getGraph()
   if (!g) return
@@ -112,7 +112,7 @@ export function playExplode(pos: Vec3, alive = true): void {
   const out = sink(g, pos)
   const far = d > e.farM
   if (!far) {
-    // crack + body, hoặc file explode_01..03 thay cả hai lớp đó
+    // crack + body, or an explode_01..03 file replacing both layers
     const f = `grenade/explode_0${1 + Math.floor(Math.random() * 3)}`
     if (!playFile(g, f, out, t, e.fileDb, 1 + randSpread(0.04))) {
       noise(c, out, { filter: 'highpass', freq: e.crackHz, gainDb: e.crackDb, decayMs: e.crackDecayMs, when: t })
@@ -122,7 +122,7 @@ export function playExplode(pos: Vec3, alive = true): void {
   tone(c, out, { type: 'sine', freq: e.thumpStartHz, freqEnd: e.thumpEndHz, gainDb: e.thumpDb, decayMs: e.thumpDecayMs, when: t })
   noise(c, out, { filter: 'lowpass', freq: e.boomHz, gainDb: e.boomDb, decayMs: e.boomDecayMs, when: t })
   noise(c, out, { filter: 'lowpass', freq: e.tailHz, gainDb: e.tailDb, attackMs: e.tailAttackMs, decayMs: e.tailDecayMs, when: t })
-  if (!far) {   // mảnh vụn rơi lạch cạch rải rác sau nổ
+  if (!far) {   // debris clattering down here and there after the blast
     for (let i = 0; i < e.debrisN; i++) {
       const at = t + e.debrisMinS + Math.random() * (e.debrisMaxS - e.debrisMinS)
       noise(c, out, { filter: 'bandpass', freq: 2200 + Math.random() * 3000, q: 4, gainDb: e.debrisDb + randSpread(3), decayMs: 25 + Math.random() * 30, when: at })
@@ -131,12 +131,24 @@ export function playExplode(pos: Vec3, alive = true): void {
   if (alive && d < GSND.tinnitus.radiusM) tinnitus()
 }
 
-/** Ù tai: tone 3500Hz nhỏ dần + master bị bịt lowpass 700Hz rồi mở dần về 20kHz */
+/** Smoke grenade bursts: a "puff" + hissing for ~1.5s (grenade/smoke_burst file if available). No tinnitus, no explosion */
+export function playSmokeBurst(pos: Vec3): void {
+  const g = getGraph()
+  if (!g) return
+  const c = g.ctx, t = c.currentTime
+  const out = sink(g, pos)
+  if (playFile(g, 'grenade/smoke_burst', out, t, -2, 1 + randSpread(0.03))) return
+  tone(c, out, { type: 'sine', freq: 140, freqEnd: 55, gainDb: -8, decayMs: 160, when: t })
+  noise(c, out, { filter: 'lowpass', freq: 900, gainDb: -9, decayMs: 220, when: t })
+  noise(c, out, { filter: 'bandpass', freq: 5200, freqEnd: 2400, q: 0.7, gainDb: -16, attackMs: 60, decayMs: 1400, when: t + 0.04 })   // hiss
+}
+
+/** Tinnitus: a fading 3500Hz tone + master muffled by a 700Hz lowpass, then gradually opening back to 20kHz */
 export function tinnitus(): void {
   const g = getGraph(), s = GSND.tinnitus
   if (!g || !s.enabled) return
   const t = g.ctx.currentTime
-  tone(g.ctx, g.comp, { type: 'sine', freq: s.toneHz, gainDb: s.toneDb, attackMs: 30, decayMs: s.durS * 1000, when: t })   // đi thẳng vào compressor: không bị chính lowpass bịt mất
+  tone(g.ctx, g.comp, { type: 'sine', freq: s.toneHz, gainDb: s.toneDb, attackMs: 30, decayMs: s.durS * 1000, when: t })   // goes straight into the compressor: not muffled by the lowpass itself
   const f = g.muffle.frequency
   f.cancelScheduledValues(t)
   f.setValueAtTime(s.muffleHz, t)

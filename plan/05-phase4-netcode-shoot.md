@@ -1,113 +1,113 @@
-# Phase 4 – Bắn online ⚠️
+# Phase 4 – Online shooting ⚠️
 
-Mục tiêu: bắn nhau trúng đúng cảm giác. Nguyên tắc vàng: **client chỉ báo "tôi bóp cò lúc nào, nhìn hướng nào"; server mới quyết định trúng hay trượt.**
+Goal: hit registration feels right. The golden rule: **the client only reports "when I pulled the trigger and which way I was looking"; the server decides hit or miss.**
 
-## Message thêm
+## Added messages
 
 ```ts
-// InputCmd đã có: buttons có bit Fire, weapon, và fireRenderTime
-// fireRenderTime = currentRenderTime (task 3.5) tại tick bắn; chỉ gửi khi bit Fire bật.
+// InputCmd already has: buttons with the Fire bit, weapon, and fireRenderTime
+// fireRenderTime = currentRenderTime (task 3.5) at the firing tick; only sent when the Fire bit is on.
 
 // Server → Client
-  | { t: 106; damage: number; headshot: boolean; targetId: number }           // HitConfirm (gửi riêng người bắn)
-  | { t: 107; killerId: number; victimId: number; weapon: number; headshot: boolean } // Kill (gửi cả phòng)
-  | { t: 108; id: number; pos: Vec3; yaw: number }                             // Respawn (gửi cả phòng)
-  | { t: 109; shooterId: number; origin: Vec3; dir: Vec3; dist: number }       // ShotFx (cả phòng, để vẽ vệt đạn/tiếng súng của người khác)
-  | { t: 110; origin: Vec3; dir: Vec3; boxes: HitBox[] }                       // DebugShot (chỉ khi bật debug)
+  | { t: 106; damage: number; headshot: boolean; targetId: number }           // HitConfirm (sent only to the shooter)
+  | { t: 107; killerId: number; victimId: number; weapon: number; headshot: boolean } // Kill (sent to the whole room)
+  | { t: 108; id: number; pos: Vec3; yaw: number }                             // Respawn (sent to the whole room)
+  | { t: 109; shooterId: number; origin: Vec3; dir: Vec3; dist: number }       // ShotFx (whole room, to draw tracers/gunshot sounds of other players)
+  | { t: 110; origin: Vec3; dir: Vec3; boxes: HitBox[] }                       // DebugShot (only when debug is on)
 
-// NetPlayer thêm: hp, alive, weapon, ammo (chỉ cần chính xác cho bản thân), invulnUntil
+// NetPlayer adds: hp, alive, weapon, ammo (only needs to be exact for yourself), invulnUntil
 ```
 
 ---
 
-## Task 4.1 – Bắn qua InputCmd, server kiểm soát đạn/fire rate
+## Task 4.1 – Shooting via InputCmd, server controls ammo/fire rate
 
-Làm:
-- Client: khi giữ chuột, bật bit Fire trong cmd và điền `fireRenderTime`. Client vẫn chạy `tryFire` cục bộ để **hiện hiệu ứng ngay** (lửa, tiếng, recoil, trừ đạn trên HUD) — đây là dự đoán, giống prediction di chuyển.
-- Server: khi xử lý cmd có bit Fire → chạy `tryFire` (cùng hàm `shared`) với `nowMs` = thời điểm mô phỏng của server. Bắn hợp lệ thì tạo "phát bắn" (task 4.2). Không hợp lệ thì bỏ qua.
-- `WeaponState` của mình được gửi trong snapshot; client reconcile ammo/reload giống reconcile vị trí.
-- `nowMs` trong `tryFire` ở cả 2 bên = `seq * 1000 / TICK_RATE` của cmd (không dùng tick server), để client và server tính fire rate giống hệt.
+Do:
+- Client: when the mouse is held, set the Fire bit in the cmd and fill in `fireRenderTime`. The client still runs `tryFire` locally to **show effects immediately** (flash, sound, recoil, ammo deduction on the HUD) — this is prediction, like movement prediction.
+- Server: when processing a cmd with the Fire bit → run `tryFire` (the same `shared` function) with `nowMs` = the server's simulation time. A valid shot creates a "shot" (task 4.2). An invalid one is ignored.
+- Your own `WeaponState` is sent in the snapshot; the client reconciles ammo/reload the same way it reconciles position.
+- `nowMs` in `tryFire` on both sides = the cmd's `seq * 1000 / TICK_RATE` (not the server tick), so client and server compute the fire rate identically.
 
-Nghiệm thu:
-- [ ] Sửa tạm client để gửi Fire mỗi tick với Pistol: server chỉ chấp nhận đúng 4 phát/giây (log).
-- [ ] Đạn trên HUD khớp với server sau khi xả hết băng và reload (không lệch 1–2 viên).
+Acceptance:
+- [ ] Temporarily change the client to send Fire every tick with the Pistol: the server accepts exactly 4 shots/second (log).
+- [ ] The HUD ammo matches the server after emptying the magazine and reloading (no 1–2 round drift).
 
-Pitfall:
-- Nếu dùng tick server làm `nowMs` thì cmd đến dồn 2 cái/tick sẽ bị server từ chối phát thứ 2 dù client cho phép → đạn lệch. Dùng `seq` của cmd.
-- Server **phải** giới hạn `seq` không chạy nhanh hơn thời gian thực quá xa (người gian lận gửi seq nhảy cóc để bắn nhanh): nếu số cmd nhận trong 1 giây > 66, bỏ phần dư.
-
----
-
-## Task 4.2 – Server hitscan (chưa lag compensation)
-
-Mục đích: đúng ở ping 0 trước, rồi mới thêm tua thời gian.
-
-Làm (`server/src/simulation.ts`):
-- Gốc tia: mắt người bắn theo state **ngay sau khi chạy cmd đó** (`pos + eyeHeight`).
-- Hướng: từ `cmd.yaw`, `cmd.pitch` + recoil + spread (rng seed `playerId, shotSeq`) — **cùng công thức với client**.
-- `wallDist` = Rapier `castRay` chỉ với collider map, tối đa `range`.
-- Với mỗi người chơi khác còn sống, **khác đội** (phase 5; tạm thời bắn được tất cả trừ bản thân): `hitboxesFor(state hiện tại)`, `rayAabb`, lấy trúng gần nhất < `wallDist`.
-- Trúng: tính damage theo phần, gửi HitConfirm cho người bắn. (Trừ máu ở task 4.4.)
-- Luôn gửi ShotFx cho cả phòng (trừ người bắn) để vẽ vệt đạn + phát tiếng súng có vị trí (PannerNode).
-
-Nghiệm thu (chạy `?lat=0`):
-- [ ] Tab A đứng yên, tab B bắn đầu A: B nhận hitmarker đỏ.
-- [ ] B bắn A qua lỗ bắn: trúng. Bắn vào tường cạnh lỗ: không trúng.
-- [ ] Tab A thấy vệt đạn và nghe tiếng súng của B đúng hướng.
+Pitfalls:
+- If the server tick is used as `nowMs`, then when 2 cmds arrive bunched in one tick the server rejects the 2nd shot even though the client allowed it → ammo drift. Use the cmd's `seq`.
+- The server **must** limit `seq` from running much faster than real time (a cheater sending jumping seqs to shoot faster): if the number of cmds received in 1 second > 66, drop the excess.
 
 ---
 
-## Task 4.3 – Lịch sử hitbox + lag compensation ⚠️
+## Task 4.2 – Server hitscan (no lag compensation yet)
 
-Ý tưởng: người bắn nhìn thấy đối thủ ở **quá khứ** (trễ ping/2 + 100ms nội suy). Server phải tua đối thủ về đúng thời điểm đó rồi mới chấm.
+Purpose: be correct at 0 ping first, then add time rewind.
 
-Làm (`server/src/lagComp.ts`):
-- Sau mỗi tick server, lưu vào ring buffer: `{ serverTime, players: Map<id, { pos, crouching, alive }> }`. Giữ `HITBOX_HISTORY_MS` (60 mục).
-- Khi xử lý phát bắn:
+Do (`server/src/simulation.ts`):
+- Ray origin: the shooter's eye according to the state **right after running that cmd** (`pos + eyeHeight`).
+- Direction: from `cmd.yaw`, `cmd.pitch` + recoil + spread (rng seeded with `playerId, shotSeq`) — **the same formula as the client**.
+- `wallDist` = Rapier `castRay` against map colliders only, up to `range`.
+- For every other living player on a **different team** (phase 5; for now every player except yourself can be shot): `hitboxesFor(current state)`, `rayAabb`, take the nearest hit < `wallDist`.
+- Hit: compute damage by body part, and send HitConfirm to the shooter. (Health deduction is in task 4.4.)
+- Always send ShotFx to the whole room (except the shooter) to draw tracers + play positional gunshot sounds (PannerNode).
+
+Acceptance (run with `?lat=0`):
+- [ ] Tab A stands still, tab B shoots A's head: B gets a red hitmarker.
+- [ ] B shoots A through a firing slot: hits. Shooting the wall next to the slot: does not hit.
+- [ ] Tab A sees B's tracer and hears B's gunshot from the right direction.
+
+---
+
+## Task 4.3 – Hitbox history + lag compensation ⚠️
+
+Idea: the shooter sees the opponent in the **past** (ping/2 delay + 100ms interpolation). The server has to rewind the opponent to that moment before judging the hit.
+
+Do (`server/src/lagComp.ts`):
+- After each server tick, store in a ring buffer: `{ serverTime, players: Map<id, { pos, crouching, alive }> }`. Keep `HITBOX_HISTORY_MS` (60 entries).
+- When processing a shot:
   1. `t = clamp(cmd.fireRenderTime, serverNow − MAX_REWIND_MS, serverNow)`.
-  2. Tìm 2 mục lịch sử kẹp `t`, nội suy `pos` từng người (giống hệt cách client nội suy ở task 3.5). `crouching`, `alive` lấy theo mục trước.
-  3. Tạo hitbox từ vị trí đã tua, raycast như task 4.2.
-  4. **Tường không tua** (map tĩnh). Người bắn **không tua** (dùng vị trí hiện tại của chính mình).
-- Người bị bắn đã chết ở thời điểm `t` thì bỏ qua.
-- Phím F7 (debug): server gửi DebugShot gồm tia và các hitbox đã tua; client vẽ wireframe 2 giây. Người bắn nhìn thấy hitbox tua về phải **trùng** với hình nhân vật mình đã thấy lúc bắn.
+  2. Find the 2 history entries bracketing `t` and interpolate each player's `pos` (exactly the way the client interpolates in task 3.5). `crouching`, `alive` come from the earlier entry.
+  3. Build hitboxes from the rewound positions and raycast as in task 4.2.
+  4. **Walls are not rewound** (static map). The shooter is **not rewound** (use their own current position).
+- A target who was already dead at time `t` is skipped.
+- F7 key (debug): the server sends DebugShot containing the ray and the rewound hitboxes; the client draws the wireframes for 2 seconds. The rewound hitboxes the shooter sees must **coincide** with the character model they saw when firing.
 
-Nghiệm thu:
-- [ ] `?lat=100` ở tab B, A chạy ngang liên tục. B ngắm thẳng vào A (trên màn hình B) rồi bắn: **trúng** (trước khi có lag comp sẽ trượt sau lưng A).
-- [ ] Bật F7: hitbox tua về khớp hình A mà B nhìn thấy, sai lệch < 10cm.
-- [ ] `fireRenderTime` gửi lên cũ hơn 250ms (sửa tạm client): server kẹp lại, không tua quá giới hạn.
+Acceptance:
+- [ ] `?lat=100` in tab B, A runs sideways continuously. B aims straight at A (on B's screen) and fires: **hit** (before lag comp it would miss behind A).
+- [ ] With F7 on: the rewound hitbox matches the image of A that B sees, with an error < 10cm.
+- [ ] A `fireRenderTime` sent older than 250ms (temporarily change the client): the server clamps it and does not rewind beyond the limit.
 
-Pitfall:
-- Hitbox tua về lệch đều một khoảng theo hướng chạy → client và server tính `renderTime` khác nhau: kiểm tra `INTERP_DELAY_MS` giống nhau, offset đồng hồ (task 3.3) đúng.
-- Lệch ngẫu nhiên → cách nội suy ở server khác client (ví dụ server lấy snapshot gần nhất thay vì nội suy). Phải nội suy y hệt.
-- Lịch sử phải lưu **theo serverTime của tick**, không theo thời điểm gửi snapshot.
-
----
-
-## Task 4.4 – Máu, chết, hồi sinh, bất tử
-
-Làm (server):
-- `hp = 100` khi spawn. Trúng: `hp −= damage` (không trừ nếu đang bất tử). `hp ≤ 0` → `alive = false`, gửi Kill, lưu `respawnAt = now + RESPAWN_DELAY_MS`.
-- Người chết: không xử lý movement/fire, không có hitbox.
-- Hồi sinh: chọn spawn (đội của mình ở phase 5; tạm thời bất kỳ) **xa kẻ địch còn sống nhất** (cực đại khoảng cách tới kẻ địch gần nhất), đặt state mới, `hp = 100`, đạn đầy, `invulnUntil = now + SPAWN_INVULN_MS`, gửi Respawn.
-- Bất tử kết thúc sớm ngay khi người đó bắn phát hợp lệ đầu tiên.
-- Client: chết → màn hình xám + "Bị [tên] hạ" + đếm ngược. Hồi sinh → teleport (xoá `pending`, đặt state mới, không làm mượt). Nhân vật bất tử nhấp nháy mờ.
-
-Nghiệm thu:
-- [ ] Rifle bắn thân: 4 phát chết. Bắn đầu: 1 phát chết.
-- [ ] Chết 3 giây rồi hồi sinh ở chỗ xa địch.
-- [ ] Vừa hồi sinh bị bắn không mất máu; bắn một phát xong thì bị bắn là mất máu.
-- [ ] Hai người bắn chết nhau cùng tick: cả hai đều chết (không ai "ăn gian" sống sót), killfeed hiện 2 dòng.
+Pitfalls:
+- The rewound hitbox is consistently offset by a fixed amount along the running direction → client and server compute `renderTime` differently: check that `INTERP_DELAY_MS` is the same and that the clock offset (task 3.3) is correct.
+- Random offset → the server's interpolation differs from the client's (for example the server takes the nearest snapshot instead of interpolating). It must interpolate identically.
+- The history must be stored **by the tick's serverTime**, not by the time the snapshot was sent.
 
 ---
 
-## Task 4.5 – Hitmarker, killfeed, hiệu ứng trúng
+## Task 4.4 – Health, death, respawn, invulnerability
 
-Làm (client):
-- Hitmarker **chỉ hiện khi nhận HitConfirm** (không đoán trước). Âm "tách" khi trúng, "ting" khi headshot.
-- Killfeed góc trên phải: `Người bắn [súng] Người chết`, headshot có biểu tượng, mỗi dòng sống 5 giây, tối đa 5 dòng.
-- Bị bắn: viền đỏ ở cạnh màn hình phía hướng đạn đến (tính từ ShotFx có trúng mình hoặc thêm trường vào HitConfirm phía nạn nhân).
-- Số damage nổi (tuỳ chọn, tắt mặc định).
+Do (server):
+- `hp = 100` on spawn. On a hit: `hp −= damage` (not deducted if invulnerable). `hp ≤ 0` → `alive = false`, send Kill, store `respawnAt = now + RESPAWN_DELAY_MS`.
+- Dead players: no movement/fire processing, no hitbox.
+- Respawn: pick a spawn (your own team's in phase 5; for now any) **farthest from living enemies** (maximize the distance to the nearest enemy), set a new state, `hp = 100`, full ammo, `invulnUntil = now + SPAWN_INVULN_MS`, send Respawn.
+- Invulnerability ends early as soon as that player fires their first valid shot.
+- Client: on death → gray screen + "Killed by [name]" + countdown. On respawn → teleport (clear `pending`, set the new state, no smoothing). An invulnerable character flickers translucent.
 
-Nghiệm thu (bài kiểm tra cuối phase):
-- [ ] 3 tab với ping 20/80/150, bắn nhau 5 phút: không có ca "ngắm trúng rõ ràng mà không tính" (dùng F7 kiểm tra khi nghi ngờ).
-- [ ] Killfeed, hitmarker, hồi sinh hoạt động đúng ở cả 3 tab.
+Acceptance:
+- [ ] Rifle body shots: 4 shots to kill. Headshot: 1 shot to kill.
+- [ ] Dead for 3 seconds then respawn far from the enemy.
+- [ ] Just after respawn, getting shot loses no health; after firing one shot, getting shot loses health.
+- [ ] Two players kill each other on the same tick: both die (no one "cheats" and survives), and the killfeed shows 2 lines.
+
+---
+
+## Task 4.5 – Hitmarker, killfeed, hit effects
+
+Do (client):
+- The hitmarker **only appears on receiving HitConfirm** (no guessing ahead). A "tick" sound on hit, a "ting" on headshot.
+- Killfeed in the top-right corner: `Shooter [weapon] Victim`, with an icon for headshots, each line lives 5 seconds, at most 5 lines.
+- Getting shot: a red border on the screen edge on the side the bullet came from (computed from a ShotFx that hit you, or add a field to the HitConfirm on the victim's side).
+- Floating damage numbers (optional, off by default).
+
+Acceptance (end-of-phase test):
+- [ ] 3 tabs with ping 20/80/150, shooting each other for 5 minutes: no case of "clearly aimed on target but not counted" (use F7 to check when in doubt).
+- [ ] Killfeed, hitmarker, and respawn work correctly in all 3 tabs.

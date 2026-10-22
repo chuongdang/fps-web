@@ -2,8 +2,8 @@ import * as THREE from 'three'
 import { poses, WEAPON_KEYS, type FingerName, weaponPose, getAnchor, notifyPosesChanged, exportPoses, exportWeapon, resetPosesToFile, type Vec3 } from './poses'
 import type { ViewmodelHandle } from './viewmodel'
 
-// Debug (plan 10, P.6): F9 = bảng chỉnh tư thế (tay + súng, ghi thẳng vào `poses` đang chạy), F10 = camera quỹ đạo
-// nhìn model của chính mình. Chỉ dùng để chỉnh; chỉnh xong "Copy JSON" rồi dán vào render/poses.json.
+// Debug (plan 10, P.6): F9 = pose editor panel (hands + gun, writes straight into the running `poses`), F10 = orbit camera
+// looking at your own model. Tuning only; when done, "Copy JSON" and paste into render/poses.json.
 type Tab = 'First' | 'Third' | 'Character' | 'Grip' | 'Anchors' | 'Style' | 'Reload'
 const TABS: Tab[] = ['First', 'Third', 'Character', 'Grip', 'Anchors', 'Style', 'Reload']
 const FINGERS: FingerName[] = ['thumb', 'index', 'middle', 'ring', 'pinky']
@@ -11,9 +11,9 @@ const AXES = ['x', 'y', 'z']
 
 export interface PoseEditor {
   readonly orbitOn: boolean
-  /** Đặt camera quỹ đạo quanh (x,y,z) khi F10 bật */
+  /** Place the orbit camera around (x,y,z) while F10 is on */
   applyOrbit(camera: THREE.PerspectiveCamera, x: number, y: number, z: number): void
-  /** Mỗi frame: cập nhật chấm debug / phát thử nạp đạn */
+  /** Every frame: update the debug dots / reload preview playback */
   tick(dt: number): void
 }
 
@@ -21,15 +21,15 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
   let open = false
   let orbit = false
   let tab: Tab = 'First'
-  let selWeapon = -1   // -1 = theo súng đang cầm
+  let selWeapon = -1   // -1 = follow the held gun
   let orbitYaw = 0.6, orbitPitch = 0.25, orbitDist = 3
-  let playT = -1       // phát thử nạp đạn: thời gian đã chạy (giây)
+  let playT = -1       // reload preview: elapsed time (seconds)
 
   const panel = document.createElement('div')
   panel.style.cssText = 'position:fixed;top:8px;right:8px;width:340px;max-height:calc(100vh - 16px);overflow:auto;background:rgba(10,12,16,.92);color:#dde;font:12px monospace;padding:8px;border:1px solid #445;z-index:50;display:none'
   document.body.appendChild(panel)
 
-  // Chấm debug trong không gian camera của viewmodel
+  // Debug dots in the viewmodel camera space
   const dots = new Map<string, THREE.Mesh>()
   const dotGeo = new THREE.SphereGeometry(0.008, 8, 6)
   const dot = (name: string, color: number) => {
@@ -79,10 +79,10 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
   function render(): void {
     panel.replaceChildren()
     const head = el('div', 'margin-bottom:4px')
-    head.append(el('b', '', 'Pose editor (F9) · F10 camera quỹ đạo '))
+    head.append(el('b', '', 'Pose editor (F9) · F10 orbit camera '))
     panel.append(head)
     const wsel = el('select', 'background:#111;color:#dde;margin-right:6px')
-    const auto = el('option', '', '(súng đang cầm)'); auto.value = '-1'; wsel.append(auto)
+    const auto = el('option', '', '(held gun)'); auto.value = '-1'; wsel.append(auto)
     WEAPON_KEYS.forEach((k, i) => { const o = el('option', '', k); o.value = String(i); wsel.append(o) })
     wsel.value = String(selWeapon); wsel.onchange = () => { selWeapon = parseInt(wsel.value); if (selWeapon >= 0) equip?.(selWeapon); render() }
     head.append(wsel)
@@ -97,7 +97,7 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
       if (!w.first.gunPos) w.first.gunPos = [0.14, -0.16, -0.36]
       vecRows(body, 'gunPos', () => w.first.gunPos!, -1, 1)
       vecRows(body, 'gunRotDeg', () => w.first.gunRotDeg, -90, 90, 0.5)
-      body.append(el('div', 'margin-top:6px;color:#8af', 'Ngắm (giữ chuột phải; chấm xanh = đầu ruồi)'))
+      body.append(el('div', 'margin-top:6px;color:#8af', 'Aim (hold right mouse; green dot = front sight)'))
       numRow(body, 'adsEyeDist', () => w.first.adsEyeDist ?? 0.45, v => { w.first.adsEyeDist = v }, 0.05, 0.8, 0.005)
       if (!w.first.adsRotDeg) w.first.adsRotDeg = [0, 0, 0]
       vecRows(body, 'adsRotDeg', () => w.first.adsRotDeg!, -30, 30, 0.25)
@@ -106,7 +106,7 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
       vecRows(body, 'shoulderL', () => poses.first.shoulderL, -1, 1)
       vecRows(body, 'poleR', () => poses.first.poleR, -1, 1)
       vecRows(body, 'poleL', () => poses.first.poleL, -1, 1)
-      body.append(el('div', 'margin-top:6px;color:#8af', 'Tay bằng model nhân vật (xương thật)'))
+      body.append(el('div', 'margin-top:6px;color:#8af', 'Hands from the character model (real bones)'))
       vecRows(body, 'armsRoot', () => poses.first.armsRootOffset, -1, 1)
       vecRows(body, 'armsRot°', () => poses.first.armsRootRotDeg, -90, 90, 1)
       numRow(body, 'armsScale', () => poses.first.armsScale, v => { poses.first.armsScale = v }, 0.5, 3, 0.01)
@@ -124,7 +124,7 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
       vecRows(body, 'poleL', () => poses.third.poleL, -1, 1)
     } else if (tab === 'Character') {
       const c = poses.character, an = c.anim
-      body.append(el('div', 'color:#8af', 'Nhân vật có xương (góc 3)'))
+      body.append(el('div', 'color:#8af', 'Skinned character (3rd person)'))
       numRow(body, 'crouchDrop', () => c.crouchDrop, v => { c.crouchDrop = v }, -0.3, 0.6, 0.01)
       numRow(body, 'crouchWalkDrop', () => c.crouchWalkDrop, v => { c.crouchWalkDrop = v }, -0.3, 0.6, 0.01)
       numRow(body, 'pitchLimit°', () => c.spinePitchLimitDeg, v => { c.spinePitchLimitDeg = v }, 10, 90, 1)
@@ -135,8 +135,8 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
       vecRows(body, 'poleL', () => c.poleL, -1, 1)
       vecRows(body, 'handRotR°', () => c.handRotOffsetDegR, -180, 180, 1)
       vecRows(body, 'handRotL°', () => c.handRotOffsetDegL, -180, 180, 1)
-      vecRows(body, '1tay.pos', () => c.oneHandGunPos, -0.3, 0.3, 0.002)
-      vecRows(body, '1tay.rot°', () => c.oneHandGunRotDeg, -180, 180, 1)
+      vecRows(body, 'oneHand.pos', () => c.oneHandGunPos, -0.3, 0.3, 0.002)
+      vecRows(body, 'oneHand.rot°', () => c.oneHandGunRotDeg, -180, 180, 1)
       body.append(el('div', 'margin-top:6px;color:#8af', 'Animation'))
       numRow(body, 'blendTime', () => an.blendTime, v => { an.blendTime = v }, 0.02, 0.6, 0.01)
       numRow(body, 'walkRef m/s', () => an.walkRefSpeed, v => { an.walkRefSpeed = v }, 0.5, 4, 0.05)
@@ -147,7 +147,7 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
     } else if (tab === 'Grip') {
       selectRow(body, 'axis', ['x', 'y', 'z'], () => poses.grip.axis, v => { poses.grip.axis = v as 'x' | 'y' | 'z' })
       for (const hand of ['R', 'L'] as const) {
-        body.append(el('div', 'margin-top:4px;color:#8af', hand === 'R' ? 'Tay phải (độ gập đốt 1/2/3)' : 'Tay trái (độ gập đốt 1/2/3)'))
+        body.append(el('div', 'margin-top:4px;color:#8af', hand === 'R' ? 'Right hand (joint 1/2/3 bend, degrees)' : 'Left hand (joint 1/2/3 bend, degrees)'))
         for (const f of FINGERS) {
           const v = poses.grip[hand][f]
           for (let i = 0; i < 3; i++) numRow(body, `${f}${i + 1}`, () => v[i]!, n => { v[i] = n }, -120, 120, 1)
@@ -167,12 +167,12 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
         numRow(body, 'thickness', () => s.thickness, v => { s.thickness = v }, 0.02, 0.2, 0.001)
         numRow(body, 'handSize', () => s.handSize, v => { s.handSize = v }, 0.02, 0.2, 0.001)
       }
-      body.append(el('div', 'margin-top:6px', 'Màu tay áo/da đổi trong poses.json (tải lại trang để thấy).'))
+      body.append(el('div', 'margin-top:6px', 'Sleeve/skin colours are changed in poses.json (reload the page to see them).'))
     } else {
       const rl = poses.reloadLeftHand
-      numRow(body, 't (dừng hình)', () => vm.debug.freezeReload, v => { vm.debug.freezeReload = v; playT = -1 }, 0, 1, 0.01)
-      btn(body, 'Phát thử nạp đạn', () => { playT = 0 })
-      btn(body, 'Bỏ dừng hình', () => { vm.debug.freezeReload = -1; playT = -1; render() })
+      numRow(body, 't (freeze frame)', () => vm.debug.freezeReload, v => { vm.debug.freezeReload = v; playT = -1 }, 0, 1, 0.01)
+      btn(body, 'Preview reload', () => { playT = 0 })
+      btn(body, 'Unfreeze', () => { vm.debug.freezeReload = -1; playT = -1; render() })
       numRow(body, 'magDetachT', () => rl.magDetachT, v => { rl.magDetachT = v }, 0, 1, 0.01)
       numRow(body, 'magAttachT', () => rl.magAttachT, v => { rl.magAttachT = v }, 0, 1, 0.01)
       for (const k of ['roll', 'pitch'] as const) numRow(body, `tilt.${k}`, () => rl.gunTiltDeg[k], v => { rl.gunTiltDeg[k] = v }, -90, 90, 1)
@@ -184,13 +184,13 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
         if (!k.offset) k.offset = [0, 0, 0]
         vecRows(body, 'offset', () => k.offset!, -0.6, 0.6)
       })
-      body.append(el('div', 'margin-top:6px;color:#999', 'Mốc t nên trùng các mốc `at` trong profile âm thanh nạp đạn (A.6).'))
+      body.append(el('div', 'margin-top:6px;color:#999', 'The t marks should match the `at` marks in the reload audio profile (A.6).'))
     }
     panel.append(body)
     const foot = el('div', 'margin-top:8px;border-top:1px solid #445;padding-top:6px')
     btn(foot, 'Copy JSON', () => copy(exportPoses()))
-    btn(foot, 'Copy súng này', () => copy({ [WEAPON_KEYS[id]!]: exportWeapon(id) }))
-    btn(foot, 'Reset về file', () => { resetPosesToFile(); render() })
+    btn(foot, 'Copy this gun', () => copy({ [WEAPON_KEYS[id]!]: exportWeapon(id) }))
+    btn(foot, 'Reset to file', () => { resetPosesToFile(); render() })
     panel.append(foot)
   }
 

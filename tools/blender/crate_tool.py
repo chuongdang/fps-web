@@ -1,6 +1,6 @@
 """
-Chuẩn hoá thùng gỗ thành khối đơn vị 1x1x1 m, tâm ở gốc (Y lên) rồi xuất glb. Game scale theo kích thước thùng trên map.
-Dùng:
+Normalize the wooden crate to a 1x1x1 m unit cube centered at the origin (Y up), then export glb. The game scales it to each crate's size on the map.
+Usage:
   blender -b assets/source/texture/Crate.blend --python tools/blender/crate_tool.py -- client/public/models/crate.glb
 """
 import bpy, sys
@@ -8,7 +8,7 @@ from mathutils import Vector
 
 out = sys.argv[sys.argv.index("--") + 1]
 objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
-assert objs, "không có mesh"
+assert objs, "no mesh found"
 
 mn = Vector((1e9, 1e9, 1e9)); mx = Vector((-1e9, -1e9, -1e9))
 for o in objs:
@@ -19,7 +19,7 @@ for o in objs:
 center = (mn + mx) / 2
 size = mx - mn
 
-# File gốc (Blender 2.79) chỉ có màu viewport, node vật liệu trống nên glb mất màu: dựng lại Principled BSDF từ diffuse_color
+# The source file (Blender 2.79) only has viewport colors and empty material nodes, so the glb loses its colors: rebuild a Principled BSDF from diffuse_color
 for m in bpy.data.materials:
     m.use_nodes = True
     m.node_tree.nodes.clear()
@@ -32,7 +32,7 @@ for m in bpy.data.materials:
 bpy.ops.object.select_all(action='DESELECT')
 for o in objs:
     o.select_set(True)
-    # scale quanh gốc object, nên vị trí phải chia size luôn: (vị trí - tâm) / size
+    # scale is around the object origin, so the location must be divided by size too: (location - center) / size
     o.scale = Vector((o.scale[0] / size[0], o.scale[1] / size[1], o.scale[2] / size[2]))
     o.location = Vector(((o.location[i] - center[i]) / size[i] for i in range(3)))
 bpy.context.view_layer.objects.active = objs[0]

@@ -1,16 +1,16 @@
-# Phase 2 – Súng (offline, bắn bia)
+# Phase 2 – Guns (offline, shooting targets)
 
-Mục tiêu: bắn bia đã tay. Logic súng (đạn, fire rate, spread) viết trong `shared/` để phase 4 server dùng lại.
+Goal: shooting targets feels great. The gun logic (ammo, fire rate, spread) is written in `shared/` so the phase 4 server can reuse it.
 
 ---
 
-## Thông số súng (`shared/src/weapons.ts`)
+## Gun stats (`shared/src/weapons.ts`)
 
 ```ts
 export interface WeaponDef {
   id: number;
   name: string;
-  auto: boolean;            // giữ chuột là bắn liên tục
+  auto: boolean;            // holding the mouse button fires continuously
   damage: number;
   headMult: number;
   legMult: number;
@@ -19,8 +19,8 @@ export interface WeaponDef {
   reloadMs: number;
   range: number;            // m
   spreadDeg: { stand: number; move: number; air: number; crouch: number };
-  recoilPitchDeg: number;   // mỗi phát hếch nòng
-  recoilYawDeg: number;     // lệch ngang ngẫu nhiên ± giá trị này
+  recoilPitchDeg: number;   // muzzle climb per shot
+  recoilYawDeg: number;     // random horizontal deviation ± this value
   recoilRecoverDegPerSec: number;
 }
 
@@ -36,29 +36,29 @@ export const WEAPONS: WeaponDef[] = [
 ];
 ```
 
-Trạng thái súng của người chơi:
+The player's weapon state:
 
 ```ts
 export interface WeaponState {
-  current: number;           // id súng đang cầm
-  ammo: number[];            // đạn trong băng theo id súng
-  reloadEndMs: number;       // 0 = không reload
+  current: number;           // id of the gun being held
+  ammo: number[];            // rounds in the magazine per gun id
+  reloadEndMs: number;       // 0 = not reloading
   nextFireMs: number;
-  shotSeq: number;           // tăng mỗi phát, dùng làm seed spread
-  triggerHeld: boolean;      // cho súng bán tự động
+  shotSeq: number;           // increments per shot, used as the spread seed
+  triggerHeld: boolean;      // for semi-automatic guns
 }
 ```
 
-Thời gian trong logic súng tính bằng **ms của mô phỏng** (`tick * 1000 / TICK_RATE`), không dùng `performance.now()`, để client và server tính giống nhau.
+Time in the gun logic is measured in **simulation ms** (`tick * 1000 / TICK_RATE`), not `performance.now()`, so client and server compute the same results.
 
 ---
 
-## Task 2.1 – Viewmodel + render pass riêng
+## Task 2.1 – Viewmodel + separate render pass
 
-Làm (`client/src/render/viewmodel.ts`):
-- Scene riêng `viewScene` + camera riêng `viewCam` (FOV cố định 60, near 0.01).
-- Súng `.glb` đặt trong `viewScene`, vị trí khởi điểm khoảng `(0.25, −0.22, −0.5)`.
-- Render mỗi frame:
+Do (`client/src/render/viewmodel.ts`):
+- A separate scene `viewScene` + a separate camera `viewCam` (fixed FOV 60, near 0.01).
+- The gun `.glb` is placed in `viewScene`, with a starting position of about `(0.25, −0.22, −0.5)`.
+- Render every frame:
   ```ts
   renderer.autoClear = false;
   renderer.clear();
@@ -66,83 +66,83 @@ Làm (`client/src/render/viewmodel.ts`):
   renderer.clearDepth();
   renderer.render(viewScene, viewCam);
   ```
-- Nếu chưa có file súng: dùng khối hộp dài màu xám làm súng tạm.
-- Phím 1/2 đổi Rifle/Pistol (có animation đơn giản: súng hạ xuống rồi đưa lên, 0,3s).
+- If the gun file does not exist yet: use a long gray box as a temporary gun.
+- Keys 1/2 switch Rifle/Pistol (with a simple animation: the gun lowers then raises, 0.3s).
 
-Nghiệm thu:
-- [ ] Đứng sát tường, súng không bị tường che.
-- [ ] Đổi FOV camera chính (task 1.1 setting) thì súng không méo theo.
+Acceptance:
+- [ ] Standing right against a wall, the gun is not hidden by the wall.
+- [ ] Changing the main camera FOV (the task 1.1 setting) does not distort the gun.
 
 ---
 
-## Task 2.2 – Hitscan + bia
+## Task 2.2 – Hitscan + targets
 
-Làm:
-- Bia: vài hình hộp người (cao 1,8m) đặt khu giữa, đầu là khối riêng. Bia dùng **cùng hàm hitbox** sẽ dùng cho người chơi (`shared/src/hitbox.ts`):
+Do:
+- Targets: a few human-shaped boxes (1.8m tall) placed in the mid-field, with the head as a separate block. Targets use the **same hitbox function** that will be used for players (`shared/src/hitbox.ts`):
   ```ts
   interface HitBox { min: Vec3; max: Vec3; part: 'head' | 'body' | 'legs'; }
-  function hitboxesFor(state: PlayerState, cfg): HitBox[];  // AABB, không xoay theo yaw
-  function rayAabb(origin, dir, box, maxDist): number | null; // slab test, trả khoảng cách
+  function hitboxesFor(state: PlayerState, cfg): HitBox[];  // AABB, does not rotate with yaw
+  function rayAabb(origin, dir, box, maxDist): number | null; // slab test, returns the distance
   ```
-  Đứng: legs 0–0,8m, body 0,8–1,45m, head 1,45–1,8m (rộng 0,6/0,6/0,35). Ngồi: hạ tỉ lệ theo `crouchHeight`.
-- Bắn: tia từ mắt (`pos + eyeHeight`) theo hướng nhìn (+ spread). Tính `wallDist` bằng Rapier `castRay` chỉ với map; tính trúng hitbox gần nhất có khoảng cách < `wallDist`.
-- Trúng: hiện hitmarker (dấu X trắng, đầu thì đỏ) 150ms, bia nháy đỏ. Trượt: decal lỗ đạn nhỏ trên tường (tối đa 50 cái, cũ nhất bị xoá).
+  Standing: legs 0–0.8m, body 0.8–1.45m, head 1.45–1.8m (widths 0.6/0.6/0.35). Crouching: scale down proportionally by `crouchHeight`.
+- Shooting: a ray from the eye (`pos + eyeHeight`) along the view direction (+ spread). Compute `wallDist` with Rapier `castRay` against the map only; hit the nearest hitbox whose distance is < `wallDist`.
+- Hit: show a hitmarker (white X, red for head) for 150ms, the target flashes red. Miss: a small bullet-hole decal on the wall (max 50, the oldest is removed).
 
-Nghiệm thu:
-- [ ] Bắn bia qua lỗ bắn trên tường: trúng. Bắn vào phần tường cạnh lỗ: không trúng bia đằng sau.
-- [ ] Ngắm đầu → hitmarker đỏ; ngắm thân → trắng.
-- [ ] Test: `rayAabb` với tia đi xuyên giữa box, tia sượt ngoài, tia xuất phát bên trong box (trả 0).
+Acceptance:
+- [ ] Shooting a target through a firing slot in the wall: hits. Shooting the wall next to the slot: does not hit the target behind it.
+- [ ] Aiming at the head → red hitmarker; aiming at the body → white.
+- [ ] Test: `rayAabb` with a ray passing through the middle of the box, a ray grazing outside, and a ray starting inside the box (returns 0).
 
 Pitfall:
-- Hướng nhìn từ yaw/pitch: `dir = (−sin(yaw)·cos(pitch), sin(pitch), −cos(yaw)·cos(pitch))`. Viết test cho hàm này.
-- Hitbox dùng AABB không xoay là cố ý (nhân vật khối hộp, đơn giản cho netcode).
+- View direction from yaw/pitch: `dir = (−sin(yaw)·cos(pitch), sin(pitch), −cos(yaw)·cos(pitch))`. Write a test for this function.
+- Using a non-rotating AABB for the hitbox is deliberate (box characters, simpler for netcode).
 
 ---
 
-## Task 2.3 – Logic súng
+## Task 2.3 – Gun logic
 
-Làm `shared/src/weaponLogic.ts`:
+Write `shared/src/weaponLogic.ts`:
 
 ```ts
 function tryFire(ws: WeaponState, def: WeaponDef, nowMs: number, triggerDown: boolean): boolean
 ```
-- Không bắn nếu: đang reload, `nowMs < nextFireMs`, hết đạn, hoặc súng bán tự động mà `triggerHeld` từ tick trước.
-- Bắn: `ammo--`, `nextFireMs = nowMs + fireIntervalMs`, `shotSeq++`.
-- Hết đạn mà vẫn bóp cò → tự reload (và phát tiếng "tạch" một lần).
-- Reload (R hoặc tự động): `reloadEndMs = nowMs + reloadMs`; xong thì nạp đầy. Đổi súng giữa chừng → huỷ reload.
+- Does not fire if: reloading, `nowMs < nextFireMs`, out of ammo, or the gun is semi-automatic and `triggerHeld` from the previous tick.
+- Firing: `ammo--`, `nextFireMs = nowMs + fireIntervalMs`, `shotSeq++`.
+- Out of ammo but still pulling the trigger → auto reload (and play a "click" sound once).
+- Reload (R or automatic): `reloadEndMs = nowMs + reloadMs`; when done, refill the magazine. Switching guns midway → cancels the reload.
 
 Spread:
-- Chọn mức theo trạng thái: air > move (tốc độ ngang > 1 m/s) > crouch > stand.
-- Lệch tia bằng random **có seed**: `rng = mulberry32(hashSeed(playerId, shotSeq))`, lấy góc ngẫu nhiên trong hình nón `spreadDeg`.
+- Pick the level by state: air > move (horizontal speed > 1 m/s) > crouch > stand.
+- Deviate the ray using **seeded** random: `rng = mulberry32(hashSeed(playerId, shotSeq))`, taking a random angle within a cone of `spreadDeg`.
 
 Recoil:
-- Mỗi phát: cộng `recoilPitchDeg` vào một biến `recoilPitch` riêng (không sửa thẳng pitch của chuột), cộng ngang ngẫu nhiên (rng cùng seed).
-- Hướng bắn thực tế = góc nhìn + recoil. Recoil hồi dần về 0 theo `recoilRecoverDegPerSec` khi không bắn.
-- Camera cũng hiển thị recoil (người chơi thấy tâm nhảy lên).
+- Each shot: add `recoilPitchDeg` to a separate `recoilPitch` variable (do not modify the mouse pitch directly), add a random horizontal amount (same seeded rng).
+- The actual fire direction = view angle + recoil. Recoil gradually returns to 0 at `recoilRecoverDegPerSec` when not firing.
+- The camera also displays the recoil (the player sees the crosshair jump up).
 
-Nghiệm thu:
-- [ ] Rifle giữ chuột: bắn đều 10 phát/giây, đếm đạn chính xác, hết 30 thì tự reload 2 giây.
-- [ ] Pistol giữ chuột: chỉ bắn 1 phát; click nhanh bị giới hạn 4 phát/giây.
-- [ ] Bắn khi đang nhảy toé đạn rõ rệt hơn khi đứng (nhìn decal trên tường).
-- [ ] Test: cùng `playerId` + `shotSeq` luôn cho cùng hướng lệch.
+Acceptance:
+- [ ] Rifle with the mouse held: fires steadily at 10 shots/second, the ammo count is exact, and after 30 it auto-reloads for 2 seconds.
+- [ ] Pistol with the mouse held: fires only 1 shot; fast clicking is limited to 4 shots/second.
+- [ ] Shooting while jumping spreads noticeably more than while standing (look at the decals on the wall).
+- [ ] Test: the same `playerId` + `shotSeq` always gives the same deviation direction.
 
 ---
 
-## Task 2.4 – Hiệu ứng, âm thanh, HUD
+## Task 2.4 – Effects, sound, HUD
 
-Làm:
-- Hiệu ứng bằng code trên viewmodel (không cần animation file):
-  - Bắn: lùi súng 4cm + hếch 3° rồi hồi về như lò xo (~80ms).
-  - Đi: lắc súng theo hình số 8, biên độ tỉ lệ tốc độ.
-  - Reload: chúc súng xuống 35° và hạ 15cm trong 40% thời gian, giữ, rồi đưa lên.
-  - Lửa đầu nòng: sprite tại điểm `muzzle` (Empty trong file glb, hoặc toạ độ cố định nếu dùng súng tạm), hiện 1 frame, xoay ngẫu nhiên.
-- Âm thanh (`client/src/audio.ts`, Web Audio API):
-  - Preload toàn bộ file vào `AudioBuffer`. Mỗi lần phát tạo `AudioBufferSourceNode` mới.
-  - Resume `AudioContext` trong sự kiện click khoá chuột.
-  - Âm: bắn (mỗi súng), reload, hết đạn, bước chân (theo quãng đường đi, ~mỗi 2,2m), hitmarker, headshot.
-- HUD (HTML/CSS đè canvas): tâm ngắm 4 vạch (giãn ra theo spread hiện tại), máu, đạn `25 / 30`, tên súng, hitmarker.
+Do:
+- Code-driven effects on the viewmodel (no animation files needed):
+  - Fire: kick the gun back 4cm + tilt up 3° then return like a spring (~80ms).
+  - Walking: sway the gun in a figure-8, amplitude proportional to speed.
+  - Reload: tip the gun down 35° and lower it 15cm during 40% of the time, hold, then bring it back up.
+  - Muzzle flash: a sprite at the `muzzle` point (an Empty in the glb file, or fixed coordinates if using the temporary gun), shown for 1 frame, randomly rotated.
+- Sound (`client/src/audio.ts`, Web Audio API):
+  - Preload all files into `AudioBuffer`. Each play creates a new `AudioBufferSourceNode`.
+  - Resume the `AudioContext` in the pointer-lock click event.
+  - Sounds: fire (per gun), reload, empty click, footsteps (by distance walked, ~every 2.2m), hitmarker, headshot.
+- HUD (HTML/CSS over the canvas): 4-line crosshair (spreads out per the current spread), health, ammo `25 / 30`, gun name, hitmarker.
 
-Nghiệm thu:
-- [ ] Xả Rifle: tiếng không bị cắt, không bị rè.
-- [ ] Tâm ngắm giãn khi chạy/nhảy, co lại khi đứng.
-- [ ] Không có âm thanh nào phát trước khi người chơi click lần đầu (không lỗi console).
+Acceptance:
+- [ ] Spraying the Rifle: the sound is not cut off and not distorted.
+- [ ] The crosshair spreads when running/jumping and tightens when standing.
+- [ ] No sound plays before the player's first click (no console errors).

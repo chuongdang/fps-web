@@ -13,9 +13,9 @@ beforeAll(async () => { nav = buildNav(await createWorld(map), map, defaultMovem
 
 const OPTS: RoomOptions = { mode: 'defense', settings: { waves: 10, intermissionSec: 10, difficulty: 'normal' } }
 
-// Thế giới thật (Rapier): zombie đi theo nav, va chạm tường, leo ramp
-describe('Thủ Thành – zombie trong thế giới thật (T.4)', () => {
-  it('đợt 1: walker tới được người chơi và làm họ mất máu; 28 zombie + 4 người giữ tick ≤ 4ms', async () => {
+// Real world (Rapier): zombies follow the nav, collide with walls, climb ramps
+describe('Defense - zombies in the real world (T.4)', () => {
+  it('wave 1: walkers reach the players and hurt them; 28 zombies + 4 players keep the tick <= 4ms', async () => {
     const rm = new RoomManager(map, () => 0, MATCH)
     const humans: Player[] = []
     for (let i = 0; i < 4; i++) {
@@ -33,7 +33,7 @@ describe('Thủ Thành – zombie trong thế giới thật (T.4)', () => {
     for (let i = 0; i < 90; i++) step()
     expect(room.phase).toBe(MatchPhase.Playing)
     m.devSetWave(room, 8)   // 20 walker + 10 crawler + 2 screamer, ×(1+0.6×3)
-    // cho các world của zombie nạp xong
+    // let the zombie worlds finish loading
     const t0 = performance.now()
     let ticks = 0
     let maxAlive = 0, everHurt = 0, defeatAt = -1
@@ -45,11 +45,11 @@ describe('Thủ Thành – zombie trong thế giới thật (T.4)', () => {
       await new Promise(r => setTimeout(r, 0))
     }
     const ms = (performance.now() - t0) / ticks
-    console.log(`defense perf: ${ms.toFixed(2)} ms/tick, max zombie sống ${maxAlive}, wave ${m.wave} kind ${m.kind}`)
+    console.log(`defense perf: ${ms.toFixed(2)} ms/tick, max zombies alive ${maxAlive}, wave ${m.wave} kind ${m.kind}`)
     const hurt = everHurt
     console.log(`hurt samples ${everHurt}, defeat at ${defeatAt}s`)
     expect(maxAlive).toBeGreaterThan(10)
-    expect(hurt).toBeGreaterThan(0)    // zombie đã tới nơi và cào trúng
+    expect(hurt).toBeGreaterThan(0)    // zombies arrived and landed claw hits
     expect(ms).toBeLessThan(6)
   }, 120_000)
 })

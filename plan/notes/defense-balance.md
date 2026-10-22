@@ -1,12 +1,12 @@
-# Thủ Thành – số liệu cân bằng (T.9)
+# Defense – balance data (T.9)
 
-Công cụ: `BALANCE=1 npx vitest run server/src/defenseBalance.test.ts` (bot KHÓ đóng vai người chơi giữ thành, độ khó `normal`, mô phỏng nhanh hơn thời gian thực).
+Tool: `BALANCE=1 npx vitest run server/src/defenseBalance.test.ts` (a HARD bot plays the role of a player holding the base, difficulty `normal`, simulated faster than real time).
 
-| Lần | Cấu hình | Kết quả | Ghi chú |
+| Run | Configuration | Result | Notes |
 |---|---|---|---|
-| 1 | 1 bot khó | thua ở đợt 1 sau 27s | |
-| 1 | 4 bot khó | thua ở đợt 2 sau 113s (đợt 1 xong sau 70s) | tiền cuối 1700–2300/người |
+| 1 | 1 hard bot | lost at wave 1 after 27s | |
+| 1 | 4 hard bots | lost at wave 2 after 113s (wave 1 cleared after 70s) | final money 1700–2300/player |
 
-**Chưa kết luận được cân bằng.** Bot không phải đại diện cho người chơi: nó đứng giữa căn cứ và đấu súng như đấu người, không thủ ở gờ/tháp, không lùi bắn, không dùng lựu đạn theo đám đông. Mục tiêu của plan (1 người khá trụ tới đợt 7–8; 4 người qua 10 đợt nếu phối hợp) cần **chơi thử bằng người thật**, ghi lại đợt thua, thời gian mỗi đợt và tiền vào bảng này.
+**Balance cannot be concluded yet.** The bot is not representative of a player: it stands in the middle of the base and gunfights as if against players, does not defend at ledges/towers, does not back up while shooting, and does not throw grenades at crowds. The plan's goal (1 decent player holds until wave 7–8; 4 players clear 10 waves if they coordinate) needs **playtesting with real people**, recording the wave lost, the time per wave, and the money in this table.
 
-Núm chỉnh (không cần sửa code): `shared/src/zombieTypes.json` (hp, runSpeed, clawDamage, attackMs, reward), `shared/src/waves.json` (số lượng, nhịp sinh, hệ số độ khó/số người, `maxAlive`), `shared/src/defense.ts → DEFENSE` (thưởng hết đợt, thời gian gục/cứu, báo trước vuốt 250ms), `BOSS`.
+Tuning knobs (no code changes needed): `shared/src/zombieTypes.json` (hp, runSpeed, clawDamage, attackMs, reward), `shared/src/waves.json` (counts, spawn pacing, difficulty/player-count multipliers, `maxAlive`), `shared/src/defense.ts → DEFENSE` (end-of-wave reward, downed/rescue time, 250ms claw telegraph), `BOSS`.

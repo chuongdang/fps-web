@@ -1,5 +1,5 @@
-// Server offline (plan 15, B.0): cùng code Room/simulation như server Node nhưng chạy trong Web Worker của trình duyệt.
-// Phòng 'offline' chỉ có một người thật + bot. Không import ws/fs/process.
+// Offline server (plan 15, B.0): the same Room/simulation code as the Node server but running in the browser's Web Worker.
+// The 'offline' room has only one real player + bots. Does not import ws/fs/process.
 import {
   MsgType, defaultMovement, otherTeam, isZombieMode, type JoinMsg, type RoomOptions, type LoadedMap, type MovementConfig, type NavDebugMsg, type Transport, type TeamId,
 } from '@fps/shared'
@@ -17,9 +17,9 @@ const BOT_DEBUG_EVERY_TICKS = 6
 export interface OfflineHost {
   room: Room
   rooms: RoomManager
-  /** Nhận một kết nối (LocalTransport). Join đầu tiên vào phòng offline. */
+  /** Accept a connection (LocalTransport). The first Join enters the offline room. */
   connect(transport: Transport): void
-  /** Chạy các tick đã tới hạn theo đồng hồ (gọi bằng setInterval) */
+  /** Run the ticks that are due according to the clock (call it with setInterval) */
   pump(): void
   dispose(): void
 }
@@ -30,11 +30,11 @@ export async function createOfflineHost(map: LoadedMap, now: () => number = () =
   let room = rooms.createRoom(OFFLINE_ROOM, undefined, 'deathmatch')
   room.offline = true
 
-  // Rapier khởi tạo wasm ở lần createWorld đầu → làm tuần tự, world này dùng riêng cho lưới di chuyển
+  // Rapier initialises wasm on the first createWorld → do it sequentially; this world is used only for the navigation grid
   const navWorld: CollisionWorld = await createWorld(map, cfg.standHeight, cfg.crouchHeight, cfg.radius)
   const nav = buildNav(navWorld, map, cfg)
   room.nav = nav
-  // Người chơi chọn thể thức lúc vào (Lây Nhiễm / Thủ Thành): dựng lại phòng với cài đặt đó
+  // The player chooses the game mode when joining (Infection / Defense): rebuild the room with those settings
   const rebuildRoom = (options: RoomOptions): Room => {
     rooms.rooms.delete(OFFLINE_ROOM)
     const r = rooms.createRoom(OFFLINE_ROOM, undefined, 'deathmatch', options)
@@ -74,7 +74,7 @@ export async function createOfflineHost(map: LoadedMap, now: () => number = () =
     now,
     allowDebugCmds: true,
     joinOverride: (transport: Transport, name: string, msg: JoinMsg) => {
-      if (human) return null   // một người thật cho mỗi phòng offline
+      if (human) return null   // one real player per offline room
       if (msg.options && msg.options.mode && msg.options.mode !== 'tdm' && room.players.size === 0) {
         room = rebuildRoom(msg.options)
       }
@@ -82,7 +82,7 @@ export async function createOfflineHost(map: LoadedMap, now: () => number = () =
       const player = room.join(name, transport, loop.tick, now(), pref)
       if (!player) return null
       human = player
-      if (room.config.settings.mode === 'infection') for (let i = 0; i < 5; i++) addBot(room, 'medium', 'A')   // Lây Nhiễm cần ≥ 3 người: có sẵn 5 bot (xoá được bằng \\)
+      if (room.config.settings.mode === 'infection') for (let i = 0; i < 5; i++) addBot(room, 'medium', 'A')   // Infection needs ≥ 3 players: 5 bots are pre-added (removable with \\)
       return { room, player }
     },
     onJoined: (_room, player) => { player.transport.send(offlineStateMsg(room)) },
@@ -91,7 +91,7 @@ export async function createOfflineHost(map: LoadedMap, now: () => number = () =
       switch (msg.cmd) {
         case 'addBot': {
           if (room.humanCount() >= room.config.maxPlayers) break
-          const team = msg.ally === true || isZombieMode(room.config.settings.mode) ? player.team : otherTeam(player.team)   // thể thức zombie: mọi bot là người cùng phe
+          const team = msg.ally === true || isZombieMode(room.config.settings.mode) ? player.team : otherTeam(player.team)   // zombie modes: every bot is a human on the same team
           addBot(room, msg.difficulty === 'hard' ? 'hard' : 'medium', team)
           break
         }
@@ -115,7 +115,7 @@ export async function createOfflineHost(map: LoadedMap, now: () => number = () =
       dirty()
     },
   }
-  room.infiniteMoney = true   // mặc định bật
+  room.infiniteMoney = true   // on by default
 
   return {
     get room() { return room },

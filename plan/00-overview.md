@@ -1,43 +1,43 @@
-# 00 – Tổng quan: FPS Web "Cớm vs Cướp"
+# 00 – Overview: FPS Web "Cops vs Terrorists"
 
-## Cách dùng bộ plan này (dành cho người dùng)
+## How to use this plan set (for the user)
 
-- Copy cả thư mục `plan/` và file `CLAUDE.md` vào gốc repo mới.
-- **Mỗi phiên Claude Code chỉ giao một task** (ví dụ "làm task 1.3"). Prompt mẫu:
-  > Đọc CLAUDE.md, plan/00-overview.md và plan/02-phase1-movement.md. Làm task 1.3. Xong thì báo cáo theo mẫu trong CLAUDE.md.
-- Sau mỗi task, **tự test tay theo checklist** của task đó rồi mới giao task tiếp. Đừng giao 3 task một lúc.
-- Task có đánh dấu ⚠️ là task khó. Nên dùng model mạnh nhất bạn có cho các task này.
-- Nếu Claude sửa bug 2 lần không xong: mở phiên mới, dán mô tả bug + kết quả debug overlay, không tiếp tục phiên cũ (context bị rối).
-- Repo con MOBA có netcode reconcile bằng input replay đã chạy ổn. Ở task 3.6, điền đường dẫn vào đây để Claude đọc tham khảo: `MOBA_REPO = <điền đường dẫn>`
+- Copy the whole `plan/` folder and the `CLAUDE.md` file into the root of the new repo.
+- **Give each Claude Code session only one task** (for example "do task 1.3"). Sample prompt:
+  > Read CLAUDE.md, plan/00-overview.md and plan/02-phase1-movement.md. Do task 1.3. When done, report using the template in CLAUDE.md.
+- After each task, **test by hand using that task's checklist** before handing out the next task. Do not hand out 3 tasks at once.
+- Tasks marked ⚠️ are hard tasks. Use the strongest model you have for these.
+- If Claude fails to fix a bug after 2 attempts: open a new session, paste the bug description + the debug overlay output, and do not continue the old session (its context has become tangled).
+- The MOBA sub-repo has a netcode that reconciles by input replay and already works well. At task 3.6, fill in the path here so Claude can read it for reference: `MOBA_REPO = <fill in path>`
 
-## Mục tiêu
+## Goal
 
-FPS trên trình duyệt, chơi nội bộ. Team Deathmatch hai đội **Cớm** và **Cướp**, nhân vật khối hộp kiểu Krunker, di chuyển nhanh (trượt, bunny hop), súng không tay, bắn hitscan, respawn nhanh.
+A browser FPS for internal play. Two-team Team Deathmatch, **Cops** and **Terrorists**, Krunker-style box characters, fast movement (slide, bunny hop), handless guns, hitscan shooting, fast respawn.
 
-Nguyên tắc: gameplay "đã tay" trước, đẹp sau.
+Principle: nail the gameplay feel first, make it pretty later.
 
-## Chủ đề
+## Theme
 
-- Phe hư cấu. **Không dùng quân phục, huy hiệu, quân hàm thật** của lực lượng nào.
-- Cớm: xanh dương, mũ kê-pi. Cướp: đen/sọc, khăn trùm mặt, túi tiền sau lưng.
-- Tên, màu đội trong `shared/src/teams.ts`, để sau đổi cặp phe chỉ cần sửa config.
+- Fictional factions. **Do not use real uniforms, badges, or ranks** of any force.
+- Cops: blue, kepi-style cap. Terrorists: black/striped, face scarf, money bag on the back.
+- Names and team colors live in `shared/src/teams.ts`, so changing the pair of factions later only requires editing config.
 
-## Stack (chỉ dùng những thư viện này)
+## Stack (use only these libraries)
 
-| Việc | Thư viện |
+| Purpose | Library |
 |---|---|
-| Ngôn ngữ / runtime | TypeScript, Node 24 |
+| Language / runtime | TypeScript, Node 24 |
 | Client build | Vite |
-| Render | `three` |
-| Vật lý / va chạm | `@dimforge/rapier3d-compat` (client **và** server) |
-| Mạng | `ws` (server), WebSocket trình duyệt (client) |
-| Mã hoá message | `@msgpack/msgpack` |
-| Test | `vitest` |
-| Chạy server dev | `tsx` |
+| Rendering | `three` |
+| Physics / collision | `@dimforge/rapier3d-compat` (client **and** server) |
+| Networking | `ws` (server), browser WebSocket (client) |
+| Message encoding | `@msgpack/msgpack` |
+| Testing | `vitest` |
+| Running the dev server | `tsx` |
 
-Ghi version cứng trong `package.json` (không dùng `^`), client và server **cùng một version Rapier**.
+Pin exact versions in `package.json` (no `^`), and client and server use **the same Rapier version**.
 
-## Cấu trúc repo
+## Repo structure
 
 ```
 fps-web/
@@ -46,23 +46,23 @@ fps-web/
   package.json            # npm workspaces
   shared/src/
     constants.ts          # tick rate, interp delay...
-    math.ts               # vec helpers, lerp góc, rng có seed
-    movement.ts           # stepMovement (thuần)
+    math.ts               # vec helpers, angle lerp, seeded rng
+    movement.ts           # stepMovement (pure)
     movementConfig.ts
-    weapons.ts            # thông số súng
+    weapons.ts            # gun stats
     teams.ts
-    protocol.ts           # kiểu message + encode/decode
+    protocol.ts           # message types + encode/decode
     map/types.ts
-    map/loadMap.ts        # đọc JSON, xử lý mirror
-    physics/world.ts      # tạo Rapier world từ map (dùng chung)
-    hitbox.ts             # hitbox từ PlayerState, ray-AABB
+    map/loadMap.ts        # read JSON, handle mirror
+    physics/world.ts      # build the Rapier world from a map (shared)
+    hitbox.ts             # hitbox from PlayerState, ray-AABB
   server/src/
     main.ts
     transport.ts
     room.ts
     simulation.ts
     lagComp.ts
-    match.ts              # luật TDM
+    match.ts              # TDM rules
   client/src/
     main.ts
     input.ts
@@ -83,12 +83,12 @@ fps-web/
     models/  textures/  sounds/
 ```
 
-## Hằng số chính (`shared/src/constants.ts`)
+## Main constants (`shared/src/constants.ts`)
 
 ```ts
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
-export const SNAPSHOT_EVERY_TICKS = 3;      // 20 snapshot/giây
+export const SNAPSHOT_EVERY_TICKS = 3;      // 20 snapshots/second
 export const INTERP_DELAY_MS = 100;
 export const MAX_REWIND_MS = 250;
 export const HITBOX_HISTORY_MS = 1000;
@@ -98,52 +98,52 @@ export const RESPAWN_DELAY_MS = 3000;
 export const SPAWN_INVULN_MS = 2000;
 ```
 
-## Map 1 "Hai thành"
+## Map 1 "Two Citadels" (file `hai-thanh.json`)
 
-Hai đội chia theo trục **X**: đội A (Cớm) ở phía **x âm**, đội B (Cướp) ở phía **x dương**. Mặt phẳng đối xứng là `x = 0`. Map rộng 60m (x: −30..30) × 40m (z: −20..20).
+The two teams are split along the **X** axis: team A (Cops) on the **negative x** side, team B (Terrorists) on the **positive x** side. The plane of symmetry is `x = 0`. The map is 60m wide (x: −30..30) × 40m deep (z: −20..20).
 
-Bố cục một nửa (x từ −30 đến 0), số liệu là **giá trị khởi điểm**, chơi thử rồi chỉnh:
+Layout of one half (x from −30 to 0). The numbers are **starting values**; playtest, then tune:
 
-| Thành phần | Vị trí / kích thước gợi ý |
+| Component | Suggested position / size |
 |---|---|
-| Tường bao ngoài | cao 8m quanh toàn map |
-| Căn cứ A (spawn) | x −30..−20, 6–8 điểm spawn rải trong khu này |
-| Tường thành A | tâm x = −19, dày 1,5m, cao 4m, chạy z −16..16 (hở 2 đầu làm lối vòng) |
-| Lỗ bắn | 3–4 lỗ trên tường thành, rộng 1,2m, đáy cách đất 1,0m, cao 1,0m |
-| Gờ trên tường | mặt trên tường đi được; lan can thấp 0,8m phía khu giữa |
-| Cầu thang lên gờ | ramp từ đất lên mặt tường (4m), dài ~8m, nằm sát tường phía căn cứ |
-| Tháp A | khối 4×4m, đỉnh cao 6m, gần góc căn cứ; **một lối lên duy nhất**: ramp nối từ gờ tường lên đỉnh tháp |
-| Khu giữa | x −18..0: vài tường thấp cao 1,2–2m, một khối lớn ở tâm (x = 0, đánh dấu `noMirror`) |
+| Outer wall | 8m high around the whole map |
+| Base A (spawn) | x −30..−20, 6–8 spawn points scattered in this area |
+| Citadel wall A | center x = −19, 1.5m thick, 4m high, running z −16..16 (open at both ends to leave flanking routes) |
+| Firing slots | 3–4 slots in the citadel wall, 1.2m wide, bottom 1.0m above the ground, 1.0m tall |
+| Wall-top ledge | the top of the wall is walkable; 0.8m low parapet on the mid-field side |
+| Stairs up to the ledge | ramp from the ground to the wall top (4m), ~8m long, hugging the wall on the base side |
+| Tower A | 4×4m block, top at 6m, near the base corner; **a single way up**: a ramp from the wall ledge up to the tower top |
+| Mid-field | x −18..0: a few low walls 1.2–2m high, one large block in the center (x = 0, marked `noMirror`) |
 
-Quy tắc phải giữ khi chỉnh map:
-- Tháp hở các mặt, bắn tới được từ gờ tường đối diện.
-- Spawn **không nằm trong tầm nhìn** từ lỗ bắn, gờ tường, tháp của đội kia.
-- Lối vòng ở hai mép z luôn đi được.
-- Người chơi **không thể nhảy từ đất lên mặt tường** (4m) — chỉ lên bằng ramp.
+Rules to keep when tuning the map:
+- The tower is open on all sides and can be shot at from the opposing wall ledge.
+- Spawns are **not in line of sight** of the other team's firing slots, wall ledge, or tower.
+- The flanking routes along the two z edges are always passable.
+- Players **cannot jump from the ground onto the wall top** (4m) — they can only get up via the ramp.
 
-## Phase
+## Phases
 
-| File | Nội dung |
+| File | Content |
 |---|---|
-| `01-phase0-setup.md` | Khung dự án, map, render tĩnh |
-| `02-phase1-movement.md` | Đi lại offline |
-| `03-phase2-weapons.md` | Súng offline |
-| `04-phase3-netcode-move.md` ⚠️ | Multiplayer di chuyển |
-| `05-phase4-netcode-shoot.md` ⚠️ | Bắn online, lag compensation |
-| `06-phase5-tdm.md` | Luật Team Deathmatch |
-| `07-phase6-polish.md` | Làm đẹp (chọn lẻ) |
-| `08-task-gun-audio.md` | Bộ súng + âm thanh từng súng |
-| `09-hud-shop-economy.md` ⚠️ | HUD mới, 4 ô vũ khí, cửa hàng, kinh tế |
-| `tools-blend-to-glb.md` | Chuyển model .blend sang .glb |
-| `11-characters.md` ⚠️ | Nhân vật có xương cho 2 phe, IK tay thật, tay viewmodel cắt từ model |
-| `12-grenade.md` ⚠️ | Lựu đạn M67: mua, rút chốt, ném, nảy, nổ |
-| `13-game-modes.md` ⚠️ | Thể thức Sinh Tử (theo ván) / Hỗn Chiến (hồi sinh), tạo phòng |
-| `14-spread-ads.md` ⚠️ | Độ toé theo tốc độ + bloom, tâm ngắm động, ADS tuỳ chọn |
-| `15-bots-offline.md` ⚠️ | Bot Trung bình/Khó, nav grid, nút thêm bot, đổi phe offline |
-| `16-zombie-infection.md` ⚠️ | Nền zombie (dùng chung) + thể thức Lây Nhiễm |
-| `17-zombie-defense.md` ⚠️ | Thể thức Thủ Thành: chống zombie theo đợt, boss |
-| `18-packaging.md` ⚠️ | Đóng gói file chạy cho Windows/Mac, người nhận không cần cài Node |
+| `01-phase0-setup.md` | Project skeleton, map, static rendering |
+| `02-phase1-movement.md` | Offline movement |
+| `03-phase2-weapons.md` | Offline guns |
+| `04-phase3-netcode-move.md` ⚠️ | Multiplayer movement |
+| `05-phase4-netcode-shoot.md` ⚠️ | Online shooting, lag compensation |
+| `06-phase5-tdm.md` | Team Deathmatch rules |
+| `07-phase6-polish.md` | Polish (pick and choose) |
+| `08-task-gun-audio.md` | Gun set + per-gun audio |
+| `09-hud-shop-economy.md` ⚠️ | New HUD, 4 weapon slots, shop, economy |
+| `tools-blend-to-glb.md` | Convert .blend models to .glb |
+| `11-characters.md` ⚠️ | Rigged characters for both factions, real hand IK, viewmodel arms cut from the model |
+| `12-grenade.md` ⚠️ | M67 grenade: buy, pull the pin, throw, bounce, explode |
+| `13-game-modes.md` ⚠️ | Elimination (round-based) / Team Deathmatch (respawn) modes, room creation |
+| `14-spread-ads.md` ⚠️ | Speed-based spread + bloom, dynamic crosshair, optional ADS |
+| `15-bots-offline.md` ⚠️ | Medium/Hard bots, nav grid, add-bot button, offline team switching |
+| `16-zombie-infection.md` ⚠️ | Zombie foundation (shared) + Infection mode |
+| `17-zombie-defense.md` ⚠️ | Defense mode: wave-based zombie defense, boss |
+| `18-packaging.md` ⚠️ | Package runnable files for Windows/Mac, recipients do not need to install Node |
 
-## Định nghĩa "xong" bản đầu tiên
+## Definition of "done" for the first version
 
-4–6 người chia 2 đội trên "Hai thành", chạy nhảy trượt mượt, leo lên gờ bắn qua lỗ được, bắn nhau trúng đúng cảm giác, không bắn được đồng đội, chết – hồi sinh ở căn cứ – hết trận – bảng điểm – đổi bên.
+4–6 players split into 2 teams on "Two Citadels", smooth running, jumping and sliding, able to climb onto the ledge and shoot through the slots, shooting each other feels right on hit registration, no friendly fire, die – respawn at base – match ends – scoreboard – swap sides.

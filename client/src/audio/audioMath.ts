@@ -1,8 +1,8 @@
-// Hàm thuần của hệ thống âm thanh (không đụng Web Audio) — để test được.
+// Pure functions of the audio system (no Web Audio) — so they can be tested.
 
 export const dbToGain = (db: number): number => Math.pow(10, db / 20)
 
-/** Chọn ngẫu nhiên một phần tử, tránh `last` nếu còn ≥ 2 lựa chọn. */
+/** Picks a random element, avoiding `last` if there are ≥ 2 options. */
 export function pickNoRepeat<T>(items: T[], last: T | undefined, rnd: () => number): T | undefined {
   if (items.length === 0) return undefined
   if (items.length === 1) return items[0]
@@ -11,13 +11,13 @@ export function pickNoRepeat<T>(items: T[], last: T | undefined, rnd: () => numb
   return items[i]
 }
 
-/** Giá trị ngẫu nhiên trong [-amp, +amp]. */
+/** Random value in [-amp, +amp]. */
 export const randSpread = (amp: number, rnd: () => number = Math.random): number => (rnd() * 2 - 1) * amp
 
-// ── Cảnh báo sắp hết đạn ──────────────────────────────────────────────────────
+// ── Low-ammo warning ──────────────────────────────────────────────────────
 export const LOW_AMMO_FRACTION = 0.25
 
-/** `ammoLeft` là số đạn còn lại SAU phát vừa bắn. */
+/** `ammoLeft` is the ammo remaining AFTER the shot just fired. */
 export const lowAmmoActive = (ammoLeft: number, magSize: number): boolean =>
   ammoLeft <= magSize * LOW_AMMO_FRACTION
 
@@ -26,7 +26,7 @@ export const lowAmmoPitchFactor = (ammoLeft: number, magSize: number): number =>
   1 + 0.6 * (1 - ammoLeft / (magSize * LOW_AMMO_FRACTION))
 
 // ── Reload ────────────────────────────────────────────────────────────────────
-/** Thời điểm (tỉ lệ 0..1) của n tiếng nhét đạn rải đều trong [from, to]. */
+/** Timing (ratio 0..1) of n round-loading sounds spread evenly across [from, to]. */
 export function reloadInsertTimes(n: number, from: number, to: number): number[] {
   if (n <= 0) return []
   if (n === 1) return [(from + to) / 2]
@@ -35,21 +35,21 @@ export function reloadInsertTimes(n: number, from: number, to: number): number[]
   return out
 }
 
-// ── Súng người khác ───────────────────────────────────────────────────────────
-/** Cutoff lowpass theo khoảng cách: càng xa càng đục, tối thiểu 1500Hz. */
+// ── Other players' guns ───────────────────────────────────────────────────────────
+/** Lowpass cutoff by distance: the farther, the more muffled, minimum 1500Hz. */
 export const distanceCutoff = (d: number): number => Math.max(1500, 18000 * Math.pow(0.5, d / 15))
 
-// ── Tiếng trúng ───────────────────────────────────────────────────────────────
+// ── Hit sound ───────────────────────────────────────────────────────────────
 export const COMBO_WINDOW_MS = 400
 export const COMBO_STEP = 0.03
 export const COMBO_MAX = 0.15
 export const DEDUPE_MS = 30
 
-/** Trúng liên tiếp trong 400ms: mỗi lần +3% cao độ, tối đa +15%. */
+/** Consecutive hits within 400ms: +3% pitch each, max +15%. */
 export class ComboTracker {
   private count = 0
   private lastMs = -Infinity
-  /** Gọi mỗi lần thực sự phát tiếng trúng; trả hệ số cao độ. */
+  /** Call each time a hit sound is actually played; returns the pitch factor. */
   hit(nowMs: number): number {
     this.count = nowMs - this.lastMs <= COMBO_WINDOW_MS ? this.count + 1 : 0
     this.lastMs = nowMs
@@ -57,7 +57,7 @@ export class ComboTracker {
   }
 }
 
-/** Nhiều sự kiện trong 30ms chỉ phát 1: sự kiện sau chỉ được phát nếu "nặng" hơn hẳn. */
+/** Multiple events within 30ms play only one: a later event plays only if clearly "heavier". */
 export class HitDeduper {
   private lastMs = -Infinity
   private lastWeight = 0
@@ -69,13 +69,13 @@ export class HitDeduper {
   }
 }
 
-// ── Bước chân ─────────────────────────────────────────────────────────────────
+// ── Footsteps ─────────────────────────────────────────────────────────────────
 export type StepEvent = 'step' | 'land' | null
 
 /**
- * Quyết định lúc nào phát bước chân / tiếp đất. Mỗi `stepDist` mét đi trên mặt đất một bước;
- * không có bước khi trượt hoặc trên không. Tiếp đất khi vận tốc rơi (tick trước đó) > landSpeed.
- * Lần chạm đất đầu tiên (rơi từ điểm spawn) bị bỏ qua.
+ * Decides when to play footsteps / landing. One step per `stepDist` meters travelled on the ground;
+ * no steps while sliding or airborne. Landing when the fall speed (previous tick) > landSpeed.
+ * The first ground contact (falling from the spawn point) is ignored.
  */
 export class StepTracker {
   private acc = 0

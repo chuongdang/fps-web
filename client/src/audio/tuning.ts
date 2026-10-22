@@ -1,8 +1,8 @@
-// Bảng chỉnh âm thanh F8 (A.5 + tab Hit của A.8): slider mọi trường profile, bắn thử, copy JSON, peak meter.
+// F8 audio tuning panel (A.5 + the Hit tab of A.8): sliders for every profile field, test fire, copy JSON, peak meter.
 import { WEAPONS } from '@fps/shared'
 import { GUN_SOUNDS, type LayerDef } from './gunProfiles'
 import { playShot, refreshBus } from './gunAudio'
-import { playHit, playHurt, HIT, type HitKind, type HitMode } from './hitAudio'
+import { playHit, playHurt, playFallHurt, HIT, type HitKind, type HitMode } from './hitAudio'
 import { getGraph, settings, saveSettings } from './context'
 import { setHealthForAudio } from './hitAudio'
 import { FOOTSTEPS, playFootstep, playLanding, playFootstepOther, refreshFootstepBus } from './footsteps'
@@ -73,7 +73,7 @@ function heading(parent: HTMLElement, text: string): void {
 function copyJson(btn: HTMLButtonElement, obj: unknown): void {
   void navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => {
     const old = btn.textContent
-    btn.textContent = 'Đã copy!'
+    btn.textContent = 'Copied!'
     setTimeout(() => { btn.textContent = old }, 1500)
   })
 }
@@ -88,10 +88,10 @@ export function initAudioTuning(): void {
 
   const title = document.createElement('div')
   title.style.cssText = 'font-weight:bold;color:#ff0;margin-bottom:4px'
-  title.textContent = 'Âm thanh  [F8 đóng]'
+  title.textContent = 'Audio  [F8 to close]'
   panel.appendChild(title)
 
-  // Peak meter (đầu ra master, sau compressor)
+  // Peak meter (master output, after the compressor)
   const meterWrap = document.createElement('div')
   meterWrap.style.cssText = 'height:8px;background:#222;margin-bottom:6px'
   const meter = document.createElement('div')
@@ -108,7 +108,7 @@ export function initAudioTuning(): void {
       for (let i = 0; i < samples.length; i++) { const a = Math.abs(samples[i]!); if (a > peak) peak = a }
       const db = 20 * Math.log10(Math.max(peak, 1e-5))
       meter.style.width = `${Math.max(0, Math.min(1, (db + 60) / 60)) * 100}%`
-      meter.style.background = db > -1 ? '#e33' : '#4c4'   // đỏ nếu vượt -1 dBFS
+      meter.style.background = db > -1 ? '#e33' : '#4c4'   // red if above -1 dBFS
     }
     requestAnimationFrame(meterTick)
   }
@@ -125,7 +125,7 @@ export function initAudioTuning(): void {
   function render() {
     body.replaceChildren()
     tabs.replaceChildren()
-    for (const [id, name] of [['gun', 'Súng'], ['hit', 'Hit'], ['foot', 'Footsteps'], ['nade', 'Grenade'], ['misc', 'Chung']] as const) {
+    for (const [id, name] of [['gun', 'Gun'], ['hit', 'Hit'], ['foot', 'Footsteps'], ['nade', 'Grenade'], ['misc', 'Common']] as const) {
       const b = button(tabs, name, () => { tab = id; render() })
       if (id === tab) b.style.background = '#664'
     }
@@ -140,7 +140,7 @@ export function initAudioTuning(): void {
     const sel = document.createElement('select')
     sel.style.cssText = 'width:100%;margin:4px 0;font:12px monospace'
     for (const w of WEAPONS) {
-      if (!GUN_SOUNDS[w.id]) continue   // dao: không có profile súng
+      if (!GUN_SOUNDS[w.id]) continue   // knife: no gun profile
       const o = document.createElement('option'); o.value = String(w.id); o.textContent = w.name
       if (w.id === gunId) o.selected = true
       sel.appendChild(o)
@@ -152,8 +152,8 @@ export function initAudioTuning(): void {
     const def = WEAPONS[gunId]!
 
     const act = document.createElement('div'); body.appendChild(act)
-    button(act, 'Bắn thử', () => playShot(gunId, def.magSize))
-    button(act, 'Xả 1 giây', () => {
+    button(act, 'Test fire', () => playShot(gunId, def.magSize))
+    button(act, 'Fire 1 second', () => {
       clearInterval(rifling)
       let n = 0
       const total = Math.floor(1000 / def.fireIntervalMs)
@@ -167,7 +167,7 @@ export function initAudioTuning(): void {
     for (const kind of ['body', 'mech', 'tail'] as const) {
       const layer = p.layers[kind]
       if (!layer) continue
-      heading(body, `lớp ${kind}`)
+      heading(body, `${kind} layer`)
       for (const k of Object.keys(LAYER_RANGES) as (keyof typeof LAYER_RANGES)[]) {
         if (layer[k] === undefined) continue
         slider(body, k, () => layer[k] as number, v => { (layer as unknown as Record<string, number>)[k] = v }, LAYER_RANGES[k])
@@ -181,20 +181,22 @@ export function initAudioTuning(): void {
     for (const k of Object.keys(p.eq) as (keyof typeof p.eq)[]) {
       slider(body, k, () => p.eq[k], v => { p.eq[k] = v; refreshBus(gunId) }, rangeFor(k, p.eq[k]))
     }
-    heading(body, 'vỏ đạn')
+    heading(body, 'shell casing')
     slider(body, 'shellDelayMs', () => p.shellDelayMs, v => { p.shellDelayMs = v }, [0, 600, 10])
   }
 
   function renderHit() {
     const act = document.createElement('div'); body.appendChild(act)
-    button(act, 'Thử trúng thân', () => { playHit('body') })
-    button(act, 'Thử trúng đầu', () => { playHit('head') })
-    button(act, 'Thử hạ gục', () => { playHit('kill') })
-    button(act, 'Thử hạ gục headshot', () => { playHit('killHead') })
-    button(act, 'Thử combo 6 phát', () => {
-      for (let i = 0; i < 6; i++) setTimeout(() => playHit('body'), i * 90)   // cách 90ms: qua ngưỡng gộp 30ms
+    button(act, 'Test body hit', () => { playHit('body') })
+    button(act, 'Test headshot hit', () => { playHit('head') })
+    button(act, 'Test kill', () => { playHit('kill') })
+    button(act, 'Test headshot kill', () => { playHit('killHead') })
+    button(act, 'Test 6-hit combo', () => {
+      for (let i = 0; i < 6; i++) setTimeout(() => playHit('body'), i * 90)   // 90ms apart: above the 30ms merge threshold
     })
-    button(act, 'Thử bị trúng (bên phải)', () => playHurt(1, 0, 0))
+    button(act, 'Test being hit (from the right)', () => playHurt(1, 0, 0))
+    button(act, 'Test light fall (10)', () => playFallHurt(10))
+    button(act, 'Test heavy fall (45)', () => playFallHurt(45))
     const copy = button(act, 'Copy JSON', () => copyJson(copy, HIT))
 
     heading(body, 'mode (file / synth / both)')
@@ -208,27 +210,27 @@ export function initAudioTuning(): void {
       s.addEventListener('change', () => { HIT.mode[kind] = s.value as HitMode })
       row.append(l, s); body.appendChild(row)
     }
-    for (const group of ['body', 'head', 'thick', 'kill', 'hurt'] as const) {
-      heading(body, `lớp ${group}`)
+    for (const group of ['body', 'head', 'thick', 'kill', 'hurt', 'fall'] as const) {
+      heading(body, `${group} layer`)
       const obj = HIT[group] as Record<string, number>
       for (const k of Object.keys(obj)) slider(body, k, () => obj[k]!, v => { obj[k] = v }, rangeFor(k, obj[k]!))
     }
   }
 
-  // Lựu đạn (G.8): mọi lớp tổng hợp + ù tai; "Copy JSON" xuất GSND
+  // Grenade (G.8): all synthesized layers + tinnitus; "Copy JSON" exports GSND
   function renderNade() {
     const at = (dx: number, dz = 0): [number, number, number] => [listenerPos[0] + dx, listenerPos[1], listenerPos[2] + dz]
     const act = document.createElement('div'); body.appendChild(act)
-    button(act, 'Rút chốt', () => playPin())
-    button(act, 'Thìa', () => playSpoon())
-    button(act, 'Vung tay', () => playThrowSwish())
-    button(act, 'Nảy nhẹ', () => playBounce(at(3), 2))
-    button(act, 'Nảy mạnh', () => playBounce(at(3), 10))
-    button(act, 'Nảy 4 lần', () => { for (let i = 0; i < 4; i++) setTimeout(() => playBounce(at(3 + i), 9 - i * 2), i * 380) })
-    button(act, 'Nổ gần (2m, ù tai)', () => playExplode(at(2), true))
-    button(act, 'Nổ 15m', () => playExplode(at(15), true))
-    button(act, 'Nổ xa 60m', () => playExplode(at(60), true))
-    button(act, 'Ù tai', () => tinnitus())
+    button(act, 'Pull pin', () => playPin())
+    button(act, 'Spoon', () => playSpoon())
+    button(act, 'Throw swish', () => playThrowSwish())
+    button(act, 'Soft bounce', () => playBounce(at(3), 2))
+    button(act, 'Hard bounce', () => playBounce(at(3), 10))
+    button(act, '4 bounces', () => { for (let i = 0; i < 4; i++) setTimeout(() => playBounce(at(3 + i), 9 - i * 2), i * 380) })
+    button(act, 'Close explosion (2m, tinnitus)', () => playExplode(at(2), true))
+    button(act, 'Explosion 15m', () => playExplode(at(15), true))
+    button(act, 'Far explosion 60m', () => playExplode(at(60), true))
+    button(act, 'Tinnitus', () => tinnitus())
     const copy = button(act, 'Copy JSON', () => copyJson(copy, GSND))
     for (const [name, value] of Object.entries(GSND)) {
       heading(body, name)
@@ -247,12 +249,12 @@ export function initAudioTuning(): void {
 
   function renderFoot() {
     const act = document.createElement('div'); body.appendChild(act)
-    button(act, 'Bước (đứng)', () => playFootstep(false))
-    button(act, 'Bước (ngồi)', () => playFootstep(true))
-    button(act, 'Đi 6 bước', () => { for (let i = 0; i < 6; i++) setTimeout(() => playFootstep(false), i * 350) })
-    button(act, 'Tiếp đất', () => playLanding())
-    button(act, 'Người khác (phải, 5m)', () => playFootstepOther([listenerPos[0] + 5, listenerPos[1], listenerPos[2]]))
-    button(act, 'Người khác (xa 30m)', () => playFootstepOther([listenerPos[0] + 30, listenerPos[1], listenerPos[2]]))
+    button(act, 'Step (standing)', () => playFootstep(false))
+    button(act, 'Step (crouching)', () => playFootstep(true))
+    button(act, 'Walk 6 steps', () => { for (let i = 0; i < 6; i++) setTimeout(() => playFootstep(false), i * 350) })
+    button(act, 'Landing', () => playLanding())
+    button(act, 'Other player (right, 5m)', () => playFootstepOther([listenerPos[0] + 5, listenerPos[1], listenerPos[2]]))
+    button(act, 'Other player (far, 30m)', () => playFootstepOther([listenerPos[0] + 30, listenerPos[1], listenerPos[2]]))
     const copy = button(act, 'Copy JSON', () => copyJson(copy, FOOTSTEPS))
 
     for (const [name, value] of Object.entries(FOOTSTEPS)) {
@@ -270,7 +272,7 @@ export function initAudioTuning(): void {
 
   function renderMisc() {
     slider(body, 'volume', () => settings.volume, v => { settings.volume = v; saveSettings() }, [0, 1, 0.05])
-    for (const [key, label] of [['lowAmmoWarning', 'Cảnh báo sắp hết đạn'], ['heartbeat', 'Tim đập khi máu thấp'], ['dynamicCrosshair', 'Tâm ngắm động (giãn theo độ toé)']] as const) {
+    for (const [key, label] of [['lowAmmoWarning', 'Low-ammo warning'], ['heartbeat', 'Heartbeat at low health'], ['dynamicCrosshair', 'Dynamic crosshair (expands with spread)']] as const) {
       const row = document.createElement('label'); row.style.cssText = 'display:block;margin:4px 0'
       const c = document.createElement('input'); c.type = 'checkbox'; c.checked = settings[key]
       c.addEventListener('change', () => { settings[key] = c.checked; saveSettings(); if (key === 'heartbeat') setHealthForAudio(100) })

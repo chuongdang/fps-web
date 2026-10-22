@@ -6,12 +6,12 @@ const cfg = () => poses.weapons.m67!.first.grenade!
 const run = (a: GrenadeAnim, ms: number, step = 8) => { for (let t = 0; t < ms; t += step) a.update(step) }
 
 describe('GrenadeAnim (G.5)', () => {
-  it('nghỉ: quả ở idlePos, tay trái ở leftRest, chốt còn trên quả', () => {
+  it('idle: grenade at idlePos, left hand at leftRest, pin still on the grenade', () => {
     const a = new GrenadeAnim(cfg); const o = a.update(16)
     expect(o.pos).toEqual(cfg().idlePos); expect(o.leftS).toBe(-1); expect(o.pin).toBe('onGrenade'); expect(o.show).toBe(true)
   })
 
-  it('rút chốt: tay trái đi theo đường, chốt sang tay trái ở mốc t=0,75, quả đi từ idlePos tới readyPos', () => {
+  it('pull pin: left hand follows the path, pin moves to the left hand at t=0.75, grenade goes from idlePos to readyPos', () => {
     const a = new GrenadeAnim(cfg)
     a.setLogic('pulling', 'strong', 0.3, true); let o = a.update(16)
     expect(a.phase).toBe('pull'); expect(o.leftS).toBeCloseTo(0.3); expect(o.pin).toBe('onGrenade')
@@ -22,14 +22,14 @@ describe('GrenadeAnim (G.5)', () => {
     expect(o.pos[0]).toBeCloseTo(cfg().readyPos.strong[0], 6); expect(o.pos[2]).toBeCloseTo(cfg().readyPos.strong[2], 6)
   })
 
-  it('chế độ ném thấp dùng readyPos.lob', () => {
+  it('low-throw mode uses readyPos.lob', () => {
     const a = new GrenadeAnim(cfg)
     a.setLogic('ready', 'lob', 1, true); a.update(16)
     const o = a.update(16)
     expect(o.pos[1]).toBeCloseTo(cfg().readyPos.lob[1], 1)
   })
 
-  it('ném: quả trong tay ẩn ngay, vung tới throwPos, rồi hạ xuống; còn quả thì đưa quả mới lên', () => {
+  it('throw: the held grenade hides at once, swings to throwPos, then lowers; if any are left, a new one is brought up', () => {
     const a = new GrenadeAnim(cfg)
     a.setLogic('ready', 'strong', 1, true); a.update(16)
     a.onThrow(); a.setLogic('idle', 'strong', 0, true)
@@ -37,7 +37,7 @@ describe('GrenadeAnim (G.5)', () => {
     run(a, cfg().windupMs + 8); expect(a.phase).toBe('throw')
     let last = a.out.pos[2]
     for (let i = 0; i < 200 && a.phase === 'throw'; i++) { last = a.update(2).pos[2] }
-    expect(last).toBeLessThan(cfg().readyPos.strong[2] - 0.3)   // đã vung ra phía trước
+    expect(last).toBeLessThan(cfg().readyPos.strong[2] - 0.3)   // swung forward
     run(a, cfg().recoverMs + 16)
     expect(a.phase).toBe('raise')
     o = a.update(16); expect(o.show).toBe(true); expect(o.pin).toBe('onGrenade'); expect(o.pos[1]).toBeLessThan(cfg().idlePos[1] - 0.3)
@@ -45,7 +45,7 @@ describe('GrenadeAnim (G.5)', () => {
     expect(a.update(16).pos).toEqual(cfg().idlePos)
   })
 
-  it('quả cuối: sau recover không đưa quả mới lên (quả vẫn ẩn)', () => {
+  it('last grenade: after recover no new one is brought up (stays hidden)', () => {
     const a = new GrenadeAnim(cfg)
     a.setLogic('ready', 'strong', 1, false); a.update(16)
     a.onThrow(); a.setLogic('idle', 'strong', 0, false)
@@ -53,7 +53,7 @@ describe('GrenadeAnim (G.5)', () => {
     expect(a.phase).toBe('idle'); expect(a.out.show).toBe(false)
   })
 
-  it('thả sớm (huỷ): quay về idle mượt, chốt không rời quả', () => {
+  it('early release (cancel): smoothly returns to idle, pin does not leave the grenade', () => {
     const a = new GrenadeAnim(cfg)
     a.setLogic('pulling', 'strong', 0.5, true); run(a, 100)
     a.setLogic('idle', 'strong', 0, true)
@@ -62,7 +62,7 @@ describe('GrenadeAnim (G.5)', () => {
     void o
   })
 
-  it('nhấn lại ngay khi đang đưa quả mới lên: nhận pha logic sau khi xong', () => {
+  it('pressed again while a new grenade is being brought up: logic phase is accepted when done', () => {
     const a = new GrenadeAnim(cfg)
     a.setLogic('ready', 'strong', 1, true); a.update(16); a.onThrow(); a.setLogic('idle', 'strong', 0, true)
     run(a, cfg().windupMs + cfg().throwMs + cfg().recoverMs + 16); expect(a.phase).toBe('raise')
@@ -71,7 +71,7 @@ describe('GrenadeAnim (G.5)', () => {
     expect(a.phase).toBe('pull')
   })
 
-  it('pathSegment: nội suy giữa hai khoá theo s', () => {
+  it('pathSegment: interpolates between two keys by s', () => {
     const k = cfg().pullLeftHandPath
     expect(pathSegment(k, 0).a.t).toBe(0)
     expect(pathSegment(k, 0.6).a.to).toBe('pin_pull'); expect(pathSegment(k, 0.6).b.offset).toBeDefined()

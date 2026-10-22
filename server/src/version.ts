@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
 
-// Bản đóng gói: esbuild thay process.env.APP_VERSION bằng version trong package.json gốc (scripts/bundle-server.mjs).
-// Chạy dev: tìm package.json gốc (có "workspaces") từ thư mục hiện tại đi lên — `npm -w server` chạy với cwd = server/.
+// Packaged build: esbuild replaces process.env.APP_VERSION with the version in the root package.json (scripts/bundle-server.mjs).
+// Dev run: look for the root package.json (the one with "workspaces") walking up from the current directory - `npm -w server` runs with cwd = server/.
 function devVersion(): string {
   try {
     for (let dir = process.cwd(); ; dir = dirname(dir)) {
@@ -13,7 +13,7 @@ function devVersion(): string {
       }
       if (dirname(dir) === dir) break
     }
-  } catch { /* rơi xuống mặc định */ }
+  } catch { /* fall through to the default */ }
   return '0.0.0'
 }
 

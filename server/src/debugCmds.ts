@@ -1,9 +1,9 @@
-// Lệnh debug trong game (task M.8). main.ts chỉ gọi khi NODE_ENV !== 'production'.
+// In-game debug commands (task M.8). main.ts only calls this when NODE_ENV !== 'production'.
 import { MsgType, PLAYER_MAX_HP } from '@fps/shared'
 import { broadcastMatch } from './match'
 import type { Player, Room } from './room'
 
-/** Trả true nếu lệnh được nhận (đúng tên + đối số); false nếu bỏ qua */
+/** Returns true if the command was accepted (valid name + arguments); false if ignored */
 export function handleDebugCmd(room: Room, p: Player, raw: string): boolean {
   const [name, arg] = raw.trim().split(/\s+/)
   const num = Number(arg)

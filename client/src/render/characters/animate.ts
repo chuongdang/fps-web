@@ -1,14 +1,14 @@
 import type { CharacterRig } from './types'
 
-// Animation thủ tục (6.2): không cần file animation. Chạy theo vị trí đã nội suy giữa các frame (⇒ vận tốc nội suy),
-// không theo input. Chỉ chạm vào khung xương chuẩn nên dùng được cho mọi bộ nhân vật. Không cấp phát.
+// Procedural animation (6.2): no animation files needed. Driven by the interpolated position between frames (=> interpolated velocity),
+// not by input. It only touches the standard skeleton so it works for every character set. No allocation.
 export interface AnimState {
-  phase: number     // pha bước (rad), tăng theo quãng đường đi
-  speed: number     // tốc độ ngang đã làm mượt (m/s)
+  phase: number     // step phase (rad), grows with distance travelled
+  speed: number     // smoothed horizontal speed (m/s)
   lastX: number
   lastZ: number
   hasLast: boolean
-  air: number       // 0..1, độ chuyển sang tư thế nhảy / trượt / ngồi (làm mượt)
+  air: number       // 0..1, blend toward the jump / slide / crouch pose (smoothed)
   slide: number
   crouch: number
 }
@@ -18,25 +18,25 @@ export function makeAnimState(): AnimState {
 }
 
 export interface AnimInput {
-  x: number; z: number      // vị trí chân (đã nội suy)
-  dt: number                // giây từ frame trước
+  x: number; z: number      // foot position (interpolated)
+  dt: number                // seconds since the previous frame
   grounded: boolean
   crouching: boolean
   sliding: boolean
   pitch: number
-  crouchDrop: number        // m hạ hông khi ngồi hết mức (chỉ chân co lại, thân/đầu giữ nguyên tỉ lệ)
+  crouchDrop: number        // metres the hips drop at full crouch (only the legs shrink, torso/head keep their proportions)
 }
 
-const RUN_SPEED = 8.5          // tốc độ chạy: biên độ tối đa
-const TELEPORT_M = 3           // nhảy xa hơn mức này trong một frame = hồi sinh/teleport, không tính là chạy
-const POSE_EASE = 15           // 1/giây: tốc độ chuyển tư thế nhảy/trượt/ngồi
-export const HEAD_PITCH = 0.7         // phần pitch do đầu/súng đảm nhận; phần còn lại (1−0.7) do nghiêng thân
-const SLIDE_LEAN = 0.55        // ngả người ra sau khi trượt (rad, +X = đổ ra sau)
-const CROUCH_LEAN = -0.2       // cúi người về trước khi ngồi
-const AIR_LEG_L = 0.7          // nhảy: co chân (một chân co nhiều hơn)
+const RUN_SPEED = 8.5          // running speed: maximum amplitude
+const TELEPORT_M = 3           // a jump farther than this in one frame = respawn/teleport, not counted as running
+const POSE_EASE = 15           // 1/s: blend speed of the jump/slide/crouch pose
+export const HEAD_PITCH = 0.7         // share of the pitch taken by head/gun; the rest (1-0.7) comes from tilting the torso
+const SLIDE_LEAN = 0.55        // lean back while sliding (rad, +X = tips backward)
+const CROUCH_LEAN = -0.2       // lean forward while crouching
+const AIR_LEG_L = 0.7          // jump: tuck the legs (one leg more than the other)
 const AIR_LEG_R = 0.3
 
-const HIP_Y = 0.8              // chiều cao hông khi đứng (khớp kit.ts)
+const HIP_Y = 0.8              // hip height when standing (matches kit.ts)
 
 const approach = (cur: number, target: number, k: number) => cur + (target - cur) * k
 
@@ -56,13 +56,13 @@ export function updateAnim(rig: CharacterRig, st: AnimState, inp: AnimInput): vo
   const k = Math.min(1, dt * POSE_EASE)
   const sw = Math.sin(st.phase) * amp
 
-  // Chuyển tư thế (nhảy/trượt/ngồi) được làm mượt bằng trọng số; đung đưa khi chạy thì không làm mượt
-  // (tần số bước vượt xa tốc độ làm mượt, làm mượt sẽ nuốt mất biên độ)
+  // Pose transitions (jump/slide/crouch) are smoothed with a weight; the running swing is not smoothed
+  // (the step frequency far exceeds the smoothing speed, so smoothing would eat the amplitude)
   st.air = approach(st.air, !inp.grounded && !inp.sliding ? 1 : 0, k)
   st.slide = approach(st.slide, inp.sliding ? 1 : 0, k)
   st.crouch = approach(st.crouch, inp.crouching ? 1 : 0, k)
 
-  // Chân + tay trái đung đưa chéo nhau; tay phải giữ súng
+  // Legs + left arm swing in opposition; the right arm holds the gun
   let legL = sw * rig.anim.legSwing
   let legR = -sw * rig.anim.legSwing
   let armL = rig.armRestL - sw * rig.anim.armSwing
@@ -74,11 +74,11 @@ export function updateAnim(rig: CharacterRig, st: AnimState, inp: AnimInput): vo
   rig.legR.rotation.x = legR
   rig.armL.rotation.x = armL
   rig.upper.rotation.x = lean + inp.pitch * (1 - HEAD_PITCH)
-  // Đầu và tay phải (kéo theo súng) cùng nhìn/chĩa theo pitch (+pitch = ngước lên = xoay +X quanh pivot)
+  // Head and right arm (dragging the gun along) look/aim with the pitch (+pitch = look up = rotate +X around the pivot)
   rig.headPivot.rotation.x = inp.pitch * HEAD_PITCH
   rig.armR.rotation.x = rig.armRestR + inp.pitch * HEAD_PITCH
-  // Nhún nhẹ khi chạy (hai lần mỗi chu kỳ bước)
-  // Ngồi: hạ hông, chân co ngắn lại (scale riêng chân), thân và đầu giữ nguyên
+  // Slight bob while running (twice per step cycle)
+  // Crouch: lower the hips, shorten the legs (scale the legs only), keep torso and head unchanged
   const hip = HIP_Y - inp.crouchDrop * st.crouch
   rig.legL.position.y = hip; rig.legR.position.y = hip
   rig.legL.scale.y = rig.legR.scale.y = hip / HIP_Y

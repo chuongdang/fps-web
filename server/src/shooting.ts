@@ -9,26 +9,26 @@ const dirs: [number, number, number][] = Array.from({ length: MAX_PELLETS }, () 
 const hitTotals = new Map<number, { damage: number; headshot: boolean }>()
 const eye: [number, number, number] = [0, 0, 0]
 const past: PastPlayer = { pos: [0, 0, 0], crouching: false, alive: true }
-// hitboxesFor chỉ đọc pos/crouching
+// hitboxesFor only reads pos/crouching
 const pastState = { pos: past.pos, crouching: false } as unknown as PlayerState
 const kbImp: [number, number, number] = [0, 0, 0]
 
-// Thời điểm cần tua về: fireRenderTime kẹp trong [serverNow − MAX_REWIND_MS, serverNow];
-// không có fireRenderTime thì không tua.
+// Time to rewind to: fireRenderTime clamped to [serverNow - MAX_REWIND_MS, serverNow];
+// without fireRenderTime there is no rewind.
 export function rewindTime(fireRenderTime: number | undefined, serverNow: number): number {
   if (fireRenderTime === undefined) return serverNow
   return Math.min(serverNow, Math.max(serverNow - MAX_REWIND_MS, fireRenderTime))
 }
 
-// Chấm một phát bắn của `shooter` (vừa chạy cmd, state đã là sau cmd). Đối thủ được tua về cmd.fireRenderTime (lag compensation); tường và người bắn thì không.
-// Gốc tia = mắt người bắn; hướng = yaw/pitch + recoil + spread (seed playerId, shotSeq) như client;
-// tường: castRay trong world riêng của người bắn; người khác: ray vs AABB.
+// Score one shot by `shooter` (the cmd just ran, state is already post-cmd). Opponents are rewound to cmd.fireRenderTime (lag compensation); walls and the shooter are not.
+// Ray origin = shooter's eye; direction = yaw/pitch + recoil + spread (seed playerId, shotSeq) like the client;
+// walls: castRay in the shooter's own world; other players: ray vs AABB.
 export function resolveShot(shooter: Player, room: Room, cmd: InputCmd, baseCfg: MovementConfig, defOverride?: WeaponDef): void {
   const ws = shooter.weapon
   const def = defOverride ?? WEAPONS[ws.current]!
   const s = shooter.state
   const cfg = movementFor(baseCfg, shooter.zstats, shooter.speedMult)
-  // Vuốt zombie: sát thương theo loại zombie; cào mạnh nhân đôi
+  // Zombie claw: damage depends on the zombie type; a heavy claw doubles it
   const baseDamage = shooter.zstats && def.category === 'claw'
     ? shooter.zstats.clawDamage * (def.id === CLAW_HEAVY_ID ? ZOMBIE.heavyDamageMult : 1)
     : def.damage * shooter.damageMult
@@ -37,11 +37,11 @@ export function resolveShot(shooter: Player, room: Room, cmd: InputCmd, baseCfg:
   eye[0] = s.pos[0]; eye[1] = s.pos[1] + (s.crouching ? cfg.eyeCrouch : cfg.eyeStand); eye[2] = s.pos[2]
 
   const t = rewindTime(cmd.fireRenderTime, room.serverNow)
-  if (cmd.fireRenderTime !== undefined && cmd.fireRenderTime < t) shooter.rewindClamped++   // yêu cầu tua quá giới hạn
+  if (cmd.fireRenderTime !== undefined && cmd.fireRenderTime < t) shooter.rewindClamped++   // rewind request beyond the limit
   const rewound = t < room.serverNow && room.history.locate(t)
   const debugBoxes: HitBox[] | null = shooter.debugShots ? [] : null
 
-  // Cộng dồn sát thương mọi tia theo từng nạn nhân (một Hurt + một HitConfirm mỗi người mỗi phát)
+  // Accumulate the damage of all rays per victim (one Hurt + one HitConfirm per player per shot)
   hitTotals.clear()
   const dists: number[] = []
   for (let k = 0; k < pellets; k++) {
@@ -53,7 +53,7 @@ export function resolveShot(shooter: Player, room: Room, cmd: InputCmd, baseCfg:
 
     for (const other of room.players.values()) {
       if (other === shooter) continue
-      if (other.team === shooter.team && !room.rules.friendlyFire) continue   // đồng đội: đạn xuyên qua
+      if (other.team === shooter.team && !room.rules.friendlyFire) continue   // teammate: bullets pass through
       let state: PlayerState = other.state
       let alive = other.alive
       if (rewound && room.history.get(other.id, past)) {
@@ -71,7 +71,7 @@ export function resolveShot(shooter: Player, room: Room, cmd: InputCmd, baseCfg:
     dists.push(bestDist)
 
     if (hitId >= 0) {
-      const hm = room.players.get(hitId)?.zstats?.headMult ?? def.headMult   // zombie Thủ Thành: đầu ×2 (boss ×3) bất kể súng
+      const hm = room.players.get(hitId)?.zstats?.headMult ?? def.headMult   // Defense zombies: head x2 (boss x3) regardless of the gun
       const mult = hitPart === 'head' ? hm : hitPart === 'legs' ? def.legMult : 1
       const dmg = Math.round(baseDamage * mult * damageFalloff(def, bestDist))
       const tot = hitTotals.get(hitId)
@@ -90,15 +90,15 @@ export function resolveShot(shooter: Player, room: Room, cmd: InputCmd, baseCfg:
     const target = room.players.get(hitId)!
     const damage = tot.damage
     const headshot = tot.headshot
-    // Bất tử tính theo giờ hiện tại của server (không tua). Chỉ trừ máu người còn sống và chưa bị chốt chết.
+    // Invulnerability uses the server's current time (no rewind). Only living players not yet settled as dead lose health.
     const invuln = room.serverNow < target.invulnUntil
-    // Zombie không đánh người đang gục (để đồng đội kịp chạy tới cứu; gục chỉ chết do hết giờ chảy máu)
+    // Zombies do not attack downed players (so teammates have time to rescue; downed players only die when the bleed-out timer ends)
     const applied = invuln || !target.alive || target.hp <= 0 || (target.downed && shooter.npc) ? 0 : Math.round(damage * target.takenMult)
     if (applied > 0) {
       target.hp -= applied
       target.lastHurtAt = room.serverNow
       room.mode.onDamage?.(room, shooter, target, applied)
-      if (target.zstats && !def.melee) {   // zombie trúng đạn bị đẩy lùi (shotgun đẩy rất mạnh), kèm hiện tượng văng khỏi gờ khi đang trên không
+      if (target.zstats && !def.melee) {   // a zombie hit by bullets is knocked back (shotguns push very hard), including being thrown off ledges while airborne
         const dx = target.state.pos[0] - s.pos[0], dz = target.state.pos[2] - s.pos[2]
         const dl = Math.hypot(dx, dz) || 1
         knockbackImpulse(kbImp, def.key, applied, target.zstats.knockbackResist, dx / dl, dz / dl, !target.state.grounded)
@@ -106,7 +106,7 @@ export function resolveShot(shooter: Player, room: Room, cmd: InputCmd, baseCfg:
       }
       if (target.hp <= 0) { target.killerId = shooter.id; target.killWeapon = def.id; target.killHeadshot = headshot }
       target.transport.send({ t: MsgType.Hurt, origin: [eye[0], eye[1], eye[2]], damage: applied })
-      if (shooter.zstats?.shoveSpeed && def.melee && !target.zstats) {   // brute: cào trúng đẩy người lùi (khỏi gờ tường!)
+      if (shooter.zstats?.shoveSpeed && def.melee && !target.zstats) {   // brute: a claw hit knocks the player back (off wall ledges!)
         const dx = target.state.pos[0] - s.pos[0], dz = target.state.pos[2] - s.pos[2], dl = Math.hypot(dx, dz) || 1
         target.state.vel[0] += dx / dl * shooter.zstats.shoveSpeed; target.state.vel[2] += dz / dl * shooter.zstats.shoveSpeed
       }

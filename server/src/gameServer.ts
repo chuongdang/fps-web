@@ -12,27 +12,27 @@ import { handleConnection, type ServerContext } from './connection'
 const stamp = () => new Date().toTimeString().slice(0, 8)
 
 export interface GameServerOptions {
-  /** Map đầu tiên (id `deathmatch`) là mặc định; các map còn lại chọn được khi tạo phòng */
+  /** The first map (id `deathmatch`) is the default; the others can be chosen when creating a room */
   maps: Record<string, MapFile>
   rules?: MatchRules
   allowDebugCmds: boolean
   maxRooms?: number
-  /** Bắt buộc client cùng phiên bản (xem ServerContext.version) */
+  /** Require clients to have the same version (see ServerContext.version) */
   version?: string
-  /** Log tick/giây mỗi 10 giây khi có người chơi (server dev) */
+  /** Log ticks/second every 10 seconds while players are connected (dev server) */
   logTicks?: boolean
 }
 
 export interface GameServer {
   rooms: RoomManager
-  /** Gắn WebSocketServer (noServer hoặc gắn thẳng vào HTTP server) */
+  /** Attach the WebSocketServer (noServer, or attached directly to the HTTP server) */
   attach(wss: WebSocketServer): void
-  /** Rapier khởi tạo wasm + dựng nav xong thì resolve; chỉ nhận kết nối sau đó */
+  /** Resolves once Rapier has initialised wasm and the nav meshes are built; connections are only accepted after that */
   ready: Promise<void>
   close(): void
 }
 
-// Lõi server game dùng chung cho main.ts (dev) và standalone.ts (đóng gói): phòng, vòng lặp 60Hz, xử lý kết nối.
+// Game server core shared by main.ts (dev) and standalone.ts (packaged): rooms, 60Hz loop, connection handling.
 export function createGameServer(opts: GameServerOptions): GameServer {
   const cfg = defaultMovement
   const entries = Object.entries(opts.maps)
@@ -42,7 +42,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
   for (const [id, mf] of entries) if (id !== defId) rooms.registerMap(id, mf.name, loadMap(mf))
   const sweep = setInterval(() => rooms.sweep(), 5000)
 
-  // Vòng lặp 60Hz: mô phỏng rồi gửi snapshot (mỗi SNAPSHOT_EVERY_TICKS tick)
+  // 60Hz loop: simulate, then send a snapshot (every SNAPSHOT_EVERY_TICKS ticks)
   let ticksThisWindow = 0
   const loop = new TickLoop(() => performance.now(), (tick, serverTime) => {
     for (const room of rooms.rooms.values()) {
@@ -59,7 +59,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     let players = 0
     for (const r of rooms.rooms.values()) players += r.players.size
     if (players > 0) {
-      console.log(`[tick] ${(ticksThisWindow * 1000 / (now - windowStart)).toFixed(1)}/s, bỏ ${loop.skipped}, ${players} người`)
+      console.log(`[tick] ${(ticksThisWindow * 1000 / (now - windowStart)).toFixed(1)}/s, skipped ${loop.skipped}, ${players} players`)
     }
     ticksThisWindow = 0
     windowStart = now
@@ -68,7 +68,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
   const ctx: ServerContext = {
     rooms, cfg,
     tick: () => loop.tick,
-    now: () => performance.now(),   // serverTime = ms kể từ lúc server khởi động
+    now: () => performance.now(),   // serverTime = ms since the server started
     allowDebugCmds: opts.allowDebugCmds,
     version: opts.version,
     log: text => console.log(`${stamp()} ${text}`),
@@ -79,12 +79,15 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     wss.on('connection', ws => handleConnection(ctx, wrapWebSocket(ws)))
   }
 
-  // Rapier khởi tạo wasm ở lần createWorld đầu; nhiều createWorld đồng thời lúc nguội làm hỏng bộ nhớ
-  // ("recursive use of an object"). Khởi tạo xong rồi mới nhận kết nối.
-  const ready = createWorld(rooms.maps.get(defId)!.map, cfg.standHeight, cfg.crouchHeight, cfg.radius).then(w => {
-    rooms.navs.set(defId, buildNav(w, rooms.maps.get(defId)!.map, cfg))   // zombie Thủ Thành + bot đi theo lưới này
-    w.dispose()
-  })
+  // Rapier initialises wasm on the first createWorld; several concurrent createWorld calls while cold corrupt memory
+  // ("recursive use of an object"). Accept connections only after initialisation is done.
+  const ready = (async () => {
+    for (const [id, { map }] of rooms.maps) {   // one nav grid per map, built one after another (see the Rapier note above)
+      const w = await createWorld(map, cfg.standHeight, cfg.crouchHeight, cfg.radius)
+      rooms.navs.set(id, buildNav(w, map, cfg))   // Defense zombies + bots follow this grid
+      w.dispose()
+    }
+  })()
 
   return {
     rooms, attach, ready,

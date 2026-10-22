@@ -3,12 +3,12 @@ import { TICK_RATE } from '@fps/shared'
 const TICK_MS = 1000 / TICK_RATE
 const MAX_CATCHUP_TICKS = 10
 
-// Số tick cần chạy tính theo thời gian thực đã trôi (accumulator), không tin nhịp setInterval.
-// Tick k xảy ra ở thời điểm start + k*TICK_MS; serverTime của snapshot lấy từ đây nên đều đặn.
+// The number of ticks to run is computed from the real elapsed time (accumulator); the setInterval cadence is not trusted.
+// Tick k happens at start + k*TICK_MS; the snapshot's serverTime comes from here, so it is steady.
 export class TickLoop {
   private start: number
   private _tick = 0
-  skipped = 0   // tick bị bỏ vì server tụt quá xa
+  skipped = 0   // ticks dropped because the server fell too far behind
 
   constructor(private now: () => number, private onTick: (tick: number, serverTime: number) => void) {
     this.start = now()

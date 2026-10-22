@@ -1,35 +1,35 @@
-# Phase 6 – Làm đẹp (chọn lẻ từng task)
+# Phase 6 – Polish (pick individual tasks)
 
-Mỗi task độc lập, làm task nào cũng được, không cần theo thứ tự. **Không task nào được đổi logic `shared/movement.ts` hay netcode.**
+Each task is independent; do any task, in any order. **No task may change the logic of `shared/movement.ts` or the netcode.**
 
-## 6.1 Model khối hộp Cớm & Cướp
-- Dựng bằng code từ các BoxGeometry (đầu, thân, 2 tay, 2 chân) hoặc file `.glb` khối hộp.
-- Cớm: thân xanh, mũ kê-pi (hộp dẹt + vành). Cướp: thân đen sọc, khăn che mặt, túi tiền sau lưng.
-- Kích thước khớp hitbox (đầu đúng vùng head) để người chơi ngắm đầu là trúng đầu.
-- Nghiệm thu: bắn vào đầu model luôn ra headshot (bật F7 so sánh).
+## 6.1 Box models for Cops & Terrorists
+- Build in code from BoxGeometry parts (head, torso, 2 arms, 2 legs) or a box-style `.glb` file.
+- Cops: blue torso, kepi-style cap (flat box + brim). Terrorists: black striped torso, face scarf, money bag on the back.
+- Sizes match the hitboxes (the head exactly in the head zone) so that when a player aims at the head, they hit the head.
+- Acceptance: shooting the model's head always gives a headshot (turn on F7 to compare).
 
-## 6.2 Animation thủ tục
-- Không cần file animation: tay chân đung đưa theo sin của quãng đường đi, ngồi thì hạ thân, trượt thì ngả người, nhảy thì co chân.
-- Thân trên xoay theo pitch (nhìn lên/xuống), cả người xoay theo yaw.
-- Chạy theo **vận tốc nội suy**, không theo input.
-- Chết: các khối tách ra bay nhẹ rồi mờ dần (rẻ hơn ragdoll, hợp phong cách khối hộp).
+## 6.2 Procedural animation
+- No animation files needed: arms and legs swing with a sine of the distance walked, crouching lowers the torso, sliding leans the body back, jumping tucks the legs.
+- The upper body rotates with pitch (looking up/down), and the whole body rotates with yaw.
+- Run animation follows the **interpolated velocity**, not the input.
+- Death: the blocks break apart, drift gently, then fade out (cheaper than a ragdoll, fits the box style).
 
-## 6.3 Súng trên tay người khác
-- Gắn mesh súng vào khối tay phải, đổi theo `weapon` trong NetPlayer.
-- Lửa đầu nòng hiện khi nhận ShotFx.
+## 6.3 Guns in other players' hands
+- Attach the gun mesh to the right-arm block, switching with `weapon` in NetPlayer.
+- The muzzle flash shows when a ShotFx is received.
 
-## 6.4 Súng mới
-- Sniper: 1 phát/1,2s, damage 90, headMult 2, có scope (giữ chuột phải zoom FOV 30, che màn hình đen ngoài vòng tròn), spread rất lớn khi không scope.
-- Shotgun: 8 tia mỗi phát (spread seed theo `shotSeq` và chỉ số tia), damage giảm theo khoảng cách.
-- Chỉ thêm vào `WEAPONS` + hiệu ứng; logic bắn dùng lại.
+## 6.4 New guns
+- Sniper: 1 shot per 1.2s, damage 90, headMult 2, with a scope (hold right mouse to zoom to FOV 30, blacking out the screen outside a circle), very large spread when not scoped.
+- Shotgun: 8 rays per shot (spread seeded by `shotSeq` and the ray index), damage falls off with distance.
+- Only add to `WEAPONS` + effects; reuse the firing logic.
 
-## 6.5 Hình ảnh map
-- Texture thật thay ô kẻ (gạch cho tường thành, gỗ cho thùng), skybox, sương mù nhẹ.
-- Bóng đổ: chỉ 1 directional light, shadow map 2048, chỉ map đổ bóng, nhân vật không đổ bóng (hoặc dùng bóng tròn giả dưới chân).
-- Nghiệm thu: vẫn ≥ 60 FPS trên laptop văn phòng.
+## 6.5 Map visuals
+- Real textures replace the grid (brick for the citadel wall, wood for crates), a skybox, light fog.
+- Shadows: only 1 directional light, 2048 shadow map, only the map casts shadows, characters do not cast shadows (or use a fake round shadow under the feet).
+- Acceptance: still ≥ 60 FPS on an office laptop.
 
 ## 6.6 Settings
-- Sensitivity, FOV, âm lượng tổng / âm súng, màu và kiểu tâm ngắm. Lưu localStorage.
+- Sensitivity, FOV, master volume / gun volume, crosshair color and style. Saved to localStorage.
 
-## 6.7 (Tuỳ chọn) Transport geckos.io
-- Chỉ đổi cài đặt `Transport` (task 3.1). Nếu phải sửa chỗ khác ngoài transport → dừng, báo lại.
+## 6.7 (Optional) geckos.io transport
+- Only change the `Transport` implementation (task 3.1). If anything outside the transport has to be edited → stop and report back.

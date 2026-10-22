@@ -1,4 +1,4 @@
-// Gom server standalone thành một file CommonJS cho Node SEA (K.2): node scripts/bundle-server.mjs → build/server.cjs
+// Bundle the standalone server into a single CommonJS file for Node SEA (K.2): node scripts/bundle-server.mjs → build/server.cjs
 import { build } from 'esbuild'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -13,15 +13,15 @@ const result = await build({
   bundle: true,
   platform: 'node',
   format: 'cjs',
-  target: 'node24',                                  // khớp .nvmrc
+  target: 'node24',                                  // matches .nvmrc
   outfile: join(root, 'build/server.cjs'),
-  external: ['bufferutil', 'utf-8-validate'],        // gói tuỳ chọn của ws, ws tự bỏ qua nếu thiếu
+  external: ['bufferutil', 'utf-8-validate'],        // optional ws packages, ws skips them if missing
   define: { 'process.env.APP_VERSION': JSON.stringify(version) },
   metafile: true,
   logLevel: 'warning',
 })
 
-// SEA chỉ require được module có sẵn của Node → báo lỗi nếu còn require tới gói ngoài
+// SEA can only require Node built-in modules → fail if any external package is still required
 const bad = []
 for (const out of Object.values(result.metafile.outputs)) {
   for (const imp of out.imports) {
@@ -29,7 +29,7 @@ for (const out of Object.values(result.metafile.outputs)) {
   }
 }
 if (bad.length) {
-  console.error('build/server.cjs còn require gói ngoài (SEA không nạp được): ' + [...new Set(bad)].join(', '))
+  console.error('build/server.cjs still requires external packages (SEA cannot load them): ' + [...new Set(bad)].join(', '))
   process.exit(1)
 }
-console.log(`Đã gom server v${version} → build/server.cjs`)
+console.log(`Bundled server v${version} → build/server.cjs`)

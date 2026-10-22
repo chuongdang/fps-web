@@ -1,12 +1,20 @@
-// Lớp phủ trong thế giới cho các thể thức zombie (plan 17 T.7): thanh máu nhỏ trên đầu zombie vừa bị bắn, nhãn loại cho brute/screamer/boss,
-// số damage nổi, dấu thập đỏ người gục, vòng đỏ báo trước chiêu boss. Sprite/texture dùng lại (cache theo mức máu), không cấp phát theo frame.
+// In-world overlay for the zombie modes (plan 17 T.7): a small health bar over a zombie that was just shot, a type label for brute/screamer/boss,
+// floating damage numbers, a red cross over downed players, a red ring warning of a boss attack. Sprites/textures are reused (cached per health level), nothing allocated per frame.
 import * as THREE from 'three'
 import { DEFENSE, ZOMBIE_TYPES, type TelegraphMsg } from '@fps/shared'
+import { t } from '../i18n'
 
 const BAR_SHOW_MS = 3000
 const ALWAYS_NAME = new Set(['brute', 'screamer', 'boss'])
 const NAME_COLOR: Record<string, string> = { mother: '#9be07a', brute: '#e8956a', screamer: '#f0e070', boss: '#ff5050' }
 const STEPS = 20
+
+/** Display name of a zombie type; falls back to the shared definition, then to the raw id */
+function zombieName(type: string): string {
+  const key = `renderB.zombie.${type}`
+  const s = t(key)
+  return s !== key ? s : ZOMBIE_TYPES[type]?.name ?? type
+}
 
 interface Overlay { sprite: THREE.Sprite; key: string }
 export interface OverlayPlayer { id: number; pos: [number, number, number]; flags: number; hp: number; hpMax: number; ztype?: string; zscale?: number; downLeft?: number; reviveP?: number }
@@ -29,7 +37,7 @@ function barTexture(type: string, step: number, withName: boolean): THREE.Canvas
     const W = 128, H = 28
     if (withName) {
       g.font = 'bold 16px monospace'; g.textAlign = 'center'; g.textBaseline = 'top'
-      const name = type === 'mother' ? 'Zombie mẹ' : ZOMBIE_TYPES[type]?.name ?? type
+      const name = zombieName(type)
       g.lineWidth = 4; g.strokeStyle = '#000'; g.strokeText(name, W / 2, 0)
       g.fillStyle = NAME_COLOR[type] ?? '#fff'; g.fillText(name, W / 2, 0)
     }
@@ -44,9 +52,9 @@ function crossTexture(step: number, rev: number): THREE.CanvasTexture {
     g.translate(32, 32)
     g.lineWidth = 6
     g.strokeStyle = 'rgba(0,0,0,.6)'; g.beginPath(); g.arc(0, 0, 27, 0, Math.PI * 2); g.stroke()
-    g.strokeStyle = '#ff3b3b'; g.beginPath(); g.arc(0, 0, 27, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * step / STEPS); g.stroke()   // thời gian còn lại
+    g.strokeStyle = '#ff3b3b'; g.beginPath(); g.arc(0, 0, 27, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * step / STEPS); g.stroke()   // time remaining
     g.fillStyle = '#ff3b3b'; g.fillRect(-5, -16, 10, 32); g.fillRect(-16, -5, 32, 10)
-    if (rev > 0) { g.fillStyle = '#6fe06f'; g.fillRect(-26, 30, 52 * rev / STEPS, 5) }   // tiến độ cứu
+    if (rev > 0) { g.fillStyle = '#6fe06f'; g.fillRect(-26, 30, 52 * rev / STEPS, 5) }   // revive progress
   }, 64, 40 + 24)
 }
 
@@ -82,9 +90,9 @@ export function createZombieOverlay(scene: THREE.Scene) {
   const flatGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
 
   return {
-    /** HitConfirm: zombie này vừa bị bắn → hiện thanh máu 3s */
+    /** HitConfirm: this zombie was just shot -> show its health bar for 3s */
     onHit(id: number): void { hitAt.set(id, performance.now()) },
-    /** Số damage nổi tại `pos` */
+    /** Floating damage number at `pos` */
     floatDamage(pos: [number, number, number], dmg: number, headshot: boolean): void {
       const s = floaters.find(f => f.age >= f.life) ?? null
       let f = s
@@ -103,14 +111,14 @@ export function createZombieOverlay(scene: THREE.Scene) {
       f.sprite.visible = true
       f.age = 0; f.life = 0.8; f.vy = 1.4
     },
-    /** Báo trước chiêu boss; `serverToLocal` đổi serverTime → performance.now() */
+    /** Telegraph a boss attack; `serverToLocal` converts serverTime -> performance.now() */
     telegraph(msg: TelegraphMsg, serverToLocal: (t: number) => number): void {
       const endsAtLocal = serverToLocal(msg.endsAt), now = performance.now()
       const color = msg.kind === 'slam' ? 0xff2a2a : msg.kind === 'charge' ? 0xff7a1a : 0xa04cff
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, fog: false })
       let mesh: THREE.Mesh
       if (msg.kind === 'charge' && msg.dir) {
-        mesh = new THREE.Mesh(flatGeo, mat)   // hình chữ nhật nằm phẳng, trục dài = z cục bộ
+        mesh = new THREE.Mesh(flatGeo, mat)   // flat rectangle, long axis = local z
         const len = msg.radius
         mesh.scale.set(2.2, 1, len)
         mesh.rotation.y = Math.atan2(-msg.dir[0], -msg.dir[2])
@@ -131,8 +139,8 @@ export function createZombieOverlay(scene: THREE.Scene) {
       for (const p of players) {
         if (p.id === selfId) continue
         const dead = (p.flags & 8) !== 0   // NetFlag.Dead
-        // ── thanh máu / nhãn zombie
-        if (p.hpMax > 0 && p.ztype && !dead) {   // mọi zombie luôn hiện máu trên đầu (Lây Nhiễm: mẹ/thường; Thủ Thành: theo loại)
+        // ── health bar / zombie label
+        if (p.hpMax > 0 && p.ztype && !dead) {   // every zombie always shows its health overhead (Infection: mother/normal; Defense: per type)
           const prev = lastHp.get(p.id)
           if (prev !== undefined && p.hp < prev) hitAt.set(p.id, now)
           lastHp.set(p.id, p.hp)
@@ -150,7 +158,7 @@ export function createZombieOverlay(scene: THREE.Scene) {
             seen.add(p.id)
           }
         }
-        // ── dấu thập đỏ người gục (xuyên tường)
+        // ── red cross over downed players (through walls)
         if ((p.flags & 512) !== 0 && !dead) {   // NetFlag.Downed
           const step = Math.max(0, Math.min(STEPS, Math.ceil(STEPS * (p.downLeft ?? 0) / DEFENSE.down.dieAfterMs)))
           const rev = Math.round(STEPS * (p.reviveP ?? 0))
@@ -165,14 +173,14 @@ export function createZombieOverlay(scene: THREE.Scene) {
       for (const id of [...bars.keys()]) if (!seen.has(id)) drop(bars, id)
       for (const id of [...crosses.keys()]) if (!seen.has(-id - 1)) drop(crosses, id)
       for (const id of [...hitAt.keys()]) if (now - hitAt.get(id)! > 10_000) { hitAt.delete(id); lastHp.delete(id) }
-      // số damage
+      // damage numbers
       for (const f of floaters) {
         if (f.age >= f.life) { f.sprite.visible = false; continue }
         f.age += dt
         f.sprite.position.y += f.vy * dt
         f.sprite.material.opacity = Math.max(0, 1 - f.age / f.life)
       }
-      // vòng báo trước: nhấp nháy mạnh dần, hết giờ thì xoá
+      // warning ring: flashes faster and faster, removed when time runs out
       for (let i = rings.length - 1; i >= 0; i--) {
         const r = rings[i]!
         const left = r.endsAtLocal - now

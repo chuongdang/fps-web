@@ -2,8 +2,8 @@ import type { TeamId } from '../teams'
 import type { LoadedMap } from './types'
 
 /**
- * Chân người chơi có đang trong khu mua của đội mình không. Đội A ở căn cứ A trừ khi đã đổi bên (sideSwapped).
- * `pos` = vị trí chân. Map không khai báo khu mua → false.
+ * Whether the player's feet are inside their own team's buy zone. Team A is at base A unless sides were swapped (sideSwapped).
+ * `pos` = feet position. A map with no buy zones declared → false.
  */
 export function inBuyZone(map: Pick<LoadedMap, 'buyZones'>, team: TeamId, sideSwapped: boolean, pos: readonly number[]): boolean {
   const side = (team === 'A') !== sideSwapped ? 'A' : 'B'

@@ -9,48 +9,48 @@ const BOX: HitBox = {
 }
 
 describe('rayAabb', () => {
-  it('tia xuyên giữa box → trả khoảng cách dương', () => {
+  it('ray through the middle of the box → returns a positive distance', () => {
     const d = rayAabb([0, 1, 2], [0, 0, -1], BOX, 100)
     expect(d).toBeCloseTo(1.5)
   })
 
-  it('tia sượt ngoài box → null', () => {
+  it('ray grazing outside the box → null', () => {
     const d = rayAabb([1.0, 1, 2], [0, 0, -1], BOX, 100)
     expect(d).toBeNull()
   })
 
-  it('origin trong box → trả 0', () => {
+  it('origin inside the box → returns 0', () => {
     const d = rayAabb([0, 1, 0], [0, 0, -1], BOX, 100)
     expect(d).toBe(0)
   })
 
-  it('tia hướng ngược không trúng → null', () => {
+  it('ray pointing away does not hit → null', () => {
     const d = rayAabb([0, 1, 2], [0, 0, 1], BOX, 100)
     expect(d).toBeNull()
   })
 
-  it('vượt maxDist → null', () => {
+  it('beyond maxDist → null', () => {
     const d = rayAabb([0, 1, 5], [0, 0, -1], BOX, 2)
     expect(d).toBeNull()
   })
 })
 
 describe('shootDir', () => {
-  it('yaw=0 pitch=0 → nhìn về −Z', () => {
+  it('yaw=0 pitch=0 → looks toward −Z', () => {
     const [x, y, z] = shootDir(0, 0)
     expect(x).toBeCloseTo(0)
     expect(y).toBeCloseTo(0)
     expect(z).toBeCloseTo(-1)
   })
 
-  it('yaw=π/2 pitch=0 → nhìn về −X (quay trái)', () => {
+  it('yaw=π/2 pitch=0 → looks toward −X (turned left)', () => {
     const [x, y, z] = shootDir(Math.PI / 2, 0)
     expect(x).toBeCloseTo(-1)
     expect(y).toBeCloseTo(0)
     expect(z).toBeCloseTo(0)
   })
 
-  it('pitch=π/4 → hướng lên 45°, |dir|=1', () => {
+  it('pitch=π/4 → looks up 45°, |dir|=1', () => {
     const dir = shootDir(0, Math.PI / 4)
     const len = Math.hypot(...dir)
     expect(len).toBeCloseTo(1)

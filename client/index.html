@@ -2,8 +2,24 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Phones (plan 19): no pinch / double-tap zoom while playing. No viewport-fit=cover: the browser keeps the page out of the notch area, so no HUD needs safe-area padding. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>FPS Web</title>
+  <!-- "Add to Home Screen" (M.6): opens without the browser bars, which is the only way to get fullscreen on iPhone Safari -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/app-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#161b26" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="FPS Web" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <style>
+    /* touch.mode.ts adds class "touch" to <html> on phones / tablets without a mouse */
+    html.touch, html.touch body { overscroll-behavior: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+    html.touch body { position: fixed; inset: 0; width: 100%; overflow: hidden; }   /* no page scroll, no pull-to-refresh, no rubber band */
+    html.touch input, html.touch textarea { -webkit-user-select: text; user-select: text; }
+  </style>
 </head>
 <body>
   <div id="app"></div>

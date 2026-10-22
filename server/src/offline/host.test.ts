@@ -26,8 +26,8 @@ async function setup(options?: RoomOptions) {
   return { host, c, adv, cmdSeq: { n: 0 } }
 }
 
-describe('offline host (phòng Room chạy không cần server Node)', () => {
-  it('Join → Welcome, OfflineState, hồi sinh, trận tự bắt đầu với 1 người', async () => {
+describe('offline host (a Room running without the Node server)', () => {
+  it('Join → Welcome, OfflineState, respawn, the match starts by itself with 1 player', async () => {
     const { host, c, adv } = await setup()
     adv(60 * 4)
     expect(c.got.some(m => m.t === MsgType.Welcome)).toBe(true)
@@ -37,26 +37,26 @@ describe('offline host (phòng Room chạy không cần server Node)', () => {
     host.dispose()
   })
 
-  it('thêm bot: phe địch, tên [BOT] ... + nhãn độ khó; giới hạn tổng số người', async () => {
+  it('add bot: enemy team, name [BOT] ... + difficulty tag; total player limit', async () => {
     const { host, c, adv } = await setup()
     adv(30)
     for (let i = 0; i < 12; i++) c.send({ t: MsgType.OfflineCmd, cmd: 'addBot', difficulty: i % 2 ? 'hard' : 'medium' })
     adv(10)
     const st = [...c.got].reverse().find(m => m.t === MsgType.OfflineState)!
-    expect(st.t === MsgType.OfflineState && st.bots.length).toBe(9)   // 10 chỗ − 1 người
+    expect(st.t === MsgType.OfflineState && st.bots.length).toBe(9)   // 10 slots − 1 human
     if (st.t === MsgType.OfflineState) {
       expect(st.bots.filter(b => b.team === 'B').length).toBe(5)
-      expect(st.bots.filter(b => b.team === 'A').length).toBe(4)   // phe địch (B) 5, phe mình 4 sau khi đầy
+      expect(st.bots.filter(b => b.team === 'A').length).toBe(4)   // enemy team (B) 5, own team 4 once full
       expect(new Set(st.bots.map(b => b.name)).size).toBe(st.bots.length)
       expect(st.bots.every(b => b.name.startsWith('[BOT] '))).toBe(true)
-      expect(st.bots.some(b => b.name.endsWith('KHÓ'))).toBe(true)
+      expect(st.bots.some(b => b.name.endsWith('HARD'))).toBe(true)
     }
     host.dispose()
   })
 
-  it('Lây Nhiễm offline (I.5): 1 người + 5 bot tự vào; bot zombie đi săn và lây nhiễm', async () => {
+  it('Infection offline (I.5): 1 human + 5 bots join automatically; zombie bots hunt and infect', async () => {
     const { host, c, adv } = await setup({ mode: 'infection', maxPlayers: 10, settings: { rounds: 1, roundTimeSec: 120 } })
-    await new Promise(r => setTimeout(r, 300))   // các world (Rapier) của người và bot nạp bất đồng bộ
+    await new Promise(r => setTimeout(r, 300))   // the Rapier worlds of the human and the bots load asynchronously
     adv(60 * 2)
     const st = [...c.got].reverse().find(m => m.t === MsgType.OfflineState)!
     expect(st.t === MsgType.OfflineState && st.bots.length).toBe(5)
@@ -69,7 +69,7 @@ describe('offline host (phòng Room chạy không cần server Node)', () => {
     host.dispose()
   }, 120_000)
 
-  it('Thủ Thành offline: một người vào, tự bắt đầu PREP → đợt 1 và zombie xuất hiện', async () => {
+  it('Defense offline: one player joins, PREP starts by itself → wave 1 and zombies appear', async () => {
     const { host, c, adv } = await setup({ mode: 'defense', maxPlayers: 10 })
     ;(host.room.mode as unknown as { s: { prepSec: number } }).s.prepSec = 2
     await new Promise(r => setTimeout(r, 300))

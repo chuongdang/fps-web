@@ -7,11 +7,12 @@ export const Btn = {
   Crouch:  1 << 5,
   Fire:    1 << 6,
   Reload:  1 << 7,
-  Aim:     1 << 8,   // giữ chuột phải: ngắm (ADS / scope); khi cầm lựu đạn = ném thấp (lăn)
-  QuickNade: 1 << 9, // phím G: cầm lựu đạn + rút chốt luôn, thả = ném mạnh rồi tự đổi về súng trước
-  Ability:  1 << 10, // phím E: chiêu của zombie (nhảy cao). Người không dùng
-  Flashlight: 1 << 11, // đèn pin (người, ban đêm): MỨC chứ không phải cạnh — client gửi trạng thái mong muốn trong mọi cmd (phím F bật/tắt)
-  Sniff:    1 << 12, // phím Q: zombie đánh hơi (Lây Nhiễm, plan 16 I.3)
+  Aim:     1 << 8,   // hold right mouse: aim (ADS / scope); while holding a grenade = low throw (roll)
+  QuickNade: 1 << 9, // G key: take out a grenade + pull the pin immediately, release = strong throw then auto-switch back to the previous weapon
+  Ability:  1 << 10, // E key: zombie ability (high leap). Humans do not use it
+  Flashlight: 1 << 11, // flashlight (humans, night): a LEVEL not an edge — the client sends the desired state in every cmd (F key toggles)
+  Sniff:    1 << 12, // Q key: zombie sniff (Infection, plan 16 I.3)
+  CycleNade: 1 << 13, // press the grenade key (4) again while holding a grenade: switch type (HE ↔ smoke), like CS 1.6. Rising edge
 } as const
 
 export interface InputCmd {
@@ -32,17 +33,17 @@ export interface PlayerState {
   crouching: boolean
   slideTimer: number
   slideCooldown: number
-  adsT: number   // 0..1: mức ngắm (0 = hông, 1 = ngắm hẳn); ảnh hưởng tốc độ chạy nên nằm trong state của movement
-  leapCd?: number   // giây còn lại của hồi chiêu nhảy cao (zombie, plan 16); thiếu = 0. Nằm trong state để tất định
+  adsT: number   // 0..1: ADS level (0 = hip, 1 = fully aimed); affects run speed so it lives in the movement state
+  leapCd?: number   // seconds left on the high-leap cooldown (zombie, plan 16); missing = 0. Lives in the state to stay deterministic
 }
 
-/** Tham số ngắm của súng đang cầm, cho stepMovement */
+/** ADS parameters of the weapon being held, for stepMovement */
 export interface AdsMove {
   inMs: number
   outMs: number
   moveMult: number
 }
-/** Tốc độ mặc định hạ adsT khi cầm thứ không ngắm được (đổi sang pistol/dao lúc đang ngắm) */
+/** Default rate at which adsT falls when holding something that cannot ADS (switching to pistol/knife while aiming) */
 export const ADS_DEFAULT_OUT_MS = 100
 
 export interface MovementConfig {
@@ -65,9 +66,9 @@ export interface MovementConfig {
   slideFriction: number
   slideCooldown: number
   slideMinSpeed: number
-  // Chỉ zombie (plan 16, ZF.2) – bỏ trống ở cấu hình người
-  leap?: { velY: number; forward: number; cooldownMs: number }   // chiêu nhảy cao (Btn.Ability)
-  hopPenalty?: number   // 0..1: mỗi lần nhảy khỏi đất mất ngần này tốc độ ngang (chống bunny hop)
+  // Zombie only (plan 16, ZF.2) – left empty in the human config
+  leap?: { velY: number; forward: number; cooldownMs: number }   // high-leap ability (Btn.Ability)
+  hopPenalty?: number   // 0..1: each jump off the ground loses this much horizontal speed (anti bunny hop)
 }
 
 export const defaultMovement: MovementConfig = {
@@ -122,9 +123,9 @@ export function stepMovement(
   world: CollisionWorld,
   cfg: MovementConfig,
   dt: number,
-  speedMul = 1,   // hệ số tốc độ chạy theo súng đang cầm (weaponLogic.moveSpeedMul); client và server phải truyền như nhau
-  ads: AdsMove | null = null,   // súng đang cầm có ngắm không (null = không); weaponLogic.adsMoveFor
-  adsWant = false,   // muốn ngắm (giữ Aim, không nạp/đổi súng); movement còn kiểm thêm đang đứng đất, không trượt
+  speedMul = 1,   // run-speed multiplier by held weapon (weaponLogic.moveSpeedMul); client and server must pass the same
+  ads: AdsMove | null = null,   // whether the held weapon can ADS (null = no); weaponLogic.adsMoveFor
+  adsWant = false,   // wants to ADS (holding Aim, not reloading/switching weapon); movement also checks that you are on the ground and not sliding
 ): PlayerState {
   world.setCrouchHeight?.(cfg.crouchHeight)
   const pos: [number, number, number] = [state.pos[0], state.pos[1], state.pos[2]]
@@ -134,7 +135,7 @@ export function stepMovement(
   let slideTimer    = state.slideTimer
   let slideCooldown = state.slideCooldown
   let leapCd        = state.leapCd ?? 0
-  // Ngắm được khi đứng trên đất và không trượt (kiểm trên state TRƯỚC tick); không thì adsT tự giảm
+  // Can ADS when on the ground and not sliding (checked on the state BEFORE the tick); otherwise adsT decays on its own
   const aimOk = !!ads && adsWant && grounded && state.slideTimer <= 0
   let adsT = state.adsT
   if (aimOk) adsT = Math.min(1, adsT + dt * 1000 / ads!.inMs)
@@ -144,7 +145,7 @@ export function stepMovement(
   const jumping = !!(input.buttons & Btn.Jump)
   const wantCrouch = !!(input.buttons & Btn.Crouch)
 
-  // Bắt đầu trượt: vừa bấm Crouch (cạnh lên) khi chạm đất, đủ nhanh, hết cooldown
+  // Start a slide: Crouch just pressed (rising edge) on the ground, fast enough, cooldown elapsed
   const hSpeed = Math.hypot(vel[0], vel[2])
   if (wantCrouch && !crouching && grounded && !jumping && hSpeed >= cfg.slideMinSpeed && slideCooldown <= 0) {
     vel[0] += vel[0] / hSpeed * cfg.slideBoost
@@ -174,13 +175,13 @@ export function stepMovement(
 
   const wishSpeed = (crouching ? cfg.crouchSpeed : cfg.runSpeed) * speedMul * (ads ? lerp(1, ads.moveMult, adsT) : 1)
 
-  // Nhả Crouch (và đứng dậy được) thì kết thúc trượt
+  // Release Crouch (and able to stand up) → the slide ends
   if (!crouching) slideTimer = 0
   const sliding = slideTimer > 0 && grounded
 
   if (grounded) {
     if (cfg.leap && (input.buttons & Btn.Ability) && leapCd <= 0) {
-      // Chiêu nhảy cao: vel.y cố định + đà ngang theo hướng nhìn (yaw), hồi chiêu cooldownMs
+      // High-leap ability: fixed vel.y + horizontal momentum along the look direction (yaw), cooldown cooldownMs
       vel[1]   = cfg.leap.velY
       vel[0]  -= Math.sin(yaw) * cfg.leap.forward
       vel[2]  -= Math.cos(yaw) * cfg.leap.forward
@@ -194,7 +195,7 @@ export function stepMovement(
       if (cfg.hopPenalty) { vel[0] *= 1 - cfg.hopPenalty; vel[2] *= 1 - cfg.hopPenalty }
       // skip friction on jump tick
     } else if (sliding) {
-      // Đang trượt: ma sát thấp, không lái được
+      // Sliding: low friction, cannot steer
       _applyFriction(vel, cfg.slideFriction, cfg.stopSpeed, dt)
     } else {
       _applyFriction(vel, cfg.friction, cfg.stopSpeed, dt)

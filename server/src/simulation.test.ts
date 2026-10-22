@@ -5,7 +5,7 @@ import { RoomManager } from './room'
 import { enqueueCmds, stepPlayer, sendSnapshots } from './simulation'
 import { TickLoop } from './tickLoop'
 
-// Sàn phẳng y=0, không tường
+// Flat floor at y=0, no walls
 const flatWorld: CollisionWorld = {
   moveCharacter(pos, d) {
     const y = Math.max(0, pos[1] + d[1])
@@ -27,12 +27,12 @@ function setup() {
   const rm = new RoomManager(map, () => 0)
   const { room, player } = rm.join('r', 'A', t, 0, 'A')
   player.world = flatWorld
-  player.weapon.slots = [6, 2, -1, 0]; player.weapon.slot = 3; player.weapon.current = 0   // AK47 ở ô 3
+  player.weapon.slots = [6, 2, -1, 0]; player.weapon.slot = 3; player.weapon.current = 0   // AK47 in slot 3
   return { room, p: player, got }
 }
 
 describe('stepPlayer', () => {
-  it('xử lý cmd theo thứ tự, ghi lastProcessedSeq', () => {
+  it('processes cmds in order, records lastProcessedSeq', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0, Btn.Forward), cmd(1, Btn.Forward)])
     stepPlayer(p, defaultMovement)
@@ -40,7 +40,7 @@ describe('stepPlayer', () => {
     expect(p.inputQueue.length).toBe(0)
   })
 
-  it('tối đa 2 cmd mỗi tick', () => {
+  it('at most 2 cmds per tick', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0), cmd(1), cmd(2), cmd(3)])
     stepPlayer(p, defaultMovement)
@@ -48,8 +48,8 @@ describe('stepPlayer', () => {
     expect(p.inputQueue.length).toBe(2)
   })
 
-  it('cmd trùng seq không chạy 2 lần', () => {
-    // a: gửi cmd 0 rồi gửi trùng 2 lần; b: chỉ gửi cmd 0. Hai bên phải ra cùng state.
+  it('a cmd with a duplicate seq does not run twice', () => {
+    // a: sends cmd 0 then sends it again twice; b: sends cmd 0 only. Both must end in the same state.
     const a = setup().p, b = setup().p
     enqueueCmds(a, [cmd(0, Btn.Forward)]); enqueueCmds(b, [cmd(0, Btn.Forward)])
     stepPlayer(a, defaultMovement); stepPlayer(b, defaultMovement)
@@ -60,58 +60,58 @@ describe('stepPlayer', () => {
     expect(a.state).toEqual(b.state)
   })
 
-  it('bỏ cmd cũ nhất khi hàng đợi quá MAX_INPUT_QUEUE', () => {
+  it('drops the oldest cmd when the queue exceeds MAX_INPUT_QUEUE', () => {
     const { p } = setup()
     enqueueCmds(p, Array.from({ length: 15 }, (_, i) => cmd(i)))
     expect(p.inputQueue.length).toBe(10)
     expect(p.inputQueue[0]!.seq).toBe(5)
   })
 
-  it('cmd sai bị bỏ', () => {
+  it('invalid cmds are dropped', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0, 0, { pitch: 2 }), cmd(1, 0, { yaw: NaN }), cmd(2, 1 << 15), 'x', null])
-    enqueueCmds(p, 'không phải mảng')
+    enqueueCmds(p, 'not an array')
     expect(p.inputQueue.length).toBe(0)
   })
 
-  it('hàng đợi trống: chạy tiếp lastCmd nhưng bỏ Jump, không tăng seq', () => {
+  it('empty queue: keeps running lastCmd but drops Jump, does not advance seq', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0)])
-    stepPlayer(p, defaultMovement)                 // chạm đất trước
+    stepPlayer(p, defaultMovement)                 // touch the ground first
     expect(p.state.grounded).toBe(true)
     enqueueCmds(p, [cmd(1, Btn.Forward | Btn.Jump)])
     stepPlayer(p, defaultMovement)
     const vy1 = p.state.vel[1]
-    expect(vy1).toBeGreaterThan(0)                 // đã nhảy
-    for (let i = 0; i < INPUT_STARVE_GRACE_TICKS; i++) stepPlayer(p, defaultMovement)   // chờ cmd
+    expect(vy1).toBeGreaterThan(0)                 // already jumped
+    for (let i = 0; i < INPUT_STARVE_GRACE_TICKS; i++) stepPlayer(p, defaultMovement)   // wait for cmd
     expect(p.state.vel[1]).toBe(vy1)
-    stepPlayer(p, defaultMovement)                 // hết thời gian chờ → idle
+    stepPlayer(p, defaultMovement)                 // wait time over -> idle
     expect(p.lastProcessedSeq).toBe(1)
     expect(p.idleCmd.buttons & Btn.Jump).toBe(0)
     expect(p.idleCmd.buttons & Btn.Forward).toBe(Btn.Forward)
-    expect(p.state.vel[1]).toBeLessThan(vy1)      // chỉ còn trọng lực
+    expect(p.state.vel[1]).toBeLessThan(vy1)      // only gravity remains
   })
 
-  it('hàng đợi trống thoáng qua: không chạy bước thừa, cmd đến sau được bù', () => {
-    // a: cmd đến đều; b: cmd 1 đến trễ một tick (queue trống 1 tick) rồi cmd 1,2 đến cùng lúc
+  it('briefly empty queue: no extra step, later cmds make up for it', () => {
+    // a: cmds arrive steadily; b: cmd 1 arrives one tick late (queue empty for 1 tick) then cmds 1,2 arrive together
     const a = setup().p, b = setup().p
     for (const p of [a, b]) { enqueueCmds(p, [cmd(0, Btn.Forward)]); stepPlayer(p, defaultMovement) }
     enqueueCmds(a, [cmd(1, Btn.Forward)]); stepPlayer(a, defaultMovement)
     enqueueCmds(a, [cmd(2, Btn.Forward)]); stepPlayer(a, defaultMovement)
-    stepPlayer(b, defaultMovement)                                  // trống, không bước
+    stepPlayer(b, defaultMovement)                                  // empty, no step
     enqueueCmds(b, [cmd(1, Btn.Forward), cmd(2, Btn.Forward)]); stepPlayer(b, defaultMovement)
     expect(b.lastProcessedSeq).toBe(2)
     expect(b.state).toEqual(a.state)
   })
 
-  it('người chưa gửi cmd nào vẫn chạy idle (rơi xuống đất)', () => {
+  it('a player who has not sent any cmd still runs idle (falls to the ground)', () => {
     const { p } = setup()
     p.state = { ...p.state, pos: [0, 5, 0] }
     stepPlayer(p, defaultMovement)
     expect(p.state.pos[1]).toBeLessThan(5)
   })
 
-  it('chưa có world thì không chạy', () => {
+  it('does not run without a world', () => {
     const { p } = setup()
     p.world = null
     enqueueCmds(p, [cmd(0, Btn.Forward)])
@@ -121,7 +121,7 @@ describe('stepPlayer', () => {
 })
 
 describe('sendSnapshots', () => {
-  it('chỉ gửi mỗi 3 tick, ack riêng từng người', () => {
+  it('only sends every 3 ticks, ack per player', () => {
     const { room, p, got } = setup()
     p.lastProcessedSeq = 7
     sendSnapshots(room, 1, 10)
@@ -135,16 +135,16 @@ describe('sendSnapshots', () => {
 })
 
 describe('TickLoop', () => {
-  it('chạy đủ 60 tick/giây dù pump gọi thất thường', () => {
+  it('runs a full 60 ticks/second even when pump is called erratically', () => {
     let now = 1000
     let n = 0
     const loop = new TickLoop(() => now, () => { n++ })
-    while (now < 1000 + 60_000) { now += 1 + (now % 7); loop.pump() }   // nhịp gọi 1–7ms
+    while (now < 1000 + 60_000) { now += 1 + (now % 7); loop.pump() }   // call interval 1-7ms
     expect(n).toBeGreaterThanOrEqual(3599)
     expect(n).toBeLessThanOrEqual(3600)
   })
 
-  it('tụt quá xa thì bỏ bớt tick thay vì chạy dồn', () => {
+  it('when too far behind, drops ticks instead of bursting to catch up', () => {
     let now = 0
     let n = 0
     const loop = new TickLoop(() => now, () => { n++ })
@@ -155,8 +155,8 @@ describe('TickLoop', () => {
   })
 })
 
-describe('súng trên server (4.1)', () => {
-  // Gửi Fire liên tục `n` cmd, mỗi tick một cmd, trả số phát hợp lệ
+describe('guns on the server (4.1)', () => {
+  // Send Fire continuously for `n` cmds, one cmd per tick, return the number of valid shots
   function holdFire(weapon: number, n: number, pulse = false) {
     const { p } = setup()
     for (let i = 0; i < n; i++) {
@@ -167,13 +167,13 @@ describe('súng trên server (4.1)', () => {
     return p
   }
 
-  it('AK47 giữ cò: đúng 10 phát/giây theo fireIntervalMs, bất kể tick server', () => {
+  it('AK47 trigger held: exactly 10 shots/second per fireIntervalMs, regardless of server tick', () => {
     const p = holdFire(3, 60)
     expect(p.shotsFired).toBe(10)
     expect(p.weapon.ammo[0]).toBe(30 - 10)
   })
 
-  it('cmd đến dồn 2 cái/tick vẫn tính fire rate theo seq', () => {
+  it('cmds arriving 2 per tick still compute fire rate by seq', () => {
     const { p } = setup()
     for (let i = 0; i < 60; i += 2) {
       enqueueCmds(p, [cmd(i, Btn.Fire), cmd(i + 1, Btn.Fire)], i * 1000 / 60)
@@ -182,60 +182,117 @@ describe('súng trên server (4.1)', () => {
     expect(p.shotsFired).toBe(10)
   })
 
-  it('COLT bán tự động: phải nhả cò mới bắn tiếp', () => {
-    // đổi sang COLT khoá bắn 300ms; giữ cò qua lúc khoá thì cú bấm đó mất, không tự bắn khi hết khoá
+  it('COLT is semi-auto: must release the trigger to fire again', () => {
+    // switching to COLT locks firing for 300ms; holding the trigger through the lock wastes that press, it does not auto-fire when the lock ends
     expect(holdFire(1, 60).shotsFired).toBe(0)
-    // bấm mỗi 2 tick: sau 300ms khoá còn ~0.7s, mỗi phát cách ≥160ms (10 tick) → tick 18,28,38,48,58 = 5 phát
+    // press every 2 ticks: after the 300ms lock ~0.7s remain, each shot >=160ms apart (10 ticks) -> ticks 18,28,38,48,58 = 5 shots
     expect(holdFire(1, 60, true).shotsFired).toBe(5)
   })
 
-  it('xả hết băng rồi tự nạp: ammo về đầy sau reloadMs', () => {
+  it('empties the magazine then auto-reloads: ammo is full after reloadMs', () => {
     const { p } = setup()
     let seq = 0
     const run = (n: number, buttons: number) => {
       for (let i = 0; i < n; i++, seq++) { enqueueCmds(p, [cmd(seq, buttons)], seq * 1000 / 60); stepPlayer(p, defaultMovement) }
     }
-    run(200, Btn.Fire)             // 30 viên hết trong ~3s, rồi cạch + tự nạp
+    run(200, Btn.Fire)             // 30 rounds gone in ~3s, then click + auto-reload
     expect(p.weapon.ammo[0]).toBe(0)
     expect(p.shotsFired).toBe(30)
     run(160, 0)                     // 2.5s reload
     expect(p.weapon.ammo[0]).toBe(30)
   })
 
-  it('đổi súng qua cmd.weapon', () => {
+  it('switching guns via cmd.weapon', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0, 0, { weapon: 1 })], 0)
     stepPlayer(p, defaultMovement)
-    expect(p.weapon.current).toBe(2)   // ô 1 = Colt
+    expect(p.weapon.current).toBe(2)   // slot 1 = Colt
     expect(p.weapon.slot).toBe(1)
   })
 
-  it('seq nhảy cóc bị bỏ: không bắn nhanh hơn thời gian thực', () => {
+  it('skipped-ahead seq is dropped: no firing faster than real time', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0)], 0)
     stepPlayer(p, defaultMovement)
-    enqueueCmds(p, [cmd(6000, Btn.Fire)], 100)   // 100 giây trong 100ms thật
+    enqueueCmds(p, [cmd(6000, Btn.Fire)], 100)   // 100 seconds in 100ms real
     stepPlayer(p, defaultMovement)
     expect(p.lastProcessedSeq).toBe(0)
     expect(p.shotsFired).toBe(0)
   })
 
-  it('gửi dồn nhưng trong sai số 1s vẫn nhận', () => {
+  it('bursty sends within the 1s tolerance are still accepted', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0)], 0)
-    enqueueCmds(p, [cmd(30)], 100)   // 500ms seq, 100ms thật: nằm trong slack
+    enqueueCmds(p, [cmd(30)], 100)   // 500ms of seq, 100ms real: within the slack
     stepPlayer(p, defaultMovement)
     expect(p.inputQueue.length + (p.lastProcessedSeq >= 0 ? 1 : 0)).toBeGreaterThan(0)
     expect(p.inputQueue.some(c => c.seq === 30) || p.lastProcessedSeq === 30).toBe(true)
   })
 
-  it('snapshot kèm WeaponState của chính người nhận', () => {
+  it("snapshot carries the receiver's own WeaponState", () => {
     const { room, p, got } = setup()
     enqueueCmds(p, [cmd(0, Btn.Fire)], 0)
     stepPlayer(p, defaultMovement)
     sendSnapshots(room, 0, 0)
     const snap = got.find(m => m.t === MsgType.Snapshot)
-    if (!snap || snap.t !== MsgType.Snapshot) throw new Error('không có snapshot')
+    if (!snap || snap.t !== MsgType.Snapshot) throw new Error('no snapshot')
     expect(snap.wpn?.ammo[0]).toBe(29)
+  })
+})
+
+describe('fall damage', () => {
+  // Drop a player from height h (m) to the floor at y=0, run until landing
+  function drop(h: number, tweak?: (p: ReturnType<typeof setup>['p']) => void) {
+    const s = setup()
+    s.p.invulnUntil = 0
+    s.p.state.pos[1] = h; s.p.state.grounded = false
+    tweak?.(s.p)
+    for (let i = 0; i < 600 && !s.p.state.grounded; i++) stepPlayer(s.p, defaultMovement, s.room)
+    return s
+  }
+
+  it('a low fall (<= 4m) costs no hp and sends no Hurt', () => {
+    const { p, got } = drop(4)
+    expect(p.state.grounded).toBe(true)
+    expect(p.hp).toBe(100)
+    expect(got.some(m => m.t === MsgType.Hurt)).toBe(false)
+  })
+
+  it('an 8m fall costs moderate hp and sends a fall-type Hurt to the victim', () => {
+    const { p, got } = drop(8)
+    expect(p.hp).toBeLessThan(100); expect(p.hp).toBeGreaterThan(0)
+    const hurt = got.filter(m => m.t === MsgType.Hurt)
+    expect(hurt.length).toBe(1)
+    expect(hurt[0]).toMatchObject({ fall: true, damage: 100 - p.hp })
+  })
+
+  it('damage is applied once per landing (standing still on the floor does not apply it again)', () => {
+    const { p, room } = drop(8)
+    const hp = p.hp
+    for (let i = 0; i < 60; i++) stepPlayer(p, defaultMovement, room)
+    expect(p.hp).toBe(hp)
+  })
+
+  it('a 12m fall kills: killerId is the player themselves', () => {
+    const { p } = drop(12)
+    expect(p.hp).toBeLessThanOrEqual(0)
+    expect(p.killerId).toBe(p.id)
+  })
+
+  it('an invulnerable player (just respawned) loses no hp', () => {
+    const { p } = drop(12, q => { q.invulnUntil = 1e9 })
+    expect(p.hp).toBe(100)
+  })
+
+  it('zombies take no fall damage', () => {
+    const { p } = drop(12, q => { q.zstats = { type: 'walker' } as never })
+    expect(p.hp).toBe(100)
+  })
+
+  it('jumping in place on a flat floor costs no hp', () => {
+    const { p, room } = drop(0)
+    enqueueCmds(p, [cmd(0, Btn.Jump)])
+    for (let i = 0; i < 120; i++) stepPlayer(p, defaultMovement, room)
+    expect(p.hp).toBe(100)
   })
 })

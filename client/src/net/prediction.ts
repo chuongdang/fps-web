@@ -1,42 +1,42 @@
 import { DT, TICK_RATE, adsMoveFor, adsWanted, copyWeaponState, makeWeaponState, moveSpeedMul, stepMovement, stepWeaponCmd, type AdsMove, type InputCmd, type MovementConfig, type PlayerState, type WeaponState } from '@fps/shared'
 import type { CollisionWorld } from '@fps/shared/physics/world'
 
-const MAX_PENDING = 240          // 4 giây cmd chưa được ack; quá thì bỏ cái cũ nhất
-const TELEPORT_DIST = 1          // lệch ≥ 1m: nhảy thẳng, không làm mượt
-const OFFSET_DECAY = 0.85        // mỗi frame
+const MAX_PENDING = 240          // 4 seconds of unacked cmds; beyond that drop the oldest
+const TELEPORT_DIST = 1          // error ≥ 1m: snap straight there, no smoothing
+const OFFSET_DECAY = 0.85        // per frame
 const OFFSET_EPS = 1e-4
 const ERROR_WINDOW_MS = 5000
 
 interface Pending { cmd: InputCmd; stateAfter: PlayerState }
 
-// Dự đoán phía client + reconcile (input replay):
-//  - mỗi tick: chạy stepMovement ngay, nhớ {cmd, stateAfter}
-//  - có snapshot: bỏ cmd đã ack, đặt state = state server, chạy lại các cmd còn lại
+// Client-side prediction + reconcile (input replay):
+//  - each tick: run stepMovement immediately, remember {cmd, stateAfter}
+//  - on snapshot: drop acked cmds, set state = server state, replay the remaining cmds
 export class Prediction {
   predicted: PlayerState
   pending: Pending[] = []
-  ready = false                   // đã nhận snapshot đầu tiên
-  lastError = 0                   // sai số vị trí (m) ở lần reconcile gần nhất
+  ready = false                   // first snapshot received
+  lastError = 0                   // position error (m) at the latest reconcile
   reconciles = 0
   private errors: { t: number; e: number }[] = []
-  private wsScratch = makeWeaponState()   // replay súng song song với replay vị trí (tốc độ chạy phụ thuộc súng đang cầm)
-  // Làm mượt hiển thị: vị trí vẽ = predicted.pos + visualOffset
+  private wsScratch = makeWeaponState()   // weapon replay in parallel with the position replay (run speed depends on the held weapon)
+  // Display smoothing: drawn position = predicted.pos + visualOffset
   readonly visualOffset: [number, number, number] = [0, 0, 0]
 
   constructor(
     private world: CollisionWorld,
-    private cfg: MovementConfig,   // đổi được khi vai trò đổi (người ↔ zombie): setConfig
+    private cfg: MovementConfig,   // changeable when the role changes (human ↔ zombie): setConfig
     initial: PlayerState,
     private now: () => number = () => performance.now(),
   ) {
     this.predicted = initial
   }
 
-  /** Đổi cấu hình di chuyển (người ↔ zombie). Gọi trước onSnapshot của snapshot báo vai mới để replay dùng đúng cấu hình. */
+  /** Change the movement config (human ↔ zombie). Call before onSnapshot of the snapshot announcing the new role so the replay uses the right config. */
   setConfig(cfg: MovementConfig): void { this.cfg = cfg }
 
-  // Chạy một tick dự đoán. Gọi sau khi cmd được tạo; trả về state mới.
-  // speedMul = hệ số tốc độ theo súng đang cầm TRƯỚC cmd này (moveSpeedMul của WeaponState hiện tại)
+  // Run one prediction tick. Call after the cmd is created; returns the new state.
+  // speedMul = speed factor of the held weapon BEFORE this cmd (moveSpeedMul of the current WeaponState)
   step(cmd: InputCmd, speedMul = 1, ads: AdsMove | null = null, adsWant = false): PlayerState {
     const next = stepMovement(this.predicted, cmd, this.world, this.cfg, DT, speedMul, ads, adsWant)
     this.predicted = next
@@ -45,16 +45,16 @@ export class Prediction {
     return next
   }
 
-  // Hồi sinh: đặt state mới, bỏ cmd chưa ack, không làm mượt
+  // Respawn: set a new state, drop unacked cmds, no smoothing
   teleport(state: PlayerState): void {
     this.predicted = state
     this.pending.length = 0
     this.visualOffset[0] = 0; this.visualOffset[1] = 0; this.visualOffset[2] = 0
   }
 
-  // wpn = WeaponState của server sau cmd `ack`: replay súng cùng lúc để biết tốc độ chạy đúng ở từng cmd chưa ack
+  // wpn = the server's WeaponState after cmd `ack`: replay the weapon at the same time to get the right run speed at each unacked cmd
   onSnapshot(ack: number, serverState: PlayerState, wpn?: WeaponState | null): void {
-    // So với stateAfter đã lưu cho cmd seq = ack (nếu còn)
+    // Compare with the stateAfter stored for cmd seq = ack (if still present)
     let error = -1
     for (const p of this.pending) {
       if (p.cmd.seq === ack) { error = dist(p.stateAfter.pos, serverState.pos); break }
@@ -63,13 +63,13 @@ export class Prediction {
     while (drop < this.pending.length && this.pending[drop]!.cmd.seq <= ack) drop++
     if (drop > 0) this.pending.splice(0, drop)
 
-    // Vị trí đang vẽ trước khi sửa
+    // Drawn position before the correction
     const ox = this.predicted.pos[0] + this.visualOffset[0]
     const oy = this.predicted.pos[1] + this.visualOffset[1]
     const oz = this.predicted.pos[2] + this.visualOffset[2]
 
-    // Luôn đặt lại = state server rồi chạy lại cmd chưa ack. stepMovement truyền vị trí vào
-    // world mỗi lần nên collider của mình tự được đặt lại theo state.
+    // Always reset to the server state, then replay the unacked cmds. stepMovement passes the position into
+    // the world every call, so our collider is reset to the state automatically.
     let s = serverState
     const ws = this.wsScratch
     if (wpn) copyWeaponState(ws, wpn)
@@ -99,7 +99,7 @@ export class Prediction {
     }
   }
 
-  // Gọi mỗi frame hiển thị
+  // Call every rendered frame
   decayOffset(): readonly [number, number, number] {
     const o = this.visualOffset
     o[0] *= OFFSET_DECAY; o[1] *= OFFSET_DECAY; o[2] *= OFFSET_DECAY
@@ -107,7 +107,7 @@ export class Prediction {
     return o
   }
 
-  // Sai số lớn nhất trong 5 giây gần nhất
+  // Largest error in the last 5 seconds
   maxError(): number {
     const t = this.now() - ERROR_WINDOW_MS
     let m = 0

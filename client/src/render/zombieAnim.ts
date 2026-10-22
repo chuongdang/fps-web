@@ -1,11 +1,11 @@
 import type { Slot } from './locomotion'
 
-// Animation zombie (plan 16, ZF.4): bộ z_* của Mixamo dùng chung mọi model (cùng bộ xương 65), kể cả người bị lây.
-// Thuần số học để test; characterRig.ts áp vào mixer.
+// Zombie animation (plan 16, ZF.4): the Mixamo z_* set is shared by every model (same 65-bone skeleton), including infected players.
+// Pure math so it is testable; characterRig.ts applies it to the mixer.
 export const Z_CLIPS = ['z_idle', 'z_walk', 'z_run', 'z_crawl', 'z_jump'] as const
 export const Z_DEATH = ['z_death_1', 'z_death_2'] as const
 
-/** Ô di chuyển → clip. Zombie không đi lùi/ngang riêng: mượn z_walk; ngồi = bò. */
+/** Movement slot -> clip. Zombies have no dedicated backward/sideways walk: borrow z_walk; crouch = crawl. */
 export function zombieSlotClip(slot: Slot): string {
   switch (slot) {
     case 'idle': return 'z_idle'
@@ -16,13 +16,13 @@ export function zombieSlotClip(slot: Slot): string {
   }
 }
 
-// Tốc độ (m/s) mà clip trông khớp chân; timeScale = speed / ref, kẹp để khỏi đứng hình / hoạt hình nhanh quá
-// (đo từ chân trong chính clip: z_walk rất chậm ~0,5 m/s, z_run ~2,5 m/s, z_crawl ~0,5 m/s)
+// Speed (m/s) at which the clip's feet look right; timeScale = speed / ref, clamped to avoid freezing / over-fast animation
+// (measured from the feet in the clip itself: z_walk is very slow ~0.5 m/s, z_run ~2.5 m/s, z_crawl ~0.5 m/s)
 export const ZOMBIE_REF_SPEED = { walk: 0.6, run: 2.6, crawl: 0.5 }
 export const ZOMBIE_RATE_MIN = 0.5
 export const ZOMBIE_RATE_MAX = 2.6
 
-/** Ngưỡng chuyển z_walk → z_run của zombie (z_walk quá chậm để theo kịp tốc độ đi của zombie) */
+/** Zombie threshold for switching z_walk -> z_run (z_walk is too slow to keep up with the zombie walking speed) */
 export const ZOMBIE_RUN_START = 1.5
 export const ZOMBIE_RUN_BLEND = 1
 
@@ -32,12 +32,12 @@ export function zombieClipRate(clip: string, speed: number): number {
   return Math.min(ZOMBIE_RATE_MAX, Math.max(ZOMBIE_RATE_MIN, speed / ref))
 }
 
-/** z_jump: giữ ở khung giữa lúc còn trên không (tỉ lệ độ dài clip) */
+/** z_jump: hold the middle frame while airborne (fraction of the clip length) */
 export const ZOMBIE_JUMP_HOLD = 0.4
 
 /**
- * Đòn cào: chỉ phát một đoạn [from, to] (tỉ lệ độ dài clip, quanh lúc tay vung nhanh nhất) trong `sec` giây.
- * Cào thường = z_attack_2 (tay vung ở ~42% clip); cào mạnh = z_attack_1 (hai nhịp ở ~19% và ~32%).
+ * Claw attack: plays only a segment [from, to] (fraction of the clip length, around when the arm swings fastest) over `sec` seconds.
+ * Normal claw = z_attack_2 (swing at ~42% of the clip); heavy claw = z_attack_1 (two beats at ~19% and ~32%).
  */
 export const ZOMBIE_ATTACK = {
   light: { clip: 'z_attack_2', from: 0.12, to: 0.62, sec: 0.5 },
@@ -45,7 +45,7 @@ export const ZOMBIE_ATTACK = {
 } as const
 export type ZombieAttackKind = keyof typeof ZOMBIE_ATTACK
 
-/** Biến hình: z_transform co lại vừa `sec` giây (thời gian bất tử + đứng yên của server) */
+/** Transformation: z_transform is squeezed to fit `sec` seconds (the server's invulnerable + frozen time) */
 export function fitRate(clipDur: number, from: number, to: number, sec: number): number {
   return Math.max(0.1, ((to - from) * clipDur) / Math.max(0.05, sec))
 }

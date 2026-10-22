@@ -1,12 +1,12 @@
 import * as THREE from 'three'
 import { GRENADE, type Vec3 } from '@fps/shared'
 
-// Hiệu ứng nổ lựu đạn (plan 12, G.7): chớp sáng + đèn, cầu lửa, khói, tia lửa, vết cháy, rung màn hình.
-// Mọi texture sprite sinh bằng canvas (gradient tròn), không tải file. Toàn bộ dùng pool dựng sẵn: không cấp phát khi nổ,
-// không đổi số đèn trong scene (đổi số đèn làm shader Lambert biên dịch lại → giật).
+// Grenade explosion effects (plan 12, G.7): flash + light, fireball, smoke, sparks, scorch mark, screen shake.
+// All sprite textures are generated on a canvas (round gradients), no files loaded. Everything uses prebuilt pools: no allocation on explosion,
+// and the number of lights in the scene never changes (changing it recompiles the Lambert shader -> hitch).
 export interface CastRay { (o: Vec3, d: Vec3, max: number): { dist: number; normal: Vec3 } | null }
 
-// ── Thông số hiệu ứng ──────────────────────────────────────────────────────────
+// ── Effect parameters ──────────────────────────────────────────────────────────
 const FLASH_SIZE = 7, FLASH_S = 0.08
 const LIGHT_S = 0.25, LIGHT_INTENSITY = 380, LIGHT_DIST = 20, LIGHT_POOL = 3
 const FIRE_COUNT = 14, FIRE_R0 = 0.7, FIRE_R1 = 3.6, FIRE_GROW_S = 0.3, FIRE_LIFE_S = 0.6
@@ -67,7 +67,7 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
     p.sprite.position.set(x, y, z); p.sprite.scale.setScalar(r0); p.mat.opacity = 1; p.sprite.visible = true
   }
 
-  // Vết cháy: tia xuống sàn; không có thì tường gần nhất trong 4 hướng ngang + trần
+  // Scorch mark: ray down to the floor; otherwise the nearest wall in the 4 horizontal directions + ceiling
   function placeDecal(x: number, y: number, z: number): void {
     const cast = castRay()
     if (!cast) return
@@ -83,13 +83,13 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
     }
     const dec = decals[nextDecal++ % DECAL_MAX]!
     _n.set(hit.normal[0], hit.normal[1], hit.normal[2])
-    dec.mesh.position.set(o[0] + dir[0] * hit.dist, o[1] + dir[1] * hit.dist, o[2] + dir[2] * hit.dist).addScaledVector(_n, 0.03)   // nhích ra khỏi mặt để không nhấp nháy z
+    dec.mesh.position.set(o[0] + dir[0] * hit.dist, o[1] + dir[1] * hit.dist, o[2] + dir[2] * hit.dist).addScaledVector(_n, 0.03)   // nudge off the surface to avoid z-fighting
     dec.mesh.quaternion.setFromUnitVectors(_up, _n)
     dec.age = 0; dec.mesh.visible = true; dec.mat.opacity = 1
   }
 
   return {
-    /** Nổ tại pos. camPos để tính rung theo khoảng cách (1 − d / shakeRadius) */
+    /** Explode at pos. camPos is used to scale shake by distance (1 − d / shakeRadius) */
     explode(pos: Vec3, camPos: Vec3): void {
       const [x, y, z] = pos
       spawn(take(pools.flash), x, y + 0.2, z, FLASH_S, FLASH_SIZE, FLASH_SIZE * 0.2)
@@ -101,10 +101,10 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
       }
       for (let i = 0; i < SMOKE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2, r = Math.random() * 1.6
-        const p = pools.smoke[smokeNext++ % SMOKE_MAX]!   // quá 200 thì tái dùng sprite cũ nhất
+        const p = pools.smoke[smokeNext++ % SMOKE_MAX]!   // past 200, reuse the oldest sprite
         spawn(p, x + Math.cos(a) * r, y + 0.3 + Math.random() * 1.4, z + Math.sin(a) * r, SMOKE_LIFE_S * (0.7 + Math.random() * 0.5), SMOKE_R0, SMOKE_R1 * (0.7 + Math.random() * 0.5), (Math.random() - 0.5) * 1.6, SMOKE_RISE * (0.5 + Math.random() * 0.8), (Math.random() - 0.5) * 1.6)
       }
-      for (let i = 0; i < SPARK_COUNT; i++) {   // hạt sáng bắn tung nửa cầu trên
+      for (let i = 0; i < SPARK_COUNT; i++) {   // bright particles fly out over the upper hemisphere
         const th = Math.random() * Math.PI * 2, ph = Math.random() * Math.PI * 0.5, sp = SPARK_SPEED * (0.4 + Math.random() * 0.6)
         spawn(take(pools.spark), x, y + 0.3, z, SPARK_LIFE_S, 0.12, 0.03, Math.cos(th) * Math.cos(ph) * sp, Math.sin(ph) * sp, Math.sin(th) * Math.cos(ph) * sp)
       }
@@ -114,7 +114,7 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
       if (amp > shake.amp * Math.max(0, 1 - shake.t / SHAKE_S)) { shake.amp = amp; shake.t = 0 }
     },
 
-    /** Mỗi frame */
+    /** Every frame */
     update(dt: number): void {
       for (const p of pools.flash) if (p.alive) {
         p.age += dt
@@ -125,7 +125,7 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
       for (const p of pools.fire) if (p.alive) {
         p.age += dt
         if (p.age >= p.life) { p.alive = false; p.sprite.visible = false; continue }
-        const g = Math.min(1, p.age / p.grow), s = 1 - Math.pow(1 - g, 3)   // nở nhanh rồi chậm lại
+        const g = Math.min(1, p.age / p.grow), s = 1 - Math.pow(1 - g, 3)   // expands quickly, then slows down
         p.sprite.scale.setScalar(p.r0 + (p.r1 - p.r0) * s)
         p.sprite.position.y += p.vy * dt
         p.mat.opacity = Math.max(0, 1 - Math.max(0, p.age - p.grow * 0.6) / (p.life - p.grow * 0.6))
@@ -155,7 +155,7 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
         if (d.age >= DECAL_LIFE_S) { d.mesh.visible = false; continue }
         d.mat.opacity = Math.min(1, (DECAL_LIFE_S - d.age) / DECAL_FADE_S)
       }
-      // rung: biên độ giảm tuyến tính theo thời gian, hướng ngẫu nhiên mỗi frame
+      // shake: amplitude decays linearly over time, random direction each frame
       shake.t += dt
       const k = Math.max(0, 1 - shake.t / SHAKE_S) * shake.amp
       shake.x = (Math.random() - 0.5) * 2 * SHAKE_MAX_M * k
@@ -163,7 +163,7 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
       shake.rot = (Math.random() - 0.5) * 2 * SHAKE_MAX_ROT * k
     },
 
-    /** Sang ván mới: xoá mọi hạt, vết cháy và rung đang chạy */
+    /** New round: clear all particles, scorch marks and running shake */
     clear(): void {
       for (const p of pools.flash.concat(pools.fire, pools.smoke, pools.spark)) { p.alive = false; p.sprite.visible = false }
       for (const d of decals) d.mesh.visible = false
@@ -171,10 +171,10 @@ export function createExplosionFx(scene: THREE.Scene, castRay: () => CastRay | n
       shake.amp = 0; shake.t = 99; shake.x = shake.y = shake.rot = 0
     },
 
-    /** Độ lệch rung của frame này (m, rad): cộng vào camera chính, không đụng viewmodel */
+    /** Shake offset for this frame (m, rad): added to the main camera, does not touch the viewmodel */
     get shake(): { x: number; y: number; rot: number } { return shake },
 
-    /** Số sprite đang sống (test/debug) */
+    /** Number of live sprites (test/debug) */
     get liveCount(): number { return pools.flash.concat(pools.fire, pools.smoke, pools.spark).filter(p => p.alive).length },
     get liveSmoke(): number { return pools.smoke.filter(p => p.alive).length },
     get decalCount(): number { return decals.filter(d => d.mesh.visible).length },

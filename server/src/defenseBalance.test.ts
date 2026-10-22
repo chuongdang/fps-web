@@ -1,5 +1,5 @@
-// Thử cân bằng Thủ Thành (T.9): bot KHÓ đóng vai người chơi giữ thành, chạy mô phỏng tới khi thắng/thua rồi in số liệu.
-// Chỉ chạy khi có biến môi trường:  BALANCE=1 npx vitest run server/src/defenseBalance.test.ts
+// Defense balance probe (T.9): HARD bots play the defending players, simulate until win/loss, then print stats.
+// Only runs with the env var:  BALANCE=1 npx vitest run server/src/defenseBalance.test.ts
 import { describe, it, beforeAll } from 'vitest'
 import { readFileSync } from 'fs'
 import { MATCH, defaultMovement, loadMap, type MapFile, type RoomOptions, type Transport } from '@fps/shared'
@@ -34,18 +34,18 @@ async function trial(bots: number, difficulty: 'easy' | 'normal' | 'hard', maxMi
     stepRoom(room, defaultMovement, now)
     if (i % 600 === 0) await new Promise(r => setTimeout(r, 0))
     if (m.wave !== lastWave && m.kind === 'wave') {
-      if (lastWave > 0) log.push(`đợt ${lastWave}: ${((now - waveStart) / 1000).toFixed(0)}s`)
+      if (lastWave > 0) log.push(`wave ${lastWave}: ${((now - waveStart) / 1000).toFixed(0)}s`)
       lastWave = m.wave; waveStart = now
     }
     if (m.kind === 'victory' || m.kind === 'defeat') break
   }
   const humans = [...room.players.values()].filter(p => !p.npc)
-  const res = `${bots} bot khó, độ khó ${difficulty}: ${m.kind} ở đợt ${m.wave}, ${(now / 1000).toFixed(0)}s; ${log.join(', ')}; tiền còn ${humans.map(h => h.money).join('/')}`
+  const res = `${bots} hard bots, difficulty ${difficulty}: ${m.kind} at wave ${m.wave}, ${(now / 1000).toFixed(0)}s; ${log.join(', ')}; money left ${humans.map(h => h.money).join('/')}`
   console.log('BALANCE ' + res)
   return res
 }
 
-describe.skipIf(!process.env.BALANCE)('cân bằng Thủ Thành', () => {
+describe.skipIf(!process.env.BALANCE)('Defense balance', () => {
   it('1 bot / 4 bot × normal', async () => {
     await trial(1, 'normal', 25)
     await trial(4, 'normal', 25)

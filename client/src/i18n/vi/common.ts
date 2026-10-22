@@ -1,0 +1,33 @@
+export default {
+  'team.A.name': 'Cớm',
+  'team.B.name': 'Khủng bố',
+
+  'mode.elimination': 'Sinh Tử',
+  'mode.tdm': 'Hỗn Chiến',
+  'mode.infection': 'Lây Nhiễm',
+  'mode.defense': 'Thủ Thành',
+  'mode.elimination.desc': 'Mỗi ván một mạng. Thắng 10 ván trước.',
+  'mode.tdm.desc': 'Hồi sinh liên tục. Bắn tới 50 mạng hoặc hết giờ.',
+  'mode.infection.desc': 'Zombie mẹ lây nhiễm cả phòng. Trụ tới hết giờ để thắng.',
+  'mode.defense.desc': 'Cả đội giữ thành chống 10 đợt zombie, đợt cuối có boss.',
+
+  'category.claw': 'Vuốt',
+  'category.knife': 'Dao',
+  'category.pistol': 'Súng ngắn',
+  'category.mid': 'Súng vừa',
+  'category.long': 'Súng dài',
+  'category.grenade': 'Lựu đạn',
+
+  'weapon.knife': 'Dao',
+  'weapon.colt': 'Colt',
+  'weapon.rulo': 'Rulô',
+  'weapon.shotgun': 'Shotgun',
+  'weapon.smg': 'SMG',
+  'weapon.ak47': 'AK47',
+  'weapon.m16': 'M16',
+  'weapon.sniper': 'Sniper',
+  'weapon.m67': 'Lựu đạn HE',
+  'weapon.smoke': 'Lựu đạn khói',
+  'weapon.claw': 'Vuốt',
+  'weapon.claw_heavy': 'Vuốt mạnh',
+} as Record<string, string>

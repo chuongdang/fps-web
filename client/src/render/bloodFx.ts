@@ -1,15 +1,15 @@
 import * as THREE from 'three'
 
-// Máu trắng (điểm nhấn hình ảnh): khi trúng người, vài giọt văng theo hướng đạn, rơi theo trọng lực;
-// chạm sàn/tường thì để lại vệt trắng dẹt dính vào bề mặt rồi mờ dần. Chỉ là hiệu ứng, không ảnh hưởng gameplay.
-// Pool cố định, không cấp phát mỗi giọt (trừ tia raycast của physics world).
+// White blood (a visual accent): when a person is hit, a few drops fly along the bullet direction and fall under gravity;
+// on touching the floor/wall they leave a flat white splat stuck to the surface that then fades. Effect only, no gameplay impact.
+// Fixed pool, no allocation per drop (except the physics world raycast ray).
 const MAX_DROPS = 220
 const MAX_SPLATS = 90
 const DROPS_BODY = 9
 const DROPS_HEAD = 16
-const DROP_SPEED: [number, number] = [2.5, 6.5]   // m/s dọc hướng đạn
-const DROP_SPREAD = 1.6                            // m/s lệch ngang ngẫu nhiên
-const DROP_UP: [number, number] = [0.2, 2.2]       // m/s hất lên
+const DROP_SPEED: [number, number] = [2.5, 6.5]   // m/s along the bullet direction
+const DROP_SPREAD = 1.6                            // m/s random sideways deviation
+const DROP_UP: [number, number] = [0.2, 2.2]       // m/s upward kick
 const DROP_SIZE: [number, number] = [0.025, 0.055]
 const GRAVITY = 9.8
 const DROP_LIFE_S = 1.6
@@ -22,7 +22,7 @@ type CastRay = (origin: [number, number, number], dir: [number, number, number],
 const rnd = (r: [number, number]) => r[0] + Math.random() * (r[1] - r[0])
 
 export interface BloodFx {
-  /** pos: chỗ trúng; dir: hướng đạn (chuẩn hoá) */
+  /** pos: hit point; dir: bullet direction (normalised) */
   spawn(pos: ArrayLike<number>, dir: ArrayLike<number>, headshot: boolean): void
   update(dt: number): void
   clear(): void
@@ -59,7 +59,7 @@ export function createBloodFx(scene: THREE.Scene, castRay: () => CastRay | null)
     const i = nextSplat; nextSplat = (nextSplat + 1) % MAX_SPLATS
     const m = splats[i]!
     m.position.set(x + nrm[0] * 0.006, y + nrm[1] * 0.006, z + nrm[2] * 0.006)
-    m.lookAt(x + nrm[0], y + nrm[1], z + nrm[2])   // Object3D.lookAt: trục +Z (mặt trước) hướng về điểm đó = ra ngoài bề mặt
+    m.lookAt(x + nrm[0], y + nrm[1], z + nrm[2])   // Object3D.lookAt: the +Z axis (front face) points at that point = out of the surface
     m.rotateZ(Math.random() * Math.PI * 2)
     m.scale.set(s * (0.7 + Math.random() * 0.6), s, 1)
     ;(m.material as THREE.MeshBasicMaterial).opacity = 0.95
@@ -109,7 +109,7 @@ export function createBloodFx(scene: THREE.Scene, castRay: () => CastRay | null)
           kill(i); continue
         }
         px[i]! += sx; py[i]! += sy; pz[i]! += sz
-        if (!cast && py[i]! < 0.01) { splat(px[i]!, 0, pz[i]!, [0, 1, 0], rnd(SPLAT_SIZE)); kill(i) }   // chưa có world: sàn y = 0
+        if (!cast && py[i]! < 0.01) { splat(px[i]!, 0, pz[i]!, [0, 1, 0], rnd(SPLAT_SIZE)); kill(i) }   // no world yet: floor at y = 0
       }
       dropMesh.count = n
       for (let i = 0; i < n; i++) {

@@ -1,4 +1,4 @@
-// Tham số bot (plan 15, B.8): server/src/bots/bots.json. Mọi khoảng [min, max] lấy ngẫu nhiên đều mỗi lần dùng.
+// Bot parameters (plan 15, B.8): server/src/bots/bots.json. Every [min, max] range is sampled uniformly at random on each use.
 import type { BotDifficulty } from '@fps/shared'
 import defaults from './bots.json'
 
@@ -34,7 +34,7 @@ let table: ParamTable = structuredClone(defaults) as unknown as ParamTable
 
 export function getBotParams(d: BotDifficulty): BotParams { return table[d] }
 
-/** Hot-reload (dev): thay cả bảng; bot đang chơi đọc lại ở lần dùng kế tiếp vì chỉ giữ tham chiếu tới difficulty */
+/** Hot-reload (dev): replaces the whole table; bots in play re-read it on next use because they only hold a reference to the difficulty */
 export function setBotParams(next: unknown): void {
   const t = next as Partial<ParamTable> | null
   if (!t || typeof t !== 'object' || !t.medium || !t.hard) return

@@ -1,6 +1,6 @@
-# Lịch sử phiên bản
+# Changelog
 
 ## 1.3.0
-- Bản đóng gói chạy bằng một cú nhấp đúp cho Windows và Mac (không cần cài Node): một cổng cho cả trang game lẫn WebSocket, tự mở trình duyệt, in địa chỉ cho bạn bè cùng mạng.
-- Server từ chối client khác phiên bản; client báo "Phiên bản game không khớp, tải lại trang (Ctrl+F5)".
-- Menu chính hiện số phiên bản và mục "Ghi công".
+- Double-click package for Windows and Mac (no Node install needed): one port serves both the game page and the WebSocket, opens the browser automatically, and prints the address for friends on the same network.
+- The server rejects clients of a different version; the client shows "Game version mismatch, reload the page (Ctrl+F5)".
+- The main menu shows the version number and a "Credits" entry.

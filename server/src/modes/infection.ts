@@ -1,11 +1,11 @@
-// Lây Nhiễm (plan 16, phần I): ai cũng là người, sau prepSec giây vài người thành zombie mẹ; zombie cào người → người thành zombie.
+// Infection (plan 16, part I): everyone starts as a human, after prepSec seconds a few become mother zombies; a zombie clawing a human turns them into a zombie.
 //
-// WARMUP ─(≥ 3 người)→ PREP ─→ (chọn mẹ) LIVE ─→ ROUND_END ─┬→ PREP (ván sau)
-//                                                            └→ MATCH_END ─(15s)→ PREP ván 1 / WARMUP
-// Người = đội A, zombie = đội B: luật "không bắn đồng đội" có sẵn nên người không hại nhau, zombie không cào zombie.
+// WARMUP ─(≥ 3 players)→ PREP ─→ (pick mothers) LIVE ─→ ROUND_END ─┬→ PREP (next round)
+//                                                            └→ MATCH_END ─(15s)→ PREP round 1 / WARMUP
+// Humans = team A, zombies = team B: the existing "no friendly fire" rule means humans do not hurt each other and zombies do not claw zombies.
 import {
   Btn, ECONOMY_INFECTION, INFECTION, MatchPhase, MsgType, infectionStats,
-  type InfectionSettings, type MatchStateMsg, type ScoreboardRow, type TeamId,
+  type InfectionSettings, type MatchStateMsg, type RoomStatus, type ScoreboardRow, type TeamId,
 } from '@fps/shared'
 import type { Player, Room } from '../room'
 import { broadcastScoreboard, setPhase } from '../match'
@@ -45,7 +45,7 @@ export class InfectionMode implements MatchMode {
   }
   zombies(room: Room): number { return room.players.size - this.humans(room) }
 
-  // ── Điểm xuất hiện: nav (mặt đất, rải đều) nếu có, không thì mọi điểm spawn của map
+  // ── Spawn points: nav (ground, evenly spread) if available, otherwise every spawn point of the map
   private spawnCandidates(room: Room): SpawnPoint[] {
     const key = room.nav ?? room.map
     if (this.candidates && this.candidatesFor === key) return this.candidates
@@ -63,7 +63,7 @@ export class InfectionMode implements MatchMode {
     return out
   }
 
-  /** n điểm xa nhau (lấy mẫu điểm xa nhất, điểm đầu ngẫu nhiên) */
+  /** n points far from each other (farthest-point sampling, random first point) */
   private spreadPoints(room: Room, n: number): SpawnPoint[] {
     const c = this.spawnCandidates(room)
     const chosen: SpawnPoint[] = []
@@ -82,7 +82,7 @@ export class InfectionMode implements MatchMode {
     return chosen
   }
 
-  /** Điểm xa người nhất (cho zombie hồi sinh) */
+  /** The point farthest from the humans (for respawning zombies) */
   private farthestFromHumans(room: Room): SpawnPoint {
     const c = this.spawnCandidates(room)
     let best = c[0]!, bestD = -1
@@ -97,7 +97,7 @@ export class InfectionMode implements MatchMode {
     return { pos: [best.pos[0], best.pos[1], best.pos[2]], yaw: room.random() * Math.PI * 2 - Math.PI }
   }
 
-  // ── Máy trạng thái
+  // ── State machine
   tick(room: Room, now: number): void {
     const enough = room.players.size >= INFECTION.minPlayers
     const stay = room.players.size >= MIN_PLAYERS_TO_CONTINUE
@@ -111,7 +111,7 @@ export class InfectionMode implements MatchMode {
         break
       case MatchPhase.Playing: {
         if (!stay) { this.toWaiting(room); break }
-        if (this.zombies(room) === 0 && this.humans(room) >= 2) this.makeMothers(room, 1, now)   // zombie mẹ duy nhất vừa rời đi
+        if (this.zombies(room) === 0 && this.humans(room) >= 2) this.makeMothers(room, 1, now)   // the only mother zombie just left
         this.rescaleAndAnnounce(room)
         const h = this.humans(room)
         if (h === 0) this.endRound(room, now, 'B', 'infected_all')
@@ -136,9 +136,9 @@ export class InfectionMode implements MatchMode {
     setPhase(room, MatchPhase.Waiting, 0)
   }
 
-  // Đầu ván: mọi người là người, tiền = startMoney, rải đều khắp map
+  // Round start: everyone is human, money = startMoney, spread evenly across the map
   private startPrep(room: Room, now: number): void {
-    room.grenades = []
+    room.grenades = []; room.smokes = []
     this.heroChosen = false
     for (const p of room.players.values()) p.transport.send({ t: MsgType.RoundReset, round: this.round })
     const pts = this.spreadPoints(room, room.players.size)
@@ -159,7 +159,7 @@ export class InfectionMode implements MatchMode {
     setPhase(room, MatchPhase.Playing, now + this.s.roundTimeSec * MS)
   }
 
-  /** Chọn ngẫu nhiên `count` người làm zombie mẹ; không chọn lại người vừa làm mẹ ván trước nếu còn lựa chọn khác */
+  /** Randomly pick `count` players as mother zombies; do not re-pick last round's mothers if there are other choices */
   private makeMothers(room: Room, count: number, _now: number): void {
     const humans = [...room.players.values()].filter(p => p.role === 'human')
     if (humans.length === 0) return
@@ -171,13 +171,13 @@ export class InfectionMode implements MatchMode {
     this.lastMothers = new Set(chosen.map(p => p.id))
     const humansAfter = humans.length - chosen.length
     for (const p of chosen) {
-      room.makeZombie(p, infectionStats('mother', humansAfter), INFECTION.transformMs + INFECTION.pickMs)   // biến hình tại chỗ, bất tử cho tới khi banner xong
+      room.makeZombie(p, infectionStats('mother', humansAfter), INFECTION.transformMs + INFECTION.pickMs)   // transform in place, invulnerable until the banner finishes
       for (const o of room.players.values()) o.transport.send({ t: MsgType.Infected, playerId: p.id, byId: null, kind: 'mother' })
     }
     this.rescaleAndAnnounce(room)
   }
 
-  // Cào chết người → người thành zombie tại chỗ (không tính là chết, không rơi súng)
+  // Clawed to death -> the human turns into a zombie in place (not counted as a death, no weapon drop)
   onLethal(room: Room, p: Player): boolean {
     if (room.phase !== MatchPhase.Playing || p.role !== 'human') return false
     const killer = room.players.get(p.killerId)
@@ -196,7 +196,7 @@ export class InfectionMode implements MatchMode {
     return true
   }
 
-  // Máu zombie tính lại mỗi khi số người còn sống đổi: hpMax = hpBase + hpPerHuman × người (máu hiện tại giữ tỉ lệ %); còn 1 người → anh hùng
+  // Zombie health is recomputed whenever the number of living humans changes: hpMax = hpBase + hpPerHuman × humans (current health keeps its % ratio); 1 human left -> hero
   private rescaleAndAnnounce(room: Room): void {
     const humans = this.humans(room)
     if (humans !== this.lastCounts.humans) {
@@ -211,7 +211,7 @@ export class InfectionMode implements MatchMode {
     }
     if (room.phase === MatchPhase.Playing && humans === 1 && this.zombies(room) >= 1 && !this.heroChosen) {
       const hero = [...room.players.values()].find(p => p.role === 'human')!
-      if (hero.hp <= 0) { this.announceCounts(room); return }   // người cuối đang bị chốt chết cùng tick: không cứu
+      if (hero.hp <= 0) { this.announceCounts(room); return }   // the last human is being settled as dead this same tick: no rescue
       this.heroChosen = true
       hero.hero = true
       hero.hp = INFECTION.hero.hp
@@ -230,7 +230,7 @@ export class InfectionMode implements MatchMode {
   }
 
   private endRound(room: Room, now: number, winner: TeamId, reason: 'infected_all' | 'time_survive'): void {
-    if (winner === 'A') {   // hết giờ còn người: mỗi người sống +surviveRound
+    if (winner === 'A') {   // time up with humans alive: each survivor gets +surviveRound
       for (const p of room.players.values()) if (p.role === 'human') this.sc(p).pts += INFECTION.points.surviveRound
     }
     for (const p of room.players.values()) p.transport.send({ t: MsgType.RoundEnd, round: this.round, winner, reason })
@@ -255,10 +255,10 @@ export class InfectionMode implements MatchMode {
     else this.toWaiting(room)
   }
 
-  // ── Móc của MatchMode
+  // ── MatchMode hooks
   onPlayerJoin(room: Room, p: Player): void {
     this.sc(p)
-    if (room.phase === MatchPhase.Playing) {   // vào giữa ván: vào luôn với vai zombie
+    if (room.phase === MatchPhase.Playing) {   // joined mid-round: enters straight away as a zombie
       room.makeZombie(p, infectionStats('normal', this.humans(room)), 0)
       room.respawn(p, this.farthestFromHumans(room))
       p.invulnUntil = 0
@@ -279,7 +279,7 @@ export class InfectionMode implements MatchMode {
     return 0
   }
 
-  afterDeaths(): void { /* không đổi đội theo số mạng */ }
+  afterDeaths(): void { /* no team change based on kill count */ }
 
   respawnDelayMs(room: Room, p?: Player): number | null {
     if (room.phase === MatchPhase.Prep || room.phase === MatchPhase.Waiting || room.phase === MatchPhase.Ended) return 0
@@ -301,9 +301,9 @@ export class InfectionMode implements MatchMode {
     row.pts = sc.pts; row.inf = sc.inf; row.zk = sc.zk; row.role = p.role
   }
 
-  statusText(room: Room): string {
-    if (room.phase === MatchPhase.Waiting) return 'Đang chờ'
-    return `Ván ${Math.min(this.round, this.s.rounds)}/${this.s.rounds} · ${this.humans(room)} người – ${this.zombies(room)} zombie`
+  roomStatus(room: Room): RoomStatus {
+    if (room.phase === MatchPhase.Waiting) return { code: 'waiting' }
+    return { code: 'infectionRound', round: Math.min(this.round, this.s.rounds), maxRounds: this.s.rounds, humans: this.humans(room), zombies: this.zombies(room) }
   }
 
   stateMessage(room: Room): MatchStateMsg {
@@ -316,7 +316,7 @@ export class InfectionMode implements MatchMode {
     }
   }
 
-  // Q: zombie đánh hơi — người trong bán kính hiện viền đỏ xuyên tường trên màn hình zombie (client vẽ), và nghe tiếng gầm gần
+  // Q: zombie sniff - humans within the radius get a red outline through walls on the zombie's screen (drawn by the client), and a nearby growl is heard
   onCmd(room: Room, p: Player, buttons: number): void {
     if ((buttons & Btn.Sniff) === 0 || p.role !== 'zombie' || !p.alive || room.phase !== MatchPhase.Playing) return
     if (room.serverNow < p.sniffReadyAt || room.serverNow < p.transformUntil) return
@@ -328,7 +328,7 @@ export class InfectionMode implements MatchMode {
     }
   }
 
-  // ── Lệnh debug
+  // ── Debug commands
   devSetRole(room: Room, p: Player, role: 'zombie' | 'human'): boolean {
     if (role === 'zombie') room.makeZombie(p, infectionStats('normal', this.humans(room) - (p.role === 'human' ? 1 : 0)), 0)
     else room.makeHuman(p, 'A')

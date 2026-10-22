@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+**/node_modules
+client/dist
+build
+release
+graphify-out
+assets-raw
+assets/source
+plan
+tools
+.DS_Store
+deploy

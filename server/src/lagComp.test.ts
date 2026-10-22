@@ -5,7 +5,7 @@ const pl = (id: number, x: number, crouching = false, alive = true) => ({ id, st
 const out = (): PastPlayer => ({ pos: [0, 0, 0], crouching: false, alive: true })
 
 describe('LagHistory', () => {
-  it('nội suy tuyến tính vị trí giữa hai mục', () => {
+  it('linearly interpolates the position between two entries', () => {
     const h = new LagHistory()
     h.record(1000, [pl(1, 0)])
     h.record(1016, [pl(1, 1.6)])
@@ -15,7 +15,7 @@ describe('LagHistory', () => {
     expect(o.pos[0]).toBeCloseTo(0.8)
   })
 
-  it('crouching/alive lấy theo mục trước', () => {
+  it('crouching/alive are taken from the earlier entry', () => {
     const h = new LagHistory()
     h.record(0, [pl(1, 0, false, true)])
     h.record(16, [pl(1, 0, true, false)])
@@ -25,7 +25,7 @@ describe('LagHistory', () => {
     expect(o.alive).toBe(true)
   })
 
-  it('t mới hơn mục mới nhất / cũ hơn mục cũ nhất: dùng mục biên', () => {
+  it('t newer than the newest entry / older than the oldest: uses the edge entry', () => {
     const h = new LagHistory()
     h.record(100, [pl(1, 5)]); h.record(116, [pl(1, 6)])
     const o = out()
@@ -33,7 +33,7 @@ describe('LagHistory', () => {
     h.locate(-5);  h.get(1, o); expect(o.pos[0]).toBe(5)
   })
 
-  it('ring buffer: ghi nhiều hơn dung lượng vẫn tìm đúng, cũ nhất ≈ HITBOX_HISTORY_MS', () => {
+  it('ring buffer: writing more than capacity still finds the right entry, oldest ~ HITBOX_HISTORY_MS', () => {
     const h = new LagHistory()
     for (let i = 0; i < 500; i++) h.record(i * 16.667, [pl(1, i)])
     expect(h.newestTime).toBeCloseTo(499 * 16.667)
@@ -42,15 +42,15 @@ describe('LagHistory', () => {
     expect(o.pos[0]).toBeCloseTo(470.5)
   })
 
-  it('người mới vào (chỉ có ở mục sau) vẫn lấy được; người không có thì false', () => {
+  it('a newly joined player (only in the later entry) can still be fetched; a missing player returns false', () => {
     const h = new LagHistory()
     h.record(0, [pl(1, 0)]); h.record(16, [pl(1, 0), pl(2, 7)])
     h.locate(8); const o = out()
-    expect(h.get(2, o)).toBe(false)   // không có ở mục trước → bỏ qua phát này
+    expect(h.get(2, o)).toBe(false)   // not in the earlier entry -> skip this shot
     expect(h.get(3, o)).toBe(false)
   })
 
-  it('chưa có lịch sử: locate false', () => {
+  it('no history yet: locate returns false', () => {
     expect(new LagHistory().locate(5)).toBe(false)
   })
 })

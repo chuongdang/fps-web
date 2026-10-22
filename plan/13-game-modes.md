@@ -1,34 +1,34 @@
-# 13 – Hai thể thức chơi + tạo phòng
+# 13 – Two game modes + room creation
 
-| Tên hiển thị | Mã trong code | Luật tóm tắt |
+| Display name | Code id | Rules summary |
 |---|---|---|
-| **Sinh Tử** | `elimination` | Chơi theo ván, mỗi ván một mạng. Đội bị tiêu diệt hết thì thua ván. Đội nào thắng 10 ván trước thắng chung cuộc. |
-| **Hỗn Chiến** | `tdm` | Hồi sinh liên tục, bắn tới giới hạn mạng hoặc hết giờ (chính là chế độ hiện tại của task 06). |
+| **Elimination** | `elimination` | Played in rounds, one life per round. A team that is wiped out loses the round. The first team to win 10 rounds wins the match. |
+| **Team Deathmatch** | `tdm` | Continuous respawn, shoot until the kill limit or the time runs out (this is exactly the current mode from task 06). |
 
-Thứ tự: M.1 → M.2 → M.3 → M.4 → M.5 → M.6 → M.7 → M.8. Task ⚠️ nên dùng model mạnh.
+Order: M.1 → M.2 → M.3 → M.4 → M.5 → M.6 → M.7 → M.8. Tasks marked ⚠️ should use a stronger model.
 
-Nguyên tắc: **Hỗn Chiến phải chạy y hệt như hiện tại** sau khi tách code. Mọi chỗ khác nhau giữa 2 thể thức nằm trong class thể thức + config, không rải `if (mode === ...)` khắp nơi.
+Principle: **Team Deathmatch must run exactly as it does now** after the code is split out. Every difference between the 2 modes lives in the mode class + config, with no `if (mode === ...)` scattered everywhere.
 
 ---
 
-## Cài đặt phòng (`shared/src/roomConfig.ts`)
+## Room settings (`shared/src/roomConfig.ts`)
 
 ```ts
 export type GameMode = 'elimination' | 'tdm';
 
 export const MODE_LABEL: Record<GameMode, string> = {
-  elimination: 'Sinh Tử',
-  tdm: 'Hỗn Chiến',
+  elimination: 'Elimination',
+  tdm: 'Team Deathmatch',
 };
 
 export interface EliminationSettings {
   mode: 'elimination';
-  roundsToWin: number;     // mặc định 10 → tối đa 19 ván
+  roundsToWin: number;     // default 10 → at most 19 rounds
   roundTimeSec: number;    // 105 (1:45)
-  freezeSec: number;       // 5 – đứng yên đầu ván
-  buyTimeSec: number;      // 20 – tính từ lúc bắt đầu freeze
-  roundEndSec: number;     // 5 – hiện kết quả ván
-  halftimeSec: number;     // 10 – nghỉ giữa hiệp, đổi bên
+  freezeSec: number;       // 5 – standing still at the start of the round
+  buyTimeSec: number;      // 20 – counted from the start of freeze
+  roundEndSec: number;     // 5 – show the round result
+  halftimeSec: number;     // 10 – break at halftime, swap sides
 }
 
 export interface TdmSettings {
@@ -38,9 +38,9 @@ export interface TdmSettings {
 }
 
 export interface RoomConfig {
-  name: string;            // tên phòng, 1–32 ký tự
+  name: string;            // room name, 1–32 characters
   map: string;             // 'hai-thanh'
-  maxPlayers: number;      // 2–10, chẵn
+  maxPlayers: number;      // 2–10, even
   settings: EliminationSettings | TdmSettings;
 }
 
@@ -54,14 +54,14 @@ export const SETTINGS_LIMITS = {
 };
 ```
 
-Server **luôn** kẹp giá trị theo `SETTINGS_LIMITS`, không tin client.
+The server **always** clamps values to `SETTINGS_LIMITS`, never trusting the client.
 
-## Kinh tế theo thể thức (`shared/src/economy.ts`)
+## Economy per mode (`shared/src/economy.ts`)
 
-Tách `ECONOMY` của task 09 thành 2 bộ, các hàm `quoteBuy`, `applyBuy`… nhận thêm tham số config:
+Split the `ECONOMY` of task 09 into 2 sets; the functions `quoteBuy`, `applyBuy`… take an additional config parameter:
 
 ```ts
-export const ECONOMY_TDM = { ...ECONOMY };  // giữ nguyên như task 09
+export const ECONOMY_TDM = { ...ECONOMY };  // unchanged from task 09
 
 export const ECONOMY_ELIM = {
   startMoney: 800,
@@ -71,62 +71,62 @@ export const ECONOMY_ELIM = {
   bountyReward: 600,
   sellRatio: 0.8,
   defaultResaleValue: 0,
-  keepLoadoutIfSurvived: true,   // sống sót qua ván: giữ súng, lựu đạn
+  keepLoadoutIfSurvived: true,   // survive the round: keep guns, grenades
   roundWin: 3000,
   roundLossBase: 1500,
-  roundLossStep: 400,            // thua liên tiếp: 1500, 1900, 2300, 2700, 3000
+  roundLossStep: 400,            // consecutive losses: 1500, 1900, 2300, 2700, 3000
   roundLossMax: 3000,
-  roundDraw: 1500,               // ván hoà: mỗi người +1500, chuỗi thua giữ nguyên
-  resetAtHalftime: true,         // đổi bên: tiền về startMoney, súng về mặc định
+  roundDraw: 1500,               // drawn round: everyone +1500, loss streak unchanged
+  resetAtHalftime: true,         // swap sides: money back to startMoney, guns back to default
 };
 ```
 
-- Chuỗi hạ (`killStreak`) ở Sinh Tử: **giữ qua các ván** nếu sống sót, về 0 khi chết (luật truy nã giữ nguyên ý nghĩa).
-- `startMoney` của Sinh Tử là $800 (ván đầu chỉ đủ nâng cấp nhẹ, đúng kiểu ván "súng lục"), có thể đổi.
+- Kill streak (`killStreak`) in Elimination: **kept across rounds** if you survive, reset to 0 on death (the bounty rule keeps its meaning).
+- Elimination's `startMoney` is $800 (the first round only affords a small upgrade, the typical "pistol round"), changeable.
 
 ---
 
-## Task M.1 – Tách code thể thức (server) ⚠️
+## Task M.1 – Split out the mode code (server) ⚠️
 
-Tạo `server/src/modes/`:
+Create `server/src/modes/`:
 
 ```ts
 export interface MatchMode {
   readonly mode: GameMode;
   start(room: Room): void;
   tick(room: Room, nowMs: number): void;
-  onPlayerJoin(room: Room, p: Player): void;     // gán đội, quyết định spawn ngay hay xem
+  onPlayerJoin(room: Room, p: Player): void;     // assign team, decide to spawn immediately or spectate
   onPlayerLeave(room: Room, p: Player): void;
   onKill(room: Room, killer: Player | null, victim: Player, weapon: string): void;
   canRespawn(room: Room, p: Player): boolean;
-  canBuy(room: Room, p: Player, nowMs: number): boolean; // ngoài inBuyZone
-  canMove(room: Room, p: Player): boolean;        // false trong freeze
+  canBuy(room: Room, p: Player, nowMs: number): boolean; // in addition to inBuyZone
+  canMove(room: Room, p: Player): boolean;        // false during freeze
   canDealDamage(room: Room): boolean;
   economy(): typeof ECONOMY_TDM;
   stateMessage(room: Room): MatchStateMsg;
 }
 ```
 
-- `TdmMode`: chuyển **nguyên** logic hiện có trong `match.ts` (task 06) vào đây, đọc `killLimit`, `timeLimitMin` từ settings.
+- `TdmMode`: move the **entire** existing logic in `match.ts` (task 06) here, reading `killLimit`, `timeLimitMin` from settings.
 - `EliminationMode`: task M.3.
-- `Room` giữ `config: RoomConfig` và `mode: MatchMode`, mọi chỗ cũ gọi `match.*` chuyển sang gọi qua `room.mode`.
+- `Room` holds `config: RoomConfig` and `mode: MatchMode`, and every old place that called `match.*` now calls through `room.mode`.
 
-Nghiệm thu:
-- [ ] Tạo phòng Hỗn Chiến: chơi một trận 2 tab, mọi luật như trước (hồi sinh, tiền, truy nã, đổi bên, bảng điểm).
-- [ ] Các test cũ pass, không sửa logic test (chỉ sửa import nếu cần).
-- [ ] `grep` không còn `mode === 'tdm'` / `mode === 'elimination'` nằm ngoài thư mục `modes/` và UI.
+Acceptance:
+- [ ] Create a Team Deathmatch room: play one match with 2 tabs, all rules as before (respawn, money, bounty, side swap, scoreboard).
+- [ ] The old tests pass, without changing test logic (only fix imports if needed).
+- [ ] `grep` finds no `mode === 'tdm'` / `mode === 'elimination'` outside the `modes/` directory and the UI.
 
 ---
 
-## Task M.2 – Tạo phòng, danh sách phòng
+## Task M.2 – Create a room, room list
 
-### Message
+### Messages
 
 ```ts
 // C2S
   | { t: 6; config: RoomConfig }                         // CreateRoom
   | { t: 7 }                                             // ListRooms
-  | { t: 1; name: string; room: string }                 // Join (giữ như cũ, room = mã phòng)
+  | { t: 1; name: string; room: string }                 // Join (unchanged, room = room code)
 
 // S2C
   | { t: 119; code: string }                             // RoomCreated
@@ -134,180 +134,180 @@ Nghiệm thu:
 interface RoomSummary {
   code: string; name: string; map: string; mode: GameMode;
   players: number; maxPlayers: number;
-  status: string;            // "Đang chờ" | "Ván 5/19 · 3–2" | "Còn 06:12 · 23–18"
+  status: RoomStatus;        // { code: "waiting" } | { code: "round", round: 5, maxRounds: 19, scoreA: 3, scoreB: 2 } | { code: "timeLeft", seconds: 372, ... } — the client turns it into text
 }
 ```
 
-- Mã phòng: 5 ký tự in hoa dễ đọc (bỏ `0`, `O`, `1`, `I`). Phòng trống > 60s thì xoá (như cũ).
-- URL `?room=ABCDE` vào thẳng phòng (để gửi link cho bạn bè qua ngrok).
+- Room code: 5 easy-to-read uppercase characters (excluding `0`, `O`, `1`, `I`). An empty room is deleted after 60s (as before).
+- The URL `?room=ABCDE` goes straight into the room (to send a link to friends through ngrok).
 
-### Màn hình (client)
+### Screens (client)
 
-- **Sảnh**: nhập tên người chơi (nhớ localStorage), danh sách phòng (tên, thể thức, map, số người, trạng thái), tự làm mới mỗi 3s, nút **Vào**, nút **Tạo phòng**, ô nhập mã phòng.
-- **Tạo phòng**:
-  - Tên phòng, map (dropdown, hiện chỉ "Hai thành"), số người tối đa (2–10).
-  - Chọn thể thức bằng 2 thẻ lớn: **Sinh Tử** (mô tả 1 dòng: "Mỗi ván một mạng. Thắng 10 ván trước.") và **Hỗn Chiến** ("Hồi sinh liên tục. Bắn tới 50 mạng hoặc hết giờ.").
-  - Phần cài đặt đổi theo thể thức: Sinh Tử (số ván thắng, thời gian mỗi ván); Hỗn Chiến (giới hạn mạng, thời gian trận). Có nút "Mặc định".
-  - Tạo xong vào phòng luôn, hiện mã phòng + nút copy link.
-- Trong game: góc trên bên trái nhỏ `Sinh Tử · Hai thành · ABCDE`.
+- **Lobby**: enter the player name (remembered in localStorage), the room list (name, mode, map, player count, status), auto-refreshing every 3s, a **Join** button, a **Create room** button, a room code input field.
+- **Create room**:
+  - Room name, map (dropdown, currently only "Two Walls"), maximum players (2–10).
+  - Choose the mode with 2 large cards: **Elimination** (1-line description: "One life per round. First to win 10 rounds.") and **Team Deathmatch** ("Continuous respawn. Shoot to 50 kills or until time runs out.").
+  - The settings section changes by mode: Elimination (rounds to win, time per round); Team Deathmatch (kill limit, match time). Has a "Default" button.
+  - After creating, go straight into the room, showing the room code + a copy-link button.
+- In game: a small label in the top-left corner `Elimination · Two Walls · ABCDE`.
 
-Nghiệm thu:
-- [ ] Tab A tạo phòng Sinh Tử, tab B thấy phòng trong danh sách, vào được.
-- [ ] Mở link `?room=ABCDE` ở tab C: vào thẳng phòng đó.
-- [ ] Sửa tạm client gửi `roundsToWin: 999`: server kẹp về 16.
+Acceptance:
+- [ ] Tab A creates an Elimination room, tab B sees the room in the list and can join.
+- [ ] Open the link `?room=ABCDE` in tab C: goes straight into that room.
+- [ ] Temporarily modify the client to send `roundsToWin: 999`: the server clamps it to 16.
 
 ---
 
-## Task M.3 – Thể thức Sinh Tử (server) ⚠️
+## Task M.3 – Elimination mode (server) ⚠️
 
-### Các pha
+### Phases
 
 ```
-WARMUP ──(mỗi đội ≥ 1 người)──► FREEZE ──(freezeSec)──► LIVE
-   ▲                               ▲                      │
-   │                               │      (một đội chết hết / hết roundTimeSec)
-   │                               │                      ▼
-   │                               └──(roundEndSec)── ROUND_END
-   │                                                      │
-   │                 (vừa xong ván roundsToWin − 1) ──► HALFTIME ──(halftimeSec)──► FREEZE
-   │                                                      │
-   └──(một đội không còn ai kết nối)        (đội đạt roundsToWin / hết maxRounds)
-                                                          ▼
-                                                     MATCH_END ──(15s)──► WARMUP (trận mới)
+WARMUP ──(each team ≥ 1 player)──► FREEZE ──(freezeSec)──► LIVE
+   ▲                                  ▲                      │
+   │                                  │      (one team all dead / roundTimeSec runs out)
+   │                                  │                      ▼
+   │                                  └──(roundEndSec)── ROUND_END
+   │                                                         │
+   │                (just finished round roundsToWin − 1) ──► HALFTIME ──(halftimeSec)──► FREEZE
+   │                                                         │
+   └──(a team has nobody connected)        (a team reaches roundsToWin / maxRounds exhausted)
+                                                             ▼
+                                                        MATCH_END ──(15s)──► WARMUP (new match)
 ```
 
 - `maxRounds = 2 × roundsToWin − 1`.
-- **WARMUP**: chơi tự do, hồi sinh ngay, không tính điểm, mua thoải mái (giống Hỗn Chiến), tiền không đổi.
-- **FREEZE** (đầu mỗi ván):
-  1. Xoá mọi lựu đạn đang bay, xoá vết cháy/xác (gửi `RoundReset`).
-  2. Mọi người đang kết nối (kể cả người xem chờ vào) hồi sinh tại căn cứ đội mình, **mỗi người một điểm spawn khác nhau** (không chọn trùng), máu 100, đạn đầy.
-  3. Loadout: ai **còn sống cuối ván trước** giữ nguyên loadout (`keepLoadoutIfSurvived`), ai chết thì về mặc định của phe.
-  4. Không di chuyển được (`canMove = false`), vẫn xoay chuột, mua được.
-- **Thời gian mua**: `canBuy` đúng khi `now < freezeStart + buyTimeSec` (và vẫn phải trong khu mua). Hết giờ mua: giỏ hàng tắt, menu tự đóng.
-- **LIVE**: `canRespawn = false`. Người chết chuyển sang xem (M.5).
-- **Kết thúc ván** (kiểm tra mỗi tick trong LIVE):
-  1. Một đội không còn ai sống → đội kia thắng, lý do `elimination`.
-  2. Cả hai đội cùng chết hết trong cùng tick (lựu đạn) → **hoà**, lý do `draw`.
-  3. Hết giờ → đội còn **nhiều người sống hơn** thắng (`time_alive`); bằng nhau → đội có **tổng máu** cao hơn thắng (`time_hp`); vẫn bằng → **hoà** (`draw`).
-- **ROUND_END**: vẫn bắn nhau được (đúng kiểu CS) nhưng không đổi kết quả ván. Cộng tiền cuối ván (M.4). Người sống tới cuối pha ROUND_END mới tính là "sống sót" để giữ súng.
-- **HALFTIME**: sau ván thứ `roundsToWin − 1` (mặc định ván 9). Hiện banner, đổi bên (`sideSwapped = !sideSwapped`), nếu `resetAtHalftime` thì tiền về `startMoney`, loadout về mặc định, chuỗi thua về 0.
-- **MATCH_END**: đội đạt `roundsToWin` trước thắng. Hết `maxRounds` mà không ai đạt (do có ván hoà) → đội nhiều ván thắng hơn thắng, bằng nhau → hoà chung cuộc. Sau 15s: reset điểm, tiền, loadout, đội giữ nguyên, quay về FREEZE ván 1 (nếu đủ người) hoặc WARMUP.
-- **Người vào giữa trận**: vào đội ít người hơn, **xem** cho tới FREEZE ván sau thì được chơi, tiền = `startMoney` (hoặc nếu đang ở hiệp 2: vẫn `startMoney`).
-- **Người rời giữa ván**: tính như chết (kiểm tra điều kiện kết thúc ván ngay). Một đội không còn ai kết nối: ván hiện tại xử thua cho đội đó, sau đó về WARMUP, **giữ tỉ số**; đủ người lại thì chơi tiếp từ ván kế.
-- Bỏ "bất tử sau spawn" trong Sinh Tử (ai cũng spawn cùng lúc ở căn cứ, không cần).
+- **WARMUP**: free play, instant respawn, no scoring, free buying (like Team Deathmatch), money unchanged.
+- **FREEZE** (start of each round):
+  1. Remove all grenades in flight, remove scorch marks/corpses (send `RoundReset`).
+  2. Everyone connected (including spectators waiting to join) respawns at their team's base, **each person at a different spawn point** (no duplicate picks), health 100, ammo full.
+  3. Loadout: whoever was **still alive at the end of the previous round** keeps their loadout (`keepLoadoutIfSurvived`), whoever died goes back to the team default.
+  4. Cannot move (`canMove = false`), can still turn the mouse, can buy.
+- **Buy time**: `canBuy` is true while `now < freezeStart + buyTimeSec` (and you must still be in the buy zone). When buy time ends: the cart turns off, the menu closes itself.
+- **LIVE**: `canRespawn = false`. A dead player switches to spectating (M.5).
+- **Round end** (checked every tick during LIVE):
+  1. A team has nobody alive → the other team wins, reason `elimination`.
+  2. Both teams all die on the same tick (grenade) → **draw**, reason `draw`.
+  3. Time runs out → the team with **more players alive** wins (`time_alive`); equal -> the team with the higher **total health** wins (`time_hp`); still equal -> **draw** (`draw`).
+- **ROUND_END**: players can still shoot each other (CS style) but it does not change the round result. End-of-round money is awarded (M.4). Only players who are alive at the end of the ROUND_END phase count as "survived" for keeping guns.
+- **HALFTIME**: after round `roundsToWin − 1` (default round 9). Show a banner, swap sides (`sideSwapped = !sideSwapped`), and if `resetAtHalftime` then money goes back to `startMoney`, loadout to default, loss streak to 0.
+- **MATCH_END**: the first team to reach `roundsToWin` wins. If `maxRounds` runs out without anyone reaching it (due to drawn rounds) → the team with more round wins wins, equal -> overall draw. After 15s: reset score, money, loadout, teams stay the same, go back to FREEZE of round 1 (if there are enough players) or WARMUP.
+- **Player joining mid-match**: joins the team with fewer players, **spectates** until the next round's FREEZE when they get to play, money = `startMoney` (or if in the second half: still `startMoney`).
+- **Player leaving mid-round**: counts as dead (check the round-end conditions immediately). A team with nobody connected: the current round is awarded as a loss to that team, then back to WARMUP, **keeping the score**; once there are enough players again, play continues from the next round.
+- Remove "invulnerability after spawn" in Elimination (everyone spawns at the same time in the base, so it is not needed).
 
-### Message
+### Messages
 
 ```ts
-// S2C, MatchState (t: 111) mở rộng:
+// S2C, MatchState (t: 111) extended:
   { t: 111; mode: GameMode; phase: string; phaseEndsAt: number;
-    round: number; maxRounds: number; scoreA: number; scoreB: number;   // Sinh Tử: số ván thắng; Hỗn Chiến: số mạng
-    aliveA: number; aliveB: number;                                    // chỉ Sinh Tử
+    round: number; maxRounds: number; scoreA: number; scoreB: number;   // Elimination: rounds won; Team Deathmatch: kills
+    aliveA: number; aliveB: number;                                    // Elimination only
     buyEndsAt: number | null; sideSwapped: boolean }
   | { t: 121; round: number; winner: TeamId | null; reason: 'elimination' | 'time_alive' | 'time_hp' | 'draw' }   // RoundEnd
   | { t: 122; round: number }                                                                                     // RoundReset
   | { t: 123; winner: TeamId | null; scoreA: number; scoreB: number; mvpId: number | null }                       // MatchEnd
 ```
 
-Nghiệm thu (dùng lệnh debug M.8 cho nhanh):
-- [ ] 2 tab, 1v1: A hạ B → banner "CỚM THẮNG VÁN 1", 5s sau cả hai hồi sinh ở căn cứ, tỉ số 1–0.
-- [ ] Trong LIVE bị chết: không hồi sinh, chuyển sang xem.
-- [ ] Hết giờ ván, 2v2 còn 2 vs 1 → đội 2 người thắng. 1 vs 1, máu 80 vs 40 → đội máu 80 thắng.
-- [ ] Freeze: không đi được, mua được; sau 20s từ đầu freeze không mua được nữa.
-- [ ] Sống sót qua ván với Sniper → ván sau vẫn cầm Sniper. Chết → ván sau về M16/AK47 mặc định.
-- [ ] Sau ván 9: banner đổi bên, căn cứ đổi, tiền về $800.
-- [ ] Đội đạt 10 ván: màn hình kết thúc, 15s sau trận mới từ 0–0.
-- [ ] Người vào giữa ván: xem, ván sau được chơi.
-- [ ] Lựu đạn ném lúc cuối ván không nổ sang ván sau.
+Acceptance (use the M.8 debug commands to go faster):
+- [ ] 2 tabs, 1v1: A kills B → banner "COPS WIN ROUND 1", 5s later both respawn at the base, score 1–0.
+- [ ] Dying during LIVE: no respawn, switch to spectating.
+- [ ] Time runs out in a round, 2v2 with 2 vs 1 left → the 2-player team wins. 1 vs 1, health 80 vs 40 → the 80-health team wins.
+- [ ] Freeze: cannot walk, can buy; after 20s from the start of freeze you can no longer buy.
+- [ ] Survive a round holding a Sniper → still holding the Sniper next round. Die -> next round back to the default M16/AK47.
+- [ ] After round 9: swap-sides banner, bases swap, money back to $800.
+- [ ] A team reaches 10 rounds: the end screen, 15s later a new match from 0–0.
+- [ ] A player joining mid-round: spectates, gets to play next round.
+- [ ] A grenade thrown at the end of a round does not explode in the next round.
 
 ---
 
-## Task M.4 – Tiền cuối ván (Sinh Tử)
+## Task M.4 – End-of-round money (Elimination)
 
-Khi vào ROUND_END:
-- Đội thắng: mỗi người `+roundWin`, chuỗi thua của đội về 0.
-- Đội thua: `lossStreak++`, mỗi người `+min(roundLossBase + (lossStreak − 1) × roundLossStep, roundLossMax)`.
-- Ván hoà: mỗi người `+roundDraw`, chuỗi thua giữ nguyên.
-- Áp dụng cho **mọi người trong đội**, kể cả người đã chết; người đang xem chờ vào thì không.
-- Gửi `MoneyEvent` với `reason: 'round_win' | 'round_loss' | 'round_draw'`.
-- Hạ mạng trong Sinh Tử dùng `ECONOMY_ELIM.killReward` / `bountyReward`.
+On entering ROUND_END:
+- Winning team: each player `+roundWin`, the team's loss streak goes to 0.
+- Losing team: `lossStreak++`, each player `+min(roundLossBase + (lossStreak − 1) × roundLossStep, roundLossMax)`.
+- Drawn round: each player `+roundDraw`, loss streak unchanged.
+- Applies to **everyone on the team**, including those already dead; not to spectators waiting to join.
+- Send a `MoneyEvent` with `reason: 'round_win' | 'round_loss' | 'round_draw'`.
+- Kills in Elimination use `ECONOMY_ELIM.killReward` / `bountyReward`.
 
-Nghiệm thu (vitest cho hàm tính tiền, `shared`):
-- [ ] Thua 1, 2, 3, 4, 5, 6 ván liên tiếp: 1500, 1900, 2300, 2700, 3000, 3000.
-- [ ] Thua 2 ván, thắng 1, thua 1: lần thua cuối nhận 1500.
-- [ ] Hoà giữa chuỗi thua 2: nhận 1500, ván thua tiếp theo nhận 2300.
-- [ ] Tiền không vượt 16000.
-
----
-
-## Task M.5 – Chế độ xem khi chết (Sinh Tử)
-
-- Chết trong LIVE → sau 2 giây (xem cảnh mình ngã), camera chuyển sang **theo sau lưng đồng đội còn sống** (góc 3, cao ngang vai, lệch phải, có chống xuyên tường như task camera F10).
-- **Click chuột trái / phím Space**: đổi sang đồng đội kế tiếp. Đồng đội đang xem bị hạ → tự chuyển người khác sau 1,5s.
-- Góc nhìn camera đi theo **yaw/pitch nội suy** của người được xem (thấy họ đang ngắm đâu).
-- HUD khi xem: dòng dưới giữa `Đang xem: [tên]` + máu của người đó; ẩn ô vũ khí, tiền, giỏ hàng của mình.
-- Người vào giữa ván (chưa có đội sống để xem, hoặc trước ván đầu): camera bay cố định trên cao nhìn xuống toàn map, chậm rãi quay vòng.
-- **Không** được xem kẻ địch (tránh lộ vị trí khi ngồi chung phòng).
-
-Nghiệm thu:
-- [ ] 3 tab 2v1: người chết đầu tiên xem được đồng đội, Space đổi người được.
-- [ ] Không thể chuyển sang xem đội địch bằng bất kỳ phím nào.
+Acceptance (vitest for the money-computing function, `shared`):
+- [ ] Losing 1, 2, 3, 4, 5, 6 rounds in a row: 1500, 1900, 2300, 2700, 3000, 3000.
+- [ ] Lose 2 rounds, win 1, lose 1: the last loss earns 1500.
+- [ ] A draw in the middle of a loss streak of 2: earns 1500, and the next lost round earns 2300.
+- [ ] Money never exceeds 16000.
 
 ---
 
-## Task M.6 – HUD Sinh Tử
+## Task M.5 – Spectator mode on death (Elimination)
 
-- **Trên giữa**:
+- Dying during LIVE → after 2 seconds (watching your own fall), the camera switches to **follow behind a living teammate** (3rd person, shoulder height, offset to the right, with wall clipping protection like the F10 camera task).
+- **Left click / Space key**: switch to the next teammate. If the teammate being watched is killed → automatically switch to another person after 1.5s.
+- The camera view follows the **interpolated yaw/pitch** of the person being watched (you see where they are aiming).
+- HUD while spectating: a bottom-center line `Spectating: [name]` + that person's health; hide your own weapon slots, money, and cart.
+- A player joining mid-round (no living team to watch, or before the first round): the camera floats in a fixed high position looking down at the whole map, slowly rotating.
+- You are **not** allowed to watch enemies (to avoid leaking positions when sitting in the same room).
+
+Acceptance:
+- [ ] 3 tabs, 2v1: the first to die can watch a teammate, Space switches person.
+- [ ] It is impossible to switch to watching the enemy team with any key.
+
+---
+
+## Task M.6 – Elimination HUD
+
+- **Top center**:
   ```
-          [●●○○○]  Cớm 3  ·  1:24  ·  2 Cướp  [●●●○○]
-                         Ván 6 / 19
+          [●●○○○]  Cops 3  ·  1:24  ·  2 Terrorists  [●●●○○]
+                         Round 6 / 19
   ```
-  - Chấm tròn: mỗi chấm một người của đội, sáng = còn sống, mờ = đã chết (màu đội).
-  - Đồng hồ: thời gian còn lại của pha hiện tại; trong FREEZE hiện `0:05` màu vàng; dưới 10 giây của LIVE chuyển đỏ.
-- **Thời gian mua**: cạnh giỏ hàng hiện `Mua: 0:14` khi còn giờ mua; hết thì ẩn.
-- **Banner kết thúc ván** (giữa màn hình, 3s): `CỚM THẮNG VÁN 5` / `CƯỚP THẮNG VÁN 5` / `VÁN HOÀ`, dòng nhỏ dưới là lý do: `Tiêu diệt toàn bộ` / `Hết giờ · còn nhiều người hơn` / `Hết giờ · còn nhiều máu hơn`. Kèm số tiền cuối ván mình nhận: `+$3000`.
-- **Banner đổi bên**: `HẾT HIỆP 1 · ĐỔI BÊN`, hiện cả tỉ số.
-- **Màn hình kết thúc trận**: đội thắng, tỉ số, MVP (nhiều mạng nhất, bằng thì ít chết hơn), bảng điểm tự mở, đếm ngược tới trận mới.
-- **Âm thanh**: bắt đầu ván (tiếng còi ngắn tổng hợp), thắng ván (2 nốt đi lên), thua ván (2 nốt đi xuống), 10 giây cuối mỗi giây một tiếng "tích" nhỏ.
-- Hỗn Chiến giữ HUD cũ (task 5.3); chỉ dùng chung khung trên giữa nhưng hiện số mạng và thời gian trận, không có chấm sống/chết, không có số ván.
+  - Round dots: one dot per player of the team, lit = alive, dim = dead (team color).
+  - Clock: the time remaining in the current phase; during FREEZE show `0:05` in yellow; under 10 seconds of LIVE it turns red.
+- **Buy time**: next to the cart show `Buy: 0:14` while buy time remains; hide it when over.
+- **Round end banner** (center of the screen, 3s): `COPS WIN ROUND 5` / `TERRORISTS WIN ROUND 5` / `ROUND DRAWN`, with a small line below giving the reason: `Total elimination` / `Time out · more players alive` / `Time out · more health remaining`. Along with the end-of-round money you received: `+$3000`.
+- **Side swap banner**: `END OF FIRST HALF · SWAP SIDES`, also showing the score.
+- **Match end screen**: the winning team, score, MVP (most kills, ties broken by fewer deaths), the scoreboard opens automatically, a countdown to the new match.
+- **Audio**: round start (a short synthesized whistle), round won (2 rising notes), round lost (2 falling notes), the last 10 seconds a small "tick" every second.
+- Team Deathmatch keeps the old HUD (task 5.3); it only shares the top-center frame but shows kills and match time, with no alive/dead dots and no round number.
 
-Nghiệm thu:
-- [ ] Đọc được tỉ số, ván, thời gian, số người còn sống của mỗi đội trong 1 cái liếc.
-- [ ] Banner kết thúc ván ghi đúng lý do trong cả 3 trường hợp.
-
----
-
-## Task M.7 – Hỗn Chiến: cài đặt + hoà
-
-- Đọc `killLimit`, `timeLimitMin` từ cài đặt phòng thay cho hằng số `MATCH` của task 06.
-- Hết giờ mà điểm bằng nhau → **hoà**, màn hình kết thúc ghi `HOÀ`.
-- HUD trên giữa (khung chung với Sinh Tử): `Cớm 23 · 06:12 · 18 Cướp`, dòng dưới nhỏ `Mục tiêu: 50 mạng`.
-
-Nghiệm thu:
-- [ ] Tạo phòng Hỗn Chiến 10 mạng, 3 phút: kết thúc đúng khi đạt 10 mạng hoặc hết 3 phút.
+Acceptance:
+- [ ] Score, round, time, and the number of survivors on each team can be read in a single glance.
+- [ ] The round end banner states the correct reason in all 3 cases.
 
 ---
 
-## Task M.8 – Lệnh debug (chỉ bật khi chạy dev)
+## Task M.7 – Team Deathmatch: settings + draw
 
-Gõ vào ô chat/console trong game (phím `~` mở ô lệnh), server chỉ nhận khi `NODE_ENV !== 'production'`:
+- Read `killLimit`, `timeLimitMin` from the room settings in place of the `MATCH` constants of task 06.
+- Time runs out with equal scores → **draw**, the end screen says `DRAW`.
+- Top-center HUD (shared frame with Elimination): `Cops 23 · 06:12 · 18 Terrorists`, with a small line below `Goal: 50 kills`.
 
-| Lệnh | Tác dụng |
+Acceptance:
+- [ ] Create a Team Deathmatch room with 10 kills, 3 minutes: it ends correctly when 10 kills are reached or 3 minutes run out.
+
+---
+
+## Task M.8 – Debug commands (enabled only when running dev)
+
+Type into the in-game chat/console box (the `~` key opens the command box); the server only accepts them when `NODE_ENV !== 'production'`:
+
+| Command | Effect |
 |---|---|
-| `/endround A` hoặc `/endround B` / `/endround draw` | kết thúc ván ngay với kết quả đó |
-| `/setround 9` | nhảy tới ván 9 (để test đổi bên) |
-| `/time 10` | đặt thời gian còn lại của pha hiện tại thành 10 giây |
-| `/money 16000` | đặt tiền của mình |
-| `/hp 30` | đặt máu của mình |
-| `/kill` | tự sát (test chế độ xem) |
+| `/endround A` or `/endround B` / `/endround draw` | end the round immediately with that result |
+| `/setround 9` | jump to round 9 (to test the side swap) |
+| `/time 10` | set the time remaining in the current phase to 10 seconds |
+| `/money 16000` | set your money |
+| `/hp 30` | set your health |
+| `/kill` | suicide (test spectator mode) |
 
-Nghiệm thu:
-- [ ] Mọi lệnh hoạt động ở dev; build production gửi lệnh thì server bỏ qua.
+Acceptance:
+- [ ] All commands work in dev; in a production build, sending a command is ignored by the server.
 
 ---
 
-## Ghi chú cho người dùng
+## Notes for the user
 
-- Số liệu kinh tế Sinh Tử ($800 khởi điểm, thắng $3000, thua $1500 tăng dần, hạ mạng $300) lấy theo tinh thần CS, chỉnh trong `ECONOMY_ELIM`.
-- 1v1 Sinh Tử chơi rất căng, test với 2 tab là đủ thấy. Nhóm 3v3 trở lên mới thấy rõ cái hay của chế độ xem đồng đội.
-- Chưa có **bom / gỡ bom** như CS gốc. Muốn thêm thì đó là một thể thức thứ 3, làm sau khi 2 thể thức này ổn.
+- The Elimination economy numbers ($800 start, win $3000, loss $1500 rising, kill $300) follow the spirit of CS, tune them in `ECONOMY_ELIM`.
+- 1v1 Elimination is very tense, testing with 2 tabs is enough to see it. Only with groups of 3v3 or more do you really see the value of the teammate spectator mode.
+- There is no **bomb / defusal** like the original CS yet. If you want to add it, it would be a 3rd mode, done after these 2 modes are stable.

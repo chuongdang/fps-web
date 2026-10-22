@@ -1,5 +1,5 @@
-// F11: vẽ lưới di chuyển (node xanh, node núp vàng có gạch chỉ hướng tường, cạnh mảnh) và từng bot:
-// tên + độ khó + trạng thái, đường đi (đỏ), hướng nhìn thật (xanh), điểm định nhắm (đỏ) — thấy rõ độ lệch (plan 15, B.1/B.8).
+// F11: draws the navigation graph (green nodes, yellow cover nodes with a tick showing the wall direction, thin edges) and each bot:
+// name + difficulty + state, path (red), actual look direction (blue), intended aim point (red) — the aim error is easy to see (plan 15, B.1/B.8).
 import * as THREE from 'three'
 import type { BotDebugMsg, NavDebugMsg, OfflineBotInfo } from '@fps/shared'
 

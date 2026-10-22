@@ -6,30 +6,30 @@ import { shootDir } from './hitbox'
 import { GRENADE, type ThrowMode } from './grenade'
 import type { TeamId } from './teams'
 
-// Vật lý lựu đạn (plan 12, G.2): thuần, tất định, chỉ va chạm với collider map (không chạm người chơi).
-// Client mô phỏng lại mọi quả từ GrenadeSpawn nên server/client phải chạy đúng cùng một hàm với cùng dt.
+// Grenade physics (plan 12, G.2): pure, deterministic, collides only with map colliders (not players).
+// The client re-simulates every grenade from GrenadeSpawn, so server and client must run the exact same function with the same dt.
 export interface GrenadeState {
   id: number
   ownerId: number
   team: TeamId
   pos: Vec3
   vel: Vec3
-  spawnTick: number        // tick server lúc rời tay
+  spawnTick: number        // server tick when it left the hand
   resting: boolean
 }
 
 export interface GrenadeEvent { type: 'bounce'; speed: number }
 
-const MAX_ITER = 3            // số lần va chạm xử lý trong một tick
-const SKIN = 0.001            // lùi 1mm theo pháp tuyến sau va chạm để không kẹt trong collider
+const MAX_ITER = 3            // number of collisions handled in one tick
+const SKIN = 0.001            // back off 1mm along the normal after a collision so it does not get stuck in the collider
 const EPS = 1e-9
-const FLOOR_NORMAL_Y = 0.7    // pháp tuyến y trên mức này = sàn (đi bộ được)
+const FLOOR_NORMAL_Y = 0.7    // normal y above this = floor (walkable)
 
 const _fwd: Vec3 = [0, 0, 0]
 const _right: Vec3 = [0, 0, 0]
-const _dir: Vec3 = [0, 0, 0]   // stepGrenade chạy mỗi tick/mỗi quả: tái sử dụng thay vì cấp phát
+const _dir: Vec3 = [0, 0, 0]   // stepGrenade runs every tick for every grenade: reuse instead of allocating
 
-/** Điểm xuất phát + vận tốc ban đầu khi ném. Xuất phát lệch tay phải/trước mắt; bị tường chắn thì xuất phát ngay tại mắt. */
+/** Start point + initial velocity when throwing. Starts offset to the right hand / in front of the eye; if a wall is in the way it starts right at the eye. */
 export function throwInitial(
   owner: Pick<PlayerState, 'pos' | 'vel' | 'yaw' | 'pitch' | 'crouching'>,
   mode: ThrowMode,
@@ -44,7 +44,7 @@ export function throwInitial(
     eye[1] - 0.05,
     eye[2] + _right[2] * 0.15 + _fwd[2] * 0.3,
   ]
-  // tia từ mắt tới điểm xuất phát: chạm tường thì không để lựu đạn chui qua tường khi đứng sát tường
+  // ray from the eye to the start point: if it hits a wall, do not let the grenade pass through the wall when standing against it
   const dx = start[0] - eye[0], dy = start[1] - eye[1], dz = start[2] - eye[2]
   const len = Math.hypot(dx, dy, dz)
   const hit = world.castRay(eye, [dx / len, dy / len, dz / len], len)
@@ -55,8 +55,8 @@ export function throwInitial(
 }
 
 /**
- * Một tick vật lý. Trả về sự kiện 'bounce' (tốc độ va chạm theo pháp tuyến, lần mạnh nhất trong tick) hoặc null.
- * Dùng castSphere theo quãng đường của tick (liên tục): lựu đạn nhỏ + nhanh không xuyên tường.
+ * One physics tick. Returns a 'bounce' event (normal-direction impact speed, the strongest in the tick) or null.
+ * Uses castSphere along the tick's path (continuous): a small, fast grenade does not tunnel through walls.
  */
 export function stepGrenade(g: GrenadeState, world: CollisionWorld, dt: number): GrenadeEvent | null {
   if (g.resting) return null
@@ -82,13 +82,13 @@ export function stepGrenade(g: GrenadeState, world: CollisionWorld, dt: number):
     const d = Math.min(hit.dist, move)
     pos[0] += dir[0] * d + n[0] * SKIN; pos[1] += dir[1] * d + n[1] * SKIN; pos[2] += dir[2] * d + n[2] * SKIN
     remaining *= 1 - d / move
-    const vn = vel[0] * n[0] + vel[1] * n[1] + vel[2] * n[2]   // < 0: đang lao vào bề mặt
+    const vn = vel[0] * n[0] + vel[1] * n[1] + vel[2] * n[2]   // < 0: moving into the surface
     if (vn < 0) {
       const into = -vn
       const floor = n[1] > FLOOR_NORMAL_Y
       const tx = vel[0] - n[0] * vn, ty = vel[1] - n[1] * vn, tz = vel[2] - n[2] * vn
       if (floor && into <= GRENADE.bounceMinSpeed) {
-        // chạm sàn chậm = lăn: không nảy, giữ vận tốc tiếp tuyến (ma sát lăn ở dưới)
+        // slow floor contact = rolling: no bounce, keep tangential velocity (rolling friction below)
         vel[0] = tx; vel[1] = ty; vel[2] = tz
         onFloor = true
       } else {
@@ -102,9 +102,9 @@ export function stepGrenade(g: GrenadeState, world: CollisionWorld, dt: number):
     }
     iter++
   }
-  if (remaining > 1e-7 && iter >= MAX_ITER) { vel[0] = 0; vel[1] = 0; vel[2] = 0 }   // kẹt rung trong góc: đứng yên tick này
+  if (remaining > 1e-7 && iter >= MAX_ITER) { vel[0] = 0; vel[1] = 0; vel[2] = 0 }   // jittering stuck in a corner: stay still this tick
   if (onFloor) {
-    // lăn trên sàn: giảm tốc tiếp tuyến; đủ chậm thì nằm yên
+    // rolling on the floor: reduce tangential speed; slow enough → comes to rest
     const hs = Math.hypot(vel[0], vel[2])
     const ns = Math.max(0, hs - GRENADE.rollDrag * dt)
     if (hs > EPS) { const k = ns / hs; vel[0] *= k; vel[2] *= k }

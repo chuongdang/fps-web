@@ -1,8 +1,8 @@
-// Âm giao diện cửa hàng (tổng hợp): "ka-ching" khi mua được, "bíp" thấp khi bị từ chối.
+// Shop UI audio (synthesized): "ka-ching" on a successful purchase, a low "beep" when denied.
 import { getGraph } from './context'
 import { tone } from './synth'
 
-/** 2 tone triangle 1320Hz rồi 1760Hz cách 60ms, decay 150ms, −12dB */
+/** 2 triangle tones, 1320Hz then 1760Hz 60ms apart, 150ms decay, −12dB */
 export function playBuyOk(): void {
   const g = getGraph()
   if (!g) return
@@ -18,14 +18,14 @@ export function playBuyFail(): void {
   tone(g.ctx, g.master, { type: 'square', freq: 220, gainDb: -16, decayMs: 120, when: g.ctx.currentTime })
 }
 
-/** Bắt đầu ván: còi ngắn (square 440Hz, 220ms) */
+/** Round start: short horn (square 440Hz, 220ms) */
 export function playRoundStart(): void {
   const g = getGraph()
   if (!g) return
   tone(g.ctx, g.master, { type: 'square', freq: 440, gainDb: -14, decayMs: 220, when: g.ctx.currentTime })
 }
 
-/** Thắng ván: 2 nốt đi lên */
+/** Round won: 2 ascending notes */
 export function playRoundWin(): void {
   const g = getGraph()
   if (!g) return
@@ -34,7 +34,7 @@ export function playRoundWin(): void {
   tone(g.ctx, g.master, { type: 'triangle', freq: 990, gainDb: -12, decayMs: 260, when: t + 0.14 })
 }
 
-/** Thua ván: 2 nốt đi xuống */
+/** Round lost: 2 descending notes */
 export function playRoundLose(): void {
   const g = getGraph()
   if (!g) return
@@ -43,7 +43,7 @@ export function playRoundLose(): void {
   tone(g.ctx, g.master, { type: 'triangle', freq: 330, gainDb: -12, decayMs: 300, when: t + 0.14 })
 }
 
-/** 10 giây cuối mỗi ván: mỗi giây một tiếng tích nhỏ */
+/** Last 10 seconds of each round: a small tick every second */
 export function playTick(): void {
   const g = getGraph()
   if (!g) return

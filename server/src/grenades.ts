@@ -1,63 +1,68 @@
 import {
-  GRENADE, GRENADE_ID, MsgType, TICK_RATE, DT, consumeGrenade, defaultMovement, loadoutWeaponIds, stepGrenade, throwInitial,
+  GRENADE, GRENADE_ID, MsgType, TICK_RATE, DT, WEAPONS, consumeGrenade, defaultMovement, fuseMsOf, loadoutWeaponIds, stepGrenade, throwInitial,
   type GrenadeState, type MovementConfig, type ThrowMode, type TeamId, type Vec3,
 } from '@fps/shared'
 import type { CollisionWorld } from '@fps/shared/physics/world'
 import type { Player, Room } from './room'
+import { addSmoke } from './smoke'
 
-// Lựu đạn phía server (plan 12, G.3). Vật lý tất định (shared/grenadePhysics) chạy trên world của một người trong phòng
-// (castSphere chỉ chạm map nên world nào cũng như nhau). Nổ quyết định sát thương; client tự mô phỏng quỹ đạo từ GrenadeSpawn.
+// Server-side grenades (plan 12, G.3). Deterministic physics (shared/grenadePhysics) runs on the world of one player in the room
+// (castSphere only hits the map, so any world gives the same result). The explosion decides damage; the client simulates the trajectory itself from GrenadeSpawn.
 export interface RoomGrenade extends GrenadeState {
   explodeTick: number
+  kind: string   // weapon key: 'm67' (damaging explosion) | 'smoke' (releases smoke)
 }
 
-const FUSE_TICKS = Math.round(GRENADE.fuseMs * TICK_RATE / 1000)
-const OCCLUSION_EPS = 0.05    // tia chạm tường cách đích dưới mức này vẫn coi là không bị che
-const CENTER_LIFT = 0.1       // nâng tâm nổ khi bắn tia che chắn (không bắn xuyên sàn ngay dưới quả)
-const CHEST = 1.1, FEET = 0.15   // độ cao điểm ngực/chân so với chân người (đứng); ngồi nhân tỉ lệ
+const fuseTicks = (kind: string): number => Math.round(fuseMsOf(kind) * TICK_RATE / 1000)
+const OCCLUSION_EPS = 0.05    // a ray that hits a wall less than this far from the target still counts as unobstructed
+const CENTER_LIFT = 0.1       // raise the blast centre when casting occlusion rays (do not shoot through the floor right under the grenade)
+const CHEST = 1.1, FEET = 0.15   // chest/feet point height above a standing player's feet; scaled when crouching
 
-function anyWorld(room: Room, prefer?: Player): CollisionWorld | null {
+export function anyWorld(room: Room, prefer?: Player): CollisionWorld | null {
   if (prefer?.world) return prefer.world
   for (const p of room.players.values()) if (p.world) return p.world
   return null
 }
 
-export function createGrenade(room: Room, ownerId: number, team: TeamId, pos: Vec3, vel: Vec3, mode: ThrowMode, throwSeq: number): RoomGrenade {
+export function createGrenade(room: Room, ownerId: number, team: TeamId, pos: Vec3, vel: Vec3, mode: ThrowMode, throwSeq: number, kind: string = GRENADE.key): RoomGrenade {
   const g: RoomGrenade = {
     id: room.nextGrenadeId++, ownerId, team,
     pos: [pos[0], pos[1], pos[2]], vel: [vel[0], vel[1], vel[2]],
     spawnTick: room.tick, resting: false,
-    explodeTick: room.tick + FUSE_TICKS,
+    explodeTick: room.tick + fuseTicks(kind),
+    kind,
   }
   room.grenades.push(g)
-  const msg = { t: MsgType.GrenadeSpawn, id: g.id, ownerId, mode, pos: [pos[0], pos[1], pos[2]] as Vec3, vel: [vel[0], vel[1], vel[2]] as Vec3, spawnTick: g.spawnTick, throwSeq }
+  const msg = { t: MsgType.GrenadeSpawn, id: g.id, ownerId, mode, pos: [pos[0], pos[1], pos[2]] as Vec3, vel: [vel[0], vel[1], vel[2]] as Vec3, spawnTick: g.spawnTick, throwSeq, ...(kind === GRENADE.key ? {} : { kind }) }
   for (const o of room.players.values()) o.transport.send(msg)
   return g
 }
 
-/** Người chơi vừa ném (stepWeaponCmd trả 'threw'; state đã là sau cmd): tạo quả, trừ lựu đạn trong loadout. */
+/** The player just threw (stepWeaponCmd returned 'threw'; state is already post-cmd): create the grenade, deduct one from the loadout. */
 export function spawnThrown(room: Room, p: Player, mode: ThrowMode, cfg: MovementConfig = defaultMovement): void {
   const world = anyWorld(room, p)
   if (!world) return
   const t = throwInitial(p.state, mode, world, cfg)
-  p.loadout = consumeGrenade(p.loadout)
-  createGrenade(room, p.id, p.team, t.pos, t.vel, mode, p.weapon.throwSeq)
+  const kind = WEAPONS[p.weapon.current]!.key   // the type just thrown = the type being held (stepWeaponCmd has not switched back to the old gun yet)
+  p.loadout = consumeGrenade(p.loadout, kind)
+  createGrenade(room, p.id, p.team, t.pos, t.vel, mode, p.weapon.throwSeq, kind)
 }
 
-/** Chết khi đang rút chốt: ready → lựu đạn rơi tại chỗ (vận tốc người chết) và vẫn nổ; pulling → huỷ. Gọi trước khi mất đồ. */
+/** Died while pulling the pin: ready -> the grenade drops in place (with the dead player's velocity) and still explodes; pulling -> cancelled. Call before items are lost. */
 export function dropOnDeath(room: Room, p: Player): void {
   const n = p.weapon.nade
   if (n.phase === 'idle') return
   const wasReady = n.phase === 'ready'
   n.phase = 'idle'; n.quick = false
   if (wasReady) {
-    p.weapon.ammo[GRENADE_ID] = Math.max(0, (p.weapon.ammo[GRENADE_ID] ?? 0) - 1)
+    const cur = p.weapon.current, kind = WEAPONS[cur]!.key
+    p.weapon.ammo[cur] = Math.max(0, (p.weapon.ammo[cur] ?? 0) - 1)
     p.weapon.throwSeq++
-    p.loadout = consumeGrenade(p.loadout)
+    p.loadout = consumeGrenade(p.loadout, kind)
     p.weapon.slots = loadoutWeaponIds(p.loadout)
     const s = p.state
-    createGrenade(room, p.id, p.team, [s.pos[0], s.pos[1] + 1.0, s.pos[2]], [s.vel[0], s.vel[1], s.vel[2]], n.mode, p.weapon.throwSeq)
-    for (const o of room.players.values()) o.transport.send({ t: MsgType.GrenadeAnim, playerId: p.id, phase: 'throw', mode: n.mode })
+    createGrenade(room, p.id, p.team, [s.pos[0], s.pos[1] + 1.0, s.pos[2]], [s.vel[0], s.vel[1], s.vel[2]], n.mode, p.weapon.throwSeq, kind)
+    for (const o of room.players.values()) o.transport.send({ t: MsgType.GrenadeAnim, playerId: p.id, phase: 'throw', mode: n.mode, ...(kind === GRENADE.key ? {} : { kind }) })
   } else {
     for (const o of room.players.values()) o.transport.send({ t: MsgType.GrenadeAnim, playerId: p.id, phase: 'cancel' })
   }
@@ -67,7 +72,7 @@ export function stepGrenades(room: Room): void {
   if (room.grenades.length === 0) return
   for (let i = room.grenades.length - 1; i >= 0; i--) {
     const g = room.grenades[i]!
-    if (room.tick > g.spawnTick) {   // quả vừa ném trong tick này: bước đầu tiên ở tick sau (client tua nhanh từ spawnTick giống hệt)
+    if (room.tick > g.spawnTick) {   // grenade thrown this tick: its first step is next tick (the client fast-forwards from spawnTick identically)
       const world = anyWorld(room, room.players.get(g.ownerId))
       if (world) stepGrenade(g, world, DT)
     }
@@ -78,7 +83,7 @@ export function stepGrenades(room: Room): void {
   }
 }
 
-/** Sát thương theo khoảng cách tới ngực: đầy trong innerRadius, giảm tuyến tính về 0 ở outerRadius */
+/** Damage by distance to the chest: full within innerRadius, falling linearly to 0 at outerRadius */
 export function baseDamage(d: number): number {
   if (d <= GRENADE.innerRadius) return GRENADE.damageMax
   if (d >= GRENADE.outerRadius) return 0
@@ -89,7 +94,7 @@ const origin: Vec3 = [0, 0, 0]
 const target: Vec3 = [0, 0, 0]
 const dir: Vec3 = [0, 0, 0]
 
-// Tỉ lệ phần thân không bị tường che: 3 tia (đầu, ngực, chân) từ tâm nổ (nâng lên 0,1m), chỉ tính map
+// Fraction of the body not covered by walls: 3 rays (head, chest, feet) from the blast centre (raised 0.1 m), map only
 function exposure(world: CollisionWorld | null, center: Vec3, x: number, y: number, z: number, crouching: boolean, cfg: MovementConfig): number {
   if (!world) return 1
   const sc = crouching ? cfg.crouchHeight / cfg.standHeight : 1
@@ -108,8 +113,14 @@ function exposure(world: CollisionWorld | null, center: Vec3, x: number, y: numb
   return seen / ys.length
 }
 
-/** Nổ tại `pos`: áp sát thương + đẩy lùi cho người chơi, báo cả phòng. Trả danh sách (id, sát thương đã áp). */
-export function explode(room: Room, g: Pick<RoomGrenade, 'id' | 'ownerId' | 'team' | 'pos'>, cfg: MovementConfig = defaultMovement): { id: number; damage: number }[] {
+/** Explode at `pos`: apply damage + knockback to players, notify the whole room. Returns the list of (id, damage applied). */
+export function explode(room: Room, g: Pick<RoomGrenade, 'id' | 'ownerId' | 'team' | 'pos'> & { kind?: string }, cfg: MovementConfig = defaultMovement): { id: number; damage: number }[] {
+  if (g.kind === 'smoke') {   // smoke: no damage, no knockback; only releases the smoke cloud (the server keeps it to block bot vision, the client draws it)
+    addSmoke(room, g.id, g.pos)
+    const msg = { t: MsgType.GrenadeExplode, id: g.id, pos: [g.pos[0], g.pos[1], g.pos[2]] as Vec3, hits: [] as { id: number; damage: number }[], kind: g.kind }
+    for (const o of room.players.values()) o.transport.send(msg)
+    return []
+  }
   const world = anyWorld(room, room.players.get(g.ownerId))
   const owner = room.players.get(g.ownerId)
   const hits: { id: number; damage: number }[] = []

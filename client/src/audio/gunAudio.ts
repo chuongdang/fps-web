@@ -1,6 +1,6 @@
-// Âm thanh súng (A.4, A.6, A.7): nhiều lớp phát cùng lúc qua bus EQ riêng từng súng,
-// vào gunGroup → master (compressor). Mọi lớp lên lịch bằng ctx.currentTime (không setTimeout)
-// trừ các bước reload (cần huỷ được).
+// Gun audio (A.4, A.6, A.7): multiple layers play at once through a per-gun EQ bus,
+// into gunGroup → master (compressor). Every layer is scheduled with ctx.currentTime (no setTimeout)
+// except the reload steps (which must be cancellable).
 import { WEAPONS } from '@fps/shared'
 import {
   dbToGain, pickNoRepeat, randSpread, lowAmmoActive, lowAmmoPitchFactor,
@@ -13,7 +13,7 @@ import { GUN_SOUNDS, SHELL_SYNTH, type GunSoundProfile, type LayerDef, type Relo
 
 type Vec3 = [number, number, number]
 
-// ── Bus EQ của mình (tạo một lần mỗi súng) ────────────────────────────────────
+// ── Own EQ bus (created once per gun) ────────────────────────────────────
 interface GunBus { low: BiquadFilterNode; high: BiquadFilterNode }
 const buses = new Map<number, GunBus>()
 
@@ -39,17 +39,17 @@ function ensureBus(g: AudioGraph, id: number): GunBus | null {
   return bus
 }
 
-/** Cập nhật EQ khi chỉnh profile (bảng F8). */
+/** Updates the EQ when the profile is edited (F8 panel). */
 export function refreshBus(id: number): void {
   const bus = buses.get(id)
   const p = GUN_SOUNDS[id]
   if (bus && p) applyEq(bus, p)
 }
 
-// ── Giới hạn số tiếng mỗi súng ───────────────────────────────────────────────
+// ── Voice limit per gun ───────────────────────────────────────────────
 interface Voice { gain: GainNode; endAt: number }
 const voices = new Map<number, Voice[]>()
-const VOICE_LIFETIME = 1.5   // s: thời gian một phát được coi là còn "sống"
+const VOICE_LIFETIME = 1.5   // s: how long a shot is considered still "alive"
 
 function registerVoice(g: AudioGraph, id: number, gain: GainNode, maxVoices: number): void {
   const now = g.ctx.currentTime
@@ -61,11 +61,11 @@ function registerVoice(g: AudioGraph, id: number, gain: GainNode, maxVoices: num
     const old = list.shift()!
     old.gain.gain.cancelScheduledValues(now)
     old.gain.gain.setValueAtTime(old.gain.gain.value, now)
-    old.gain.gain.linearRampToValueAtTime(0, now + 0.01)   // fade 10ms, không cắt cụt
+    old.gain.gain.linearRampToValueAtTime(0, now + 0.01)   // 10ms fade, no hard cut
   }
 }
 
-// ── Lớp âm ────────────────────────────────────────────────────────────────────
+// ── Sound layers ────────────────────────────────────────────────────────────────────
 const lastPicked = new Map<string, string>()
 
 function playBuffer(g: AudioGraph, buf: AudioBuffer, dest: AudioNode, rate: number, db: number, when: number): void {
@@ -88,11 +88,11 @@ function synthLayer(g: AudioGraph, kind: 'body' | 'mech' | 'tail', def: LayerDef
     noise(c, dest, { filter: 'bandpass', freq: 2200 * rate, q: 3, gainDb: -6, decayMs: 25, when: t })
     tone(c, dest, { type: 'square', freq: 900 * rate, gainDb: -18, decayMs: 15, when: t })
   } else {
-    // mặc định lowpass (rền, nhiều bass); synthTailHz → bandpass rộng quanh tần số đó, bớt bass (rulô)
+    // lowpass by default (rumbling, lots of bass); synthTailHz → wide bandpass around that frequency, less bass (revolver)
     const band = def.synthTailHz !== undefined
     noise(c, dest, {
       filter: band ? 'bandpass' : 'lowpass', freq: (def.synthTailHz ?? 1800) * rate, q: 0.5,
-      gainDb: band ? -11 : -8,   // bandpass nghe to hơn lowpass ~3dB → bù để cùng độ lớn
+      gainDb: band ? -11 : -8,   // bandpass sounds ~3dB louder than lowpass → compensate to match loudness
       attackMs: 5, decayMs: def.synthDecayMs ?? 350, when: t,
     })
   }
@@ -112,7 +112,7 @@ function playLayer(
     lastPicked.set(id, key)
     playBuffer(g, getBuffer(key)!, dest, rate, db, t)
   } else {
-    // không có file: âm tổng hợp qua gain lớp
+    // no file: synthesized sound through the layer gain
     const lg = g.ctx.createGain()
     lg.gain.value = dbToGain(db)
     lg.connect(dest)
@@ -133,7 +133,7 @@ function playShell(g: AudioGraph, kind: 'rifle' | 'pistol', dest: AudioNode, whe
 
 function synthShell(g: AudioGraph, kind: 'rifle' | 'pistol', dest: AudioNode, when: number, extraDb: number): void {
   const c = SHELL_SYNTH[kind]
-  noise(g.ctx, dest, { filter: 'highpass', freq: 4000, gainDb: c.clickDb + extraDb, decayMs: 8, when })   // va đập đầu tiên
+  noise(g.ctx, dest, { filter: 'highpass', freq: 4000, gainDb: c.clickDb + extraDb, decayMs: 8, when })   // first impact
   let t = when
   for (let i = 0; i < c.gainsDb.length; i++) {
     const freq = c.freqMin + Math.random() * (c.freqMax - c.freqMin)
@@ -141,7 +141,7 @@ function synthShell(g: AudioGraph, kind: 'rifle' | 'pistol', dest: AudioNode, wh
     const db = c.gainsDb[i]! + extraDb
     tone(g.ctx, dest, { type: 'sine', freq, gainDb: db, decayMs: decay, when: t })
     tone(g.ctx, dest, { type: 'sine', freq: freq * c.partialRatio, gainDb: db + c.partialDb, decayMs: decay, when: t })
-    t += (c.firstGapMs / 1000) * Math.pow(c.gapMul, i)   // khoảng nảy ngắn dần
+    t += (c.firstGapMs / 1000) * Math.pow(c.gapMul, i)   // bounce gaps get shorter
   }
 }
 
@@ -150,15 +150,21 @@ function playThump(g: AudioGraph, dest: AudioNode, p: GunSoundProfile, when: num
   tone(g.ctx, dest, { type: 'sine', freq: t.startHz, freqEnd: t.endHz, gainDb: t.gainDb, attackMs: 4, decayMs: t.durationMs, when })
 }
 
-/** Phát các lớp của một phát bắn vào `dest`. */
-function playShotLayers(g: AudioGraph, p: GunSoundProfile, dest: AudioNode, when: number, own: boolean): void {
-  playLayer(g, 'body', p.layers.body, p, dest, when, 0)
-  if (own && p.layers.mech) playLayer(g, 'mech', p.layers.mech, p, dest, when, 0)   // cơ khí chỉ nghe ở gần tay
-  if (p.layers.tail) playLayer(g, 'tail', p.layers.tail, p, dest, when, own ? 0 : 3)  // người khác: vang to hơn 3dB
-  playThump(g, dest, p, when)
+/** Plays the layers of one shot into `dest`. */
+function hasLayerFile(p: GunSoundProfile, def: LayerDef | undefined): boolean {
+  return !!def && def.files.some(f => getBuffer(gunKey(p.folder, f)))
 }
 
-// ── Dao: tiếng "vụt" tổng hợp (noise bandpass quét 800→3000Hz trong 120ms, −10dB) ──
+function playShotLayers(g: AudioGraph, p: GunSoundProfile, dest: AudioNode, when: number, own: boolean): void {
+  // With a real gunshot file (already includes reverb and bass), the mech/tail/thump layers only play when they have their own file, so synthesized sound is not stacked on top
+  const fileBody = hasLayerFile(p, p.layers.body)
+  playLayer(g, 'body', p.layers.body, p, dest, when, 0)
+  if (own && p.layers.mech && (!fileBody || hasLayerFile(p, p.layers.mech))) playLayer(g, 'mech', p.layers.mech, p, dest, when, 0)   // mechanical sound is only audible close to the hands
+  if (p.layers.tail && (!fileBody || hasLayerFile(p, p.layers.tail))) playLayer(g, 'tail', p.layers.tail, p, dest, when, own ? 0 : 3)  // other players: tail 3dB louder
+  if (!fileBody) playThump(g, dest, p, when)
+}
+
+// ── Knife: synthesized "swish" (bandpass noise sweeping 800→3000Hz over 120ms, −10dB) ──
 export function playSwing(origin?: Vec3): void {
   const g = getGraph()
   if (!g) return
@@ -169,11 +175,14 @@ export function playSwing(origin?: Vec3): void {
     pn.connect(g.master)
     dest = pn
   }
+  const files = [1, 2].map(i => commonKey(`knife_swing_0${i}`)).filter(k => getBuffer(k))
+  const key = pickNoRepeat(files, lastPicked.get('knife_swing'), Math.random)
+  if (key) { lastPicked.set('knife_swing', key); playBuffer(g, getBuffer(key)!, dest, 1 + randSpread(0.04), -4, g.ctx.currentTime); return }
   noise(g.ctx, dest, { filter: 'bandpass', freq: 800, freqEnd: 3000, q: 1.2, gainDb: -10, attackMs: 15, decayMs: 105, when: g.ctx.currentTime })
 }
 
-// ── Bắn của mình ──────────────────────────────────────────────────────────────
-/** `ammoLeft` = số đạn còn lại SAU phát vừa bắn. */
+// ── Own shots ──────────────────────────────────────────────────────────────
+/** `ammoLeft` = ammo remaining AFTER the shot just fired. */
 export function playShot(id: number, ammoLeft: number): void {
   const g = getGraph()
   const p = GUN_SOUNDS[id]
@@ -194,7 +203,7 @@ export function playShot(id: number, ammoLeft: number): void {
   if (settings.lowAmmoWarning && p.lowAmmoWarning !== false && lowAmmoActive(ammoLeft, def.magSize)) playLowAmmo(g, ammoLeft, def.magSize, now)
 }
 
-// ── Bắn của người khác (từ ShotFx, phase 4) ───────────────────────────────────
+// ── Other players' shots (from ShotFx, phase 4) ───────────────────────────────────
 function makePanner(g: AudioGraph, origin: Vec3): PannerNode {
   const pn = g.ctx.createPanner()
   pn.panningModel = 'equalpower'
@@ -216,7 +225,7 @@ export function playShotOther(id: number, origin: Vec3): void {
   const d = distTo(origin)
   const now = c.currentTime
 
-  // Mỗi phát có vị trí riêng → chuỗi filter riêng (khác súng của mình dùng bus chung)
+  // Each shot has its own position → its own filter chain (unlike own guns, which share a bus)
   const shot = c.createGain()
   const low = c.createBiquadFilter(); low.type = 'lowshelf'
   low.frequency.value = p.eq.lowShelfHz; low.gain.value = p.eq.lowShelfDb
@@ -230,19 +239,19 @@ export function playShotOther(id: number, origin: Vec3): void {
   if (p.shell && d < 15) playShell(g, p.shell, shot, now + p.shellDelayMs / 1000)
 }
 
-// ── Lên cò (rulô) ─────────────────────────────────────────────────────────────
+// ── Hammer cock (revolver) ─────────────────────────────────────────────────────────────
 function playCock(g: AudioGraph, p: GunSoundProfile, dest: AudioNode, when: number): void {
   const key = p.cockFile ? gunKey(p.folder, p.cockFile) : ''
-  // Không có file riêng thì dùng tiếng kéo khoá nòng của súng trường (common/reload_bolt), rồi mới tới âm tổng hợp
+  // Without a dedicated file, use the rifle bolt pull sound (common/reload_bolt), then fall back to synthesized sound
   const buf = (key ? getBuffer(key) : undefined) ?? getBuffer(commonKey('reload_bolt'))
   if (buf) playBuffer(g, buf, dest, 1 + randSpread(0.03), -6, when)
   else synthReload(g, 'bolt', dest, when)
 }
 
-// ── Hết đạn / sắp hết (A.7) ───────────────────────────────────────────────────
-const DRY_GAP = 0.09   // s giữa hai tiếng "cạch cạch"
+// ── Empty / low ammo (A.7) ───────────────────────────────────────────────────
+const DRY_GAP = 0.09   // s between the two "click click" sounds
 
-/** Hết đạn: phát nhanh file dryfire hai lần (lần hai nhỏ hơn 3dB, cao hơn chút); thiếu file → âm tổng hợp hai lần. */
+/** Empty: quickly plays the dryfire file twice (the second 3dB quieter and slightly higher); if the file is missing → synthesized sound twice. */
 export function playDry(id: number): void {
   const g = getGraph()
   const p = GUN_SOUNDS[id]
@@ -258,7 +267,7 @@ export function playDry(id: number): void {
   }
 }
 
-/** Búa đập vào buồng đạn rỗng: "tách" gắt + chuông kim loại ngắn (cho tiếng trong). `n` = lần thứ mấy (lần 2 nhỏ và cao hơn chút). */
+/** Hammer striking an empty chamber: sharp "click" + short metallic ring (for the clear sound). `n` = which strike (the 2nd is quieter and slightly higher). */
 export function synthDry(g: AudioGraph, kind: 'rifle' | 'pistol', dest: AudioNode, when: number, n = 0): void {
   const c = g.ctx
   const up = n === 0 ? 1 : 1.06
@@ -278,7 +287,7 @@ export function synthDry(g: AudioGraph, kind: 'rifle' | 'pistol', dest: AudioNod
 
 function playLowAmmo(g: AudioGraph, ammoLeft: number, magSize: number, when: number): void {
   const pf = lowAmmoPitchFactor(ammoLeft, magSize)
-  const boost = ammoLeft <= 0 ? 4 : 0   // viên cuối to hơn 4dB
+  const boost = ammoLeft <= 0 ? 4 : 0   // last round 4dB louder
   const buf = getBuffer(commonKey('lowammo'))
   if (buf) playBuffer(g, buf, g.gunGroup, pf, -16 + boost, when)
   else tone(g.ctx, g.gunGroup, { type: 'sine', freq: 2600 * pf, gainDb: -20 + boost, decayMs: 60, when })
@@ -289,8 +298,8 @@ export function playDraw(id: number): void {
   const p = GUN_SOUNDS[id]
   if (!g || !p) return
   const now = g.ctx.currentTime
-  // Rút súng dùng tiếng kéo khoá nòng (common/reload_bolt); thiếu thì file draw riêng, rồi tới âm tổng hợp
-  const buf = getBuffer(commonKey('reload_bolt')) ?? getBuffer(gunKey(p.folder, p.draw))
+  // The gun's own draw file; if missing, the bolt pull sound (common/reload_bolt), then synthesized sound
+  const buf = getBuffer(gunKey(p.folder, p.draw)) ?? getBuffer(commonKey('reload_bolt'))
   if (buf) { playBuffer(g, buf, g.master, 1 + randSpread(0.02), -3, now); return }
   noise(g.ctx, g.master, { filter: 'bandpass', freq: 1500, q: 2, gainDb: -14, decayMs: 50, when: now })
   tone(g.ctx, g.master, { type: 'sine', freq: 260, freqEnd: 180, gainDb: -20, decayMs: 60, when: now })
@@ -334,7 +343,7 @@ function playReloadStep(g: AudioGraph, p: GunSoundProfile, file: string, synth: 
 
 interface TimedStep { atFrac: number; file: string; synth: ReloadSynth; rate: number }
 
-/** Danh sách bước reload theo tỉ lệ thời gian nạp thực tế. */
+/** List of reload steps scaled to the actual reload time. */
 export function reloadSchedule(p: GunSoundProfile, magSize: number, ammoAtStart: number): TimedStep[] {
   const empty = ammoAtStart <= 0
   const out: TimedStep[] = []
@@ -348,7 +357,7 @@ export function reloadSchedule(p: GunSoundProfile, magSize: number, ammoAtStart:
     const step = (s: ReloadStep) => out.push({ atFrac: s.at, file: s.file, synth: s.synth, rate: 1 })
     step(r.open)
     step(r.eject)
-    // nhét đúng số viên đã bắn, mỗi lần lệch cao độ ±4%
+    // loads exactly the number of rounds fired, each with a ±4% pitch offset
     for (const at of reloadInsertTimes(magSize - ammoAtStart, r.insert.from, r.insert.to)) {
       out.push({ atFrac: at, file: r.insert.file, synth: r.insert.synth, rate: 1 + randSpread(0.04) })
     }
@@ -357,19 +366,19 @@ export function reloadSchedule(p: GunSoundProfile, magSize: number, ammoAtStart:
   return out
 }
 
-const BOLT_GAP_MS = 200   // khoảng nghỉ giữa tiếng thay băng và tiếng kéo khoá nòng
+const BOLT_GAP_MS = 200   // pause between the magazine swap sound and the bolt pull sound
 
 let activeReload: (() => void) | null = null
 
-/** Huỷ reload của mình (đổi súng, chết): dừng mọi tiếng reload ngay. */
+/** Cancels own reload (weapon switch, death): stops all reload sounds immediately. */
 export function cancelReload(): void {
   activeReload?.()
   activeReload = null
 }
 
 /**
- * Lên lịch tiếng reload. `origin` có mặt → súng người khác (chỉ phát nếu trong 12m, qua panner, -10dB).
- * Trả hàm huỷ.
+ * Schedules the reload sound. `origin` present → another player's gun (only plays within 12m, through a panner, -10dB).
+ * Returns a cancel function.
  */
 export function startReload(id: number, ammoAtStart: number, durationMs: number, origin?: Vec3): () => void {
   const noop = () => {}
@@ -379,25 +388,26 @@ export function startReload(id: number, ammoAtStart: number, durationMs: number,
   if (!g || !p || !def) return noop
   if (!origin) cancelReload()
 
-  const bus = g.ctx.createGain()   // gom mọi tiếng của lần nạp này để huỷ một phát
+  const bus = g.ctx.createGain()   // groups every sound of this reload so it can be cancelled at once
   if (origin) {
     if (distTo(origin) > 12) return noop
     bus.gain.value = dbToGain(-10)
     bus.connect(makePanner(g, origin)).connect(g.master)
   } else {
     bus.gain.value = dbToGain(-4)
-    bus.connect(g.master)   // không qua EQ của súng
+    bus.connect(g.master)   // bypasses the gun EQ
   }
 
   const timers: number[] = []
   const whole = p.reload.kind === 'mag' ? p.reload.whole : undefined
-  const wholeBuf = whole ? getBuffer(commonKey(whole.file)) : undefined
+  const ownSteps = p.reload.kind === 'mag' && p.reload.steps.some(st => !st.emptyOnly && getBuffer(gunKey(p.folder, st.file)))   // this gun's own file wins over the shared reload file
+  const wholeBuf = whole && !ownSteps ? getBuffer(commonKey(whole.file)) : undefined
   if (whole && wholeBuf) {
-    // Phát sau startFrac (chờ animation hạ súng); file dài hơn phần thời gian còn lại thì tăng tốc (tối đa ×1.3)
+    // Plays after startFrac (waits for the lower-weapon animation); if the file is longer than the remaining time, it is sped up (max ×1.3)
     const fit = Math.min(1.3, Math.max(1, wholeBuf.duration / ((durationMs * (1 - whole.startFrac)) / 1000)))
     const rate = Math.max(whole.speed ?? 1, fit)
     timers.push(window.setTimeout(() => playBuffer(g, wholeBuf, bus, rate, whole.gainDb, g.ctx.currentTime), whole.startFrac * durationMs))
-    // Kéo khoá nòng: lúc animation đưa súng lên, nhưng sau tiếng thay băng một khoảng nghỉ để nghe tách bạch
+    // Bolt pull: when the raise animation starts, but a pause after the magazine swap sound keeps them distinct
     const boltBuf = whole.boltFile ? getBuffer(commonKey(whole.boltFile)) : undefined
     if (boltBuf) {
       const wholeEndMs = whole.startFrac * durationMs + (wholeBuf.duration / rate) * 1000

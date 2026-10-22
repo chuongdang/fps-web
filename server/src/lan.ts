@@ -11,7 +11,7 @@ function isPrivate(ip: string): boolean {
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
 }
 
-// IPv4 LAN của máy này (bỏ loopback, link-local, card ảo). Mạng gia đình/văn phòng (192.168, 10, 172.16-31) lên đầu.
+// This machine's LAN IPv4 addresses (skips loopback, link-local, virtual adapters). Home/office networks (192.168, 10, 172.16-31) come first.
 export function lanAddresses(ifaces: Ifaces = networkInterfaces()): LanAddress[] {
   const out: LanAddress[] = []
   for (const [iface, list] of Object.entries(ifaces)) {

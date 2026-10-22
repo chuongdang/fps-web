@@ -1,66 +1,66 @@
-# Phase 0 – Khung dự án
+# Phase 0 – Project skeleton
 
-Mục tiêu: repo chạy được, map "Hai thành" hiện ra trên trình duyệt, camera bay tự do để ngắm.
+Goal: the repo runs, the "Two Citadels" map shows up in the browser, and a free-fly camera lets you look around.
 
 ---
 
 ## Task 0.1 – Monorepo + scripts
 
-Làm:
-- npm workspaces với 3 package `shared`, `server`, `client`. `server` và `client` import `shared` bằng tên package (ví dụ `@fps/shared`).
-- `tsconfig` strict mode (`"strict": true`, `"noUncheckedIndexedAccess": true`).
-- Scripts ở gốc:
-  - `npm run dev` → chạy server (tsx watch) + client (vite) cùng lúc
-  - `npm run typecheck` → `tsc --noEmit` cho cả 3 package
+Do:
+- npm workspaces with 3 packages `shared`, `server`, `client`. `server` and `client` import `shared` by package name (for example `@fps/shared`).
+- `tsconfig` in strict mode (`"strict": true`, `"noUncheckedIndexedAccess": true`).
+- Scripts at the root:
+  - `npm run dev` → run the server (tsx watch) + client (vite) at the same time
+  - `npm run typecheck` → `tsc --noEmit` for all 3 packages
   - `npm test` → vitest
-- Server mặc định cổng 8080, client 5173.
+- Server defaults to port 8080, client to 5173.
 
-Nghiệm thu:
-- [ ] `npm run dev` mở được trang trắng có chữ "FPS Web", console server in "listening 8080".
-- [ ] `npm run typecheck` và `npm test` (một test giả) pass.
-- [ ] Sửa một hằng số trong `shared` thì cả client và server thấy giá trị mới mà không cần build tay.
+Acceptance:
+- [ ] `npm run dev` opens a blank page with the text "FPS Web", and the server console prints "listening 8080".
+- [ ] `npm run typecheck` and `npm test` (with a dummy test) pass.
+- [ ] Changing a constant in `shared` makes both client and server see the new value without a manual build.
 
 Pitfall:
-- Vite cần được cấu hình để xử lý package workspace dạng TypeScript nguồn (không phải đã build). Nếu lỗi import, kiểm tra `exports`/`main` trong `shared/package.json` trỏ về `src/index.ts`.
+- Vite must be configured to handle workspace packages as TypeScript source (not pre-built). If imports fail, check that `exports`/`main` in `shared/package.json` point to `src/index.ts`.
 
 ---
 
-## Task 0.2 – Hằng số, quy ước, protocol rỗng
+## Task 0.2 – Constants, conventions, empty protocol
 
-Làm:
-- `shared/src/constants.ts` theo `00-overview.md`.
+Do:
+- `shared/src/constants.ts` per `00-overview.md`.
 - `shared/src/math.ts`:
-  - `forwardFromYaw(yaw, out)`, `rightFromYaw(yaw, out)` theo quy ước trong CLAUDE.md
-  - `lerp(a, b, t)`, `lerpAngle(a, b, t)` (đi đường ngắn nhất qua ±π)
-  - `mulberry32(seed)` trả về hàm random [0,1)
-  - `hashSeed(...nums)` gộp nhiều số thành seed 32-bit
-- `shared/src/protocol.ts`: khai báo type rỗng cho message (sẽ điền dần), hàm `encode(msg)` / `decode(buf)` dùng msgpack. Mỗi message có field `t` (số nhỏ, ví dụ `1 = Input`) để phân loại.
+  - `forwardFromYaw(yaw, out)`, `rightFromYaw(yaw, out)` following the conventions in CLAUDE.md
+  - `lerp(a, b, t)`, `lerpAngle(a, b, t)` (takes the shortest path across ±π)
+  - `mulberry32(seed)` returns a random function over [0,1)
+  - `hashSeed(...nums)` combines several numbers into a 32-bit seed
+- `shared/src/protocol.ts`: declare empty message types (to be filled in gradually), and `encode(msg)` / `decode(buf)` functions using msgpack. Every message has a field `t` (a small number, for example `1 = Input`) used to classify it.
 
-Nghiệm thu:
+Acceptance:
 - [ ] Test: `forwardFromYaw(0)` = (0,0,−1); `forwardFromYaw(π/2)` = (−1,0,0); `rightFromYaw(0)` = (1,0,0).
-- [ ] Test: `lerpAngle(3.0, −3.0, 0.5)` cho kết quả gần ±π (không phải 0).
-- [ ] Test: `mulberry32(42)` gọi 3 lần cho cùng dãy số ở mọi lần chạy.
-- [ ] Test: encode rồi decode một object ra đúng object ban đầu.
+- [ ] Test: `lerpAngle(3.0, −3.0, 0.5)` gives a result close to ±π (not 0).
+- [ ] Test: `mulberry32(42)` called 3 times gives the same sequence on every run.
+- [ ] Test: encoding then decoding an object yields the original object.
 
 ---
 
 ## Task 0.3 – Map format + loader + mirror
 
-Kiểu dữ liệu (`shared/src/map/types.ts`):
+Data types (`shared/src/map/types.ts`):
 
 ```ts
 type Vec3 = [number, number, number];
 
 interface MapBox {
-  pos: Vec3;          // tâm khối
-  size: Vec3;         // kích thước đầy đủ (không phải half-extent)
+  pos: Vec3;          // center of the block
+  size: Vec3;         // full size (not half-extent)
   texture: string;    // "wall" | "floor" | "crate" ...
-  noMirror?: boolean; // khối nằm trên trục giữa, không nhân đôi
+  noMirror?: boolean; // block lies on the center axis, do not duplicate
 }
 
 interface MapRamp {
-  from: Vec3;   // điểm giữa mép dưới
-  to: Vec3;     // điểm giữa mép trên
+  from: Vec3;   // midpoint of the bottom edge
+  to: Vec3;     // midpoint of the top edge
   width: number;
   noMirror?: boolean;
 }
@@ -72,7 +72,7 @@ interface MapFile {
   mirrorX: boolean;
   boxes: MapBox[];
   ramps: MapRamp[];
-  spawnsA: MapSpawn[];   // chỉ khai báo đội A khi mirrorX = true
+  spawnsA: MapSpawn[];   // only declare team A when mirrorX = true
 }
 
 interface LoadedMap {
@@ -83,37 +83,37 @@ interface LoadedMap {
 }
 ```
 
-Quy tắc mirror (`loadMap.ts`), khi `mirrorX = true`:
-- Mỗi box/ramp không có `noMirror`: thêm bản sao với `x → −x` (cả `pos`, `from`, `to`). `size` giữ nguyên.
-- Mỗi spawn đội A → spawn đội B với `x → −x` và **`yaw → −yaw`**.
-- Kiểm tra: không box nào (trừ `noMirror`) được cắt qua `x = 0`; nếu có thì throw lỗi rõ ràng.
+Mirror rules (`loadMap.ts`), when `mirrorX = true`:
+- Every box/ramp without `noMirror`: add a copy with `x → −x` (for `pos`, `from`, `to`). `size` stays unchanged.
+- Every team A spawn → a team B spawn with `x → −x` and **`yaw → −yaw`**.
+- Validation: no box (except `noMirror` ones) may cross `x = 0`; if one does, throw a clear error.
 
-Nghiệm thu:
-- [ ] Test: một box ở x = −5 sinh ra box ở x = 5.
-- [ ] Test: spawn A tại x = −25, yaw = −π/2 (nhìn về +X, tức về phía địch) → spawn B tại x = 25, yaw = π/2 (nhìn về −X). Kiểm tra bằng `forwardFromYaw`: hai hướng ngược dấu x.
-- [ ] Test: box có `noMirror` không bị nhân đôi.
-- [ ] Test: box cắt qua x = 0 mà thiếu `noMirror` → throw.
+Acceptance:
+- [ ] Test: a box at x = −5 produces a box at x = 5.
+- [ ] Test: spawn A at x = −25, yaw = −π/2 (facing +X, i.e. toward the enemy) → spawn B at x = 25, yaw = π/2 (facing −X). Check with `forwardFromYaw`: the two directions have opposite x signs.
+- [ ] Test: a box with `noMirror` is not duplicated.
+- [ ] Test: a box crossing x = 0 without `noMirror` → throws.
 
 Pitfall:
-- Đây là chỗ hay sai nhất của phase 0: quên lật yaw, hoặc lật thành `π − yaw`. Với quy ước của dự án, lật trục X tương đương **`yaw → −yaw`**.
+- This is the easiest place to go wrong in phase 0: forgetting to flip yaw, or flipping it as `π − yaw`. With this project's conventions, flipping the X axis is equivalent to **`yaw → −yaw`**.
 
 ---
 
-## Task 0.4 – Dựng map "Hai thành" + render tĩnh
+## Task 0.4 – Build the "Two Citadels" map + static render
 
-Làm:
-- Viết `assets/maps/hai-thanh.json` theo bảng trong `00-overview.md` (chỉ nửa x âm + các khối `noMirror`).
-- `shared/src/physics/world.ts`: `createWorld(map: LoadedMap)` tạo Rapier world, mỗi box là cuboid collider tĩnh, mỗi ramp là cuboid xoay theo độ dốc. Hàm này **dùng chung client/server**.
-- Lỗ bắn: tường có lỗ được ghép từ nhiều box (đoạn dưới lỗ, đoạn trên lỗ, các đoạn hai bên), **không dùng boolean CSG**.
-- Client: `render/mapMesh.ts` dựng mesh từ cùng dữ liệu (BoxGeometry, ramp là box xoay), texture prototype kẻ ô (tạm thời có thể sinh ô bằng canvas nếu chưa có file texture).
-- Camera bay tự do (WASD + chuột, Q/E lên xuống) để ngắm map. Đèn: 1 hemisphere + 1 directional.
+Do:
+- Write `assets/maps/hai-thanh.json` following the table in `00-overview.md` (only the negative-x half + the `noMirror` blocks).
+- `shared/src/physics/world.ts`: `createWorld(map: LoadedMap)` creates the Rapier world; each box is a static cuboid collider, each ramp is a cuboid rotated to the slope. This function is **shared by client and server**.
+- Firing slots: a wall with slots is assembled from several boxes (the segment below the slot, the segment above it, and the segments on both sides), **without boolean CSG**.
+- Client: `render/mapMesh.ts` builds meshes from the same data (BoxGeometry, ramps are rotated boxes), grid prototype texture (can temporarily generate the grid with a canvas if no texture file exists yet).
+- Free-fly camera (WASD + mouse, Q/E up/down) to look at the map. Lighting: 1 hemisphere + 1 directional.
 
-Nghiệm thu:
-- [ ] Map hiện đủ: tường bao, 2 căn cứ, 2 tường thành có lỗ, 2 ramp, 2 tháp, khu giữa.
-- [ ] Hai nửa đối xứng nhau (bay lên cao nhìn xuống so sánh).
-- [ ] Bật chế độ debug (phím F4) vẽ wireframe collider Rapier chồng lên mesh: collider khớp mesh, kể cả ramp.
-- [ ] Spawn hiện bằng mũi tên nhỏ chỉ hướng yaw; mũi tên của 2 đội đều chỉ về phía khu giữa.
+Acceptance:
+- [ ] The map shows everything: outer wall, 2 bases, 2 citadel walls with slots, 2 ramps, 2 towers, mid-field.
+- [ ] The two halves are symmetric (fly up high and look down to compare).
+- [ ] Debug mode (F4 key) draws Rapier collider wireframes over the meshes: colliders match the meshes, ramps included.
+- [ ] Spawns show as small arrows pointing along yaw; the arrows of both teams point toward the mid-field.
 
 Pitfall:
-- Ramp: Rapier cuboid xoay bằng quaternion quanh trục vuông góc với hướng dốc. Tính góc = `atan2(to.y − from.y, khoảng cách ngang)`. Kiểm tra bằng wireframe, đừng tin mắt nhìn mesh.
-- Texture kẻ ô bị kéo giãn trên khối dài: chỉnh `texture.repeat` theo kích thước từng mặt, hoặc dùng UV theo toạ độ thế giới.
+- Ramp: a Rapier cuboid is rotated with a quaternion about the axis perpendicular to the slope direction. Compute the angle as `atan2(to.y − from.y, horizontal distance)`. Verify with the wireframe; do not trust your eyes on the mesh.
+- A grid texture gets stretched on long blocks: adjust `texture.repeat` per face size, or use UVs based on world coordinates.

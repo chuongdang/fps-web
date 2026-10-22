@@ -1,13 +1,14 @@
-// Hỗn Chiến: hồi sinh liên tục, bắn tới giới hạn mạng hoặc hết giờ. Chuyển nguyên từ match.ts (task 06).
-// WAITING → COUNTDOWN (đủ người) → PLAYING (hết đếm) → ENDED (hết giờ / đủ killLimit) → COUNTDOWN (đổi bên)
-import { ECONOMY_TDM, MatchPhase, MsgType, RESPAWN_DELAY_MS, SPAWN_INVULN_MS, addMoney, killReward, type MatchStateMsg } from '@fps/shared'
+// Team Deathmatch: continuous respawns, play until the kill limit or the time runs out. Moved over unchanged from match.ts (task 06).
+// WAITING → COUNTDOWN (enough players) → PLAYING (countdown over) → ENDED (time up / killLimit reached) → COUNTDOWN (swap sides)
+import { ECONOMY_TDM, MatchPhase, MsgType, RESPAWN_DELAY_MS, SPAWN_INVULN_MS, addMoney, killReward, type MatchStateMsg, type RoomStatus } from '@fps/shared'
 import type { Player, Room } from '../room'
 import { broadcastScoreboard, setPhase } from '../match'
 import { runKillRules } from '../teamRules'
 import type { MatchMode } from './index'
 
-// Bắt đầu trận mới: điểm/kill/death về 0, mọi người về căn cứ (mỗi người một điểm spawn), máu/đạn đầy, không bất tử
+// Start a new match: score/kills/deaths reset to 0, everyone back at base (one spawn point each), health/ammo full, no invulnerability
 function resetForCountdown(room: Room): void {
+  room.clearDrops()
   room.scoreA = 0
   room.scoreB = 0
   const used = { A: 0, B: 0 }
@@ -57,11 +58,11 @@ export class TdmMode implements MatchMode {
   }
 
   onPlayerJoin(room: Room, p: Player): void {
-    // Vào giữa trận: bất tử như vừa hồi sinh (5.4)
+    // Joining mid-match: invulnerable as if just respawned (5.4)
     if (room.phase !== MatchPhase.Waiting) p.invulnUntil = room.serverNow + SPAWN_INVULN_MS
   }
 
-  onPlayerLeave(): void { /* tick tự xử lý khi thiếu người */ }
+  onPlayerLeave(): void { /* the tick handles a shortage of players itself */ }
 
   onKill(room: Room, killer: Player | null, victim: Player): number {
     if (room.phase !== MatchPhase.Playing) return 0
@@ -84,11 +85,10 @@ export class TdmMode implements MatchMode {
 
   canSwitchTeam(): boolean { return true }
 
-  statusText(room: Room): string {
-    if (room.phase === MatchPhase.Waiting) return 'Đang chờ'
-    const left = Math.max(0, Math.ceil((room.phaseEndsAt - room.serverNow) / 1000))
-    const clock = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`
-    return room.phase === MatchPhase.Playing ? `Còn ${clock} · ${room.scoreA}–${room.scoreB}` : room.phase === MatchPhase.Ended ? 'Kết thúc' : 'Chuẩn bị'
+  roomStatus(room: Room): RoomStatus {
+    if (room.phase === MatchPhase.Waiting) return { code: 'waiting' }
+    if (room.phase === MatchPhase.Playing) return { code: 'timeLeft', seconds: Math.max(0, Math.ceil((room.phaseEndsAt - room.serverNow) / 1000)), scoreA: room.scoreA, scoreB: room.scoreB }
+    return { code: room.phase === MatchPhase.Ended ? 'ended' : 'preparing' }
   }
 
   stateMessage(room: Room): MatchStateMsg {

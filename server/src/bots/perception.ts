@@ -1,8 +1,9 @@
-// Nhận thức của bot (plan 15, B.3): nhìn (FOV + raycast tới đầu/ngực), nghe (tiếng súng, bước chân), bị bắn, trí nhớ.
-// Bot KHÔNG bao giờ biết vị trí địch qua tường, trừ các nguồn nghe/bị bắn ở đây (đều có sai số).
+// Bot perception (plan 15, B.3): sight (FOV + raycast to head/chest), hearing (gunshots, footsteps), being shot, memory.
+// The bot NEVER knows an enemy's position through walls, except via the hearing/hurt sources here (all with error).
 import { MsgType, defaultMovement, type AnyMsg, type Vec3 } from '@fps/shared'
 import type { Player, Room } from '../room'
 import { rand, type BotParams } from './params'
+import { smokeBlocks } from '../smoke'
 
 const RAD = Math.PI / 180
 const SIGHT_RANGE = 80
@@ -10,18 +11,18 @@ const FOOTSTEP_RANGE = 15
 const FOOTSTEP_SPEED = 5.5
 const HURT_ANGLE_ERR = 20 * RAD
 const SUSPECT_ERR_M = 3
-export const CHEST_Y = 1.0, HEAD_Y = 1.62   // CHEST_Y = điểm ngắm giữa thân (người ngắm vào giữa người, không ngắm ngực cao)
+export const CHEST_Y = 1.0, HEAD_Y = 1.62   // CHEST_Y = aim point at mid-torso (a human aims at the middle of the body, not the upper chest)
 const CROUCH_SCALE = defaultMovement.crouchHeight / defaultMovement.standHeight
 
 export interface Known {
   id: number
-  pos: Vec3                  // chân, lần cuối thấy
+  pos: Vec3                  // feet, last seen
   lastSeenMs: number
-  visible: boolean           // thấy trong lần nghĩ gần nhất
+  visible: boolean           // seen during the most recent think
   headVisible: boolean
   chestVisible: boolean
-  reactAtMs: number          // sau mốc này mới được ngắm/bắn (phản xạ)
-  stillSince: number         // bắt đầu đứng yên (dịch < STILL_RADIUS quanh anchor)
+  reactAtMs: number          // aiming/shooting is allowed only after this time (reaction time)
+  stillSince: number         // when it started standing still (moved < STILL_RADIUS around the anchor)
   anchor: Vec3
   dist: number
 }
@@ -35,7 +36,7 @@ export function eyeOf(p: Player, out: Vec3): Vec3 {
   return out
 }
 
-/** Điểm ngực / đầu của người chơi `p` (theo tư thế ngồi/đứng) */
+/** Chest / head point of player `p` (depending on crouching/standing) */
 export function bodyPoint(p: Player, head: boolean, out: Vec3): Vec3 {
   const sc = p.state.crouching ? CROUCH_SCALE : 1
   out[0] = p.state.pos[0]; out[1] = p.state.pos[1] + (head ? HEAD_Y : CHEST_Y) * sc; out[2] = p.state.pos[2]
@@ -46,9 +47,9 @@ export class Perception {
   readonly known = new Map<number, Known>()
   suspicion: Suspicion | null = null
   hurtAtMs = -1e9
-  hurtYaw = 0                // hướng (yaw) bot nghĩ đạn tới
-  readonly hurtTimes: number[] = []            // thời điểm bị trúng (để biết thua đấu súng)
-  readonly dealt = new Map<number, { dmg: number; atMs: number }>()   // sát thương gây cho từng địch (cửa sổ 5s)
+  hurtYaw = 0                // direction (yaw) the bot thinks the bullet came from
+  readonly hurtTimes: number[] = []            // times it was hit (to tell whether it is losing the gunfight)
+  readonly dealt = new Map<number, { dmg: number; atMs: number }>()   // damage dealt to each enemy (5s window)
   lastDealtMs = -1e9
   private readonly _eye: Vec3 = [0, 0, 0]
   private readonly _pt: Vec3 = [0, 0, 0]
@@ -60,7 +61,7 @@ export class Perception {
     this.known.clear(); this.suspicion = null; this.hurtAtMs = -1e9; this.hurtTimes.length = 0; this.dealt.clear()
   }
 
-  /** Tin nhắn gửi cho bot (transport rỗng chuyển vào đây) */
+  /** Messages sent to the bot (the empty transport forwards them here) */
   onMessage(msg: AnyMsg, now: number, params: BotParams): void {
     const me = this.me
     switch (msg.t) {
@@ -77,7 +78,7 @@ export class Perception {
         this.hurtTimes.push(now)
         if (this.hurtTimes.length > 8) this.hurtTimes.shift()
         const dx = msg.origin[0] - me.state.pos[0], dz = msg.origin[2] - me.state.pos[2]
-        // hướng đạn tới ± 20°
+        // bullet direction ± 20°
         this.hurtYaw = Math.atan2(-dx, -dz) + (this.rng() * 2 - 1) * HURT_ANGLE_ERR
         const dist = Math.max(4, Math.hypot(dx, dz))
         this.suspect(me.state.pos[0] - Math.sin(this.hurtYaw) * dist, msg.origin[1] - 1.6, me.state.pos[2] - Math.cos(this.hurtYaw) * dist, now, true)
@@ -101,7 +102,7 @@ export class Perception {
     this.suspicion = { pos: [x + (this.rng() * 2 - 1) * e, y, z + (this.rng() * 2 - 1) * e], atMs: now }
   }
 
-  /** Số lần bị trúng trong `windowMs` gần nhất */
+  /** Number of times hit within the last `windowMs` */
   hitsTaken(now: number, windowMs: number): number {
     let n = 0
     for (const t of this.hurtTimes) if (now - t <= windowMs) n++
@@ -113,7 +114,7 @@ export class Perception {
     return e && now - e.atMs < 5000 ? e.dmg : 0
   }
 
-  /** 10 lần/giây. lookYaw/lookPitch = hướng nhìn hiện tại của bot. Dùng ≤ 2 tia mỗi địch. */
+  /** 10 times per second. lookYaw/lookPitch = the bot's current look direction. Uses ≤ 2 rays per enemy. */
   update(now: number, params: BotParams, lookYaw: number, lookPitch: number): void {
     const me = this.me, world = me.world
     if (!world) return
@@ -133,13 +134,13 @@ export class Perception {
       if (dist <= SIGHT_RANGE && dist > 0.01 && (dx * fx + dy * fy + dz * fz) / dist >= cosHalf) {
         this._dir[0] = dx / dist; this._dir[1] = dy / dist; this._dir[2] = dz / dist
         const h = world.castRay(eye, this._dir, dist)
-        chestVis = !h || h.dist >= dist - 0.3
+        chestVis = (!h || h.dist >= dist - 0.3) && !smokeBlocks(this.room, eye, chest)
         const head = bodyPoint(o, true, this._pt)
         const hx = head[0] - eye[0], hy = head[1] - eye[1], hz = head[2] - eye[2]
         const hd = Math.hypot(hx, hy, hz)
         this._dir[0] = hx / hd; this._dir[1] = hy / hd; this._dir[2] = hz / hd
         const h2 = world.castRay(eye, this._dir, hd)
-        headVis = !h2 || h2.dist >= hd - 0.3
+        headVis = (!h2 || h2.dist >= hd - 0.3) && !smokeBlocks(this.room, eye, head)
       }
       const seen = chestVis || headVis
       if (seen) {
@@ -147,7 +148,7 @@ export class Perception {
           k = { id: o.id, pos: [ox, oy, oz], lastSeenMs: now, visible: false, headVisible: false, chestVisible: false, reactAtMs: 0, stillSince: now, anchor: [ox, oy, oz], dist }
           this.known.set(o.id, k)
         }
-        if (!k.visible && now - k.lastSeenMs > 1000) k.reactAtMs = now + rand(this.rng, params.reactionMs)   // thấy lần đầu / thấy lại sau khi mất dấu
+        if (!k.visible && now - k.lastSeenMs > 1000) k.reactAtMs = now + rand(this.rng, params.reactionMs)   // first sighting / seen again after losing track
         else if (k.reactAtMs === 0) k.reactAtMs = now + rand(this.rng, params.reactionMs)
         k.visible = true; k.chestVisible = chestVis; k.headVisible = headVis
         k.lastSeenMs = now; k.pos[0] = ox; k.pos[1] = oy; k.pos[2] = oz; k.dist = dist
@@ -157,7 +158,7 @@ export class Perception {
           k.visible = false; k.chestVisible = false; k.headVisible = false
           if (now - k.lastSeenMs > params.memoryMs) this.known.delete(o.id)
         }
-        // Bước chân chạy gần (chỉ bot khó): nghi ngờ có địch quanh đó
+        // Running footsteps nearby (hard bots only): suspect an enemy around there
         if (this.hearsSteps && dist <= FOOTSTEP_RANGE && !o.state.crouching && o.state.grounded &&
             Math.hypot(o.state.vel[0], o.state.vel[2]) > FOOTSTEP_SPEED) this.suspect(ox, oy, oz, now)
       }

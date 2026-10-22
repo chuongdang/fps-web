@@ -26,16 +26,28 @@ function boxCrossesX0(b: MapBox): boolean {
   return minX < 0 && maxX > 0
 }
 
+function buyZones(a?: MapZone, b?: MapZone): LoadedMap['buyZones'] {
+  const zones: LoadedMap['buyZones'] = {}
+  if (a) zones.A = a
+  if (b) zones.B = b
+  return zones
+}
+
 export function loadMap(file: MapFile): LoadedMap {
   if (!file.mirrorX) {
     return {
       name: file.name,
       boxes: file.boxes,
       ramps: file.ramps,
-      spawns: { A: file.spawnsA, B: [] },
-      buyZones: file.buyZoneA ? { A: file.buyZoneA } : {},
+      spawns: { A: file.spawnsA, B: file.spawnsB ?? [] },
+      buyZones: buyZones(file.buyZoneA, file.buyZoneB),
+      ...(file.model ? { model: file.model } : {}),
+      ...(file.trimesh ? { trimesh: file.trimesh } : {}),
+      ...(file.stepHeight ? { stepHeight: file.stepHeight } : {}),
     }
   }
+
+  if (file.model || file.trimesh) throw new Error(`Map "${file.name}": a modelled map (model / trimesh) cannot be mirrored, set mirrorX to false`)
 
   for (const box of file.boxes) {
     if (!box.noMirror && boxCrossesX0(box)) {

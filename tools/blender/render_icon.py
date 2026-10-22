@@ -1,11 +1,11 @@
 """
-Render icon vũ khí dạng bóng trắng phẳng (nền trong suốt, nòng chĩa trái) từ file .glb ĐÃ CHUẨN HOÁ (nòng +Y, trên +Z sau khi import).
+Render a flat white silhouette weapon icon (transparent background, barrel pointing left) from a NORMALIZED .glb (barrel +Y, up +Z after import).
 
-Dùng:
+Usage:
   blender -b --python tools/blender/render_icon.py -- <model.glb> <client/public/icons/weapons/ak47.png>
 
-Camera orthographic đặt ở phía −X nhìn về +X, trục lên +Z → +Y hiện ở bên trái màn hình → nòng chĩa trái.
-Kết quả PNG 512×256. HUD ưu tiên <key>.png, không có thì dùng <key>.svg cùng thư mục.
+Orthographic camera placed on the −X side looking toward +X, up axis +Z → +Y appears on the left of the screen → barrel points left.
+Output is a 512×256 PNG. The HUD prefers <key>.png and falls back to <key>.svg in the same folder.
 """
 import bpy, sys, os
 from mathutils import Vector
@@ -19,7 +19,7 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=src)
 meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH']
 if not meshes:
-    raise SystemExit("không có mesh trong " + src)
+    raise SystemExit("no mesh in " + src)
 
 mn = Vector((1e9, 1e9, 1e9)); mx = Vector((-1e9, -1e9, -1e9))
 for o in meshes:
@@ -27,7 +27,7 @@ for o in meshes:
         w = o.matrix_world @ Vector(c)
         mn = Vector((min(mn[i], w[i]) for i in range(3)))
         mx = Vector((max(mx[i], w[i]) for i in range(3)))
-# Vật thể nhỏ (lựu đạn 9cm): phóng to lên cỡ ~1m cho camera/clip mặc định và workbench làm việc bình thường
+# Small object (9 cm grenade): scale up to ~1 m so the default camera/clip and workbench work normally
 span = max((mx - mn)[i] for i in range(3))
 if span < 0.5:
     k = 1.0 / span
@@ -49,12 +49,12 @@ size = mx - mn
 
 cam_data = bpy.data.cameras.new("icon_cam")
 cam_data.type = 'ORTHO'
-# Cạnh dài nhất của bbox (theo trục hiện trên màn hình: Y ngang, Z dọc) × 1,1; khung 2:1 nên chiều ngang là cạnh quyết định
+# Longest bbox edge (along the on-screen axes: Y horizontal, Z vertical) × 1.1; the frame is 2:1 so the horizontal extent decides
 cam_data.ortho_scale = max(size.y, size.z * 2) * 1.1
 cam = bpy.data.objects.new("icon_cam", cam_data)
 bpy.context.scene.collection.objects.link(cam)
 cam.location = Vector((center.x - max(size.x, 1.0) - 5, center.y, center.z))
-cam.rotation_euler = (1.5707963, 0, -1.5707963)   # nhìn về +X (camera ở −X), trục lên +Z, +Y hiện bên trái (rotZ +90° sẽ nhìn ra xa model)
+cam.rotation_euler = (1.5707963, 0, -1.5707963)   # looks toward +X (camera at −X), up axis +Z, +Y appears on the left (rotZ +90° would look away from the model)
 bpy.context.scene.camera = cam
 
 sc = bpy.context.scene

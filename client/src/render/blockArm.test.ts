@@ -8,7 +8,7 @@ describe('solveTwoBone', () => {
   const a = 0.4, b = 0.5
   const shoulder = v(0.2, 1.4, 0)
 
-  it('target trong tầm: đủ độ dài xương, tay chạm target', () => {
+  it('target in reach: bone lengths are preserved, hand touches target', () => {
     const target = v(0.3, 1.2, -0.5), elbow = v(), hand = v()
     expect(solveTwoBone(a, b, shoulder, target, v(0.5, 0.8, 0.2), elbow, hand)).toBe(true)
     expect(elbow.distanceTo(shoulder)).toBeCloseTo(a, 6)
@@ -16,7 +16,7 @@ describe('solveTwoBone', () => {
     expect(hand.distanceTo(target)).toBeLessThan(1e-6)
   })
 
-  it('target quá xa: duỗi thẳng, reached = false', () => {
+  it('target too far: arm fully extended, reached = false', () => {
     const target = v(0.2, 1.4, -5), elbow = v(), hand = v()
     expect(solveTwoBone(a, b, shoulder, target, v(0.5, 0.8, 0.2), elbow, hand)).toBe(false)
     expect(hand.distanceTo(shoulder)).toBeCloseTo(a + b, 3)
@@ -25,7 +25,7 @@ describe('solveTwoBone', () => {
     expect(hand.z).toBeLessThan(0)
   })
 
-  it('khuỷu nằm cùng phía với pole', () => {
+  it('elbow lies on the same side as the pole', () => {
     const target = v(0.1, 1.3, -0.6), elbow = v(), hand = v()
     for (const pole of [v(0.5, 0.8, 0.2), v(-0.5, 0.8, 0.2), v(0.2, 2.5, 0)]) {
       solveTwoBone(a, b, shoulder, target, pole, elbow, hand)
@@ -36,7 +36,7 @@ describe('solveTwoBone', () => {
     }
   })
 
-  it('pole nằm trên đường vai–tay: không NaN', () => {
+  it('pole on the shoulder-hand line: no NaN', () => {
     const elbow = v(), hand = v()
     solveTwoBone(a, b, shoulder, v(0.2, 1.4, -0.6), v(0.2, 1.4, -2), elbow, hand)
     expect(Number.isFinite(elbow.x + elbow.y + elbow.z)).toBe(true)

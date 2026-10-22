@@ -14,7 +14,7 @@ function fake() {
 }
 
 describe('RoomManager', () => {
-  it('leave giải phóng world của người chơi', () => {
+  it('leave frees the player world', () => {
     const rm = new RoomManager(map, () => 0)
     const { room, player } = rm.join('r', 'A', fake().t)
     let disposed = 0
@@ -22,11 +22,11 @@ describe('RoomManager', () => {
     room.leave(player.id)
     expect(disposed).toBe(1)
     expect(player.world).toBeNull()
-    room.leave(player.id)   // gọi lại không dispose lần 2
+    room.leave(player.id)   // calling again does not dispose twice
     expect(disposed).toBe(1)
   })
 
-  it('join: id tăng dần, Welcome cho người mới, PlayerJoined cho người cũ', () => {
+  it('join: ids increase, Welcome for the newcomer, PlayerJoined for existing players', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake(), b = fake()
     const pa = rm.join('r1', 'A', a.t, 0, 'A').player
@@ -38,7 +38,7 @@ describe('RoomManager', () => {
     expect(b.got[0]!.t).toBe(MsgType.Welcome)
   })
 
-  it('spawn xen kẽ đội A (x âm) / B (x dương)', () => {
+  it('spawns alternate team A (negative x) / B (positive x)', () => {
     const rm = new RoomManager(map, () => 0)
     const a = rm.join('r', 'A', fake().t, 0, 'A').player
     const b = rm.join('r', 'B', fake().t, 0, 'B').player
@@ -46,7 +46,7 @@ describe('RoomManager', () => {
     expect(b.state.pos[0]).toBeGreaterThan(0)
   })
 
-  it('leave: báo PlayerLeft cho người còn lại', () => {
+  it('leave: PlayerLeft is sent to the remaining players', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake(), b = fake()
     const { room } = rm.join('r', 'A', a.t)
@@ -55,22 +55,22 @@ describe('RoomManager', () => {
     expect(a.got.at(-1)).toEqual({ t: MsgType.PlayerLeft, id: 2 })
   })
 
-  it('hai phòng khác mã không thấy nhau', () => {
+  it('two rooms with different codes cannot see each other', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake(), b = fake()
     rm.join('r1', 'A', a.t)
     rm.join('r2', 'B', b.t)
-    expect(a.got.some(m => m.t === MsgType.PlayerJoined)).toBe(false)   // không thấy người phòng khác
+    expect(a.got.some(m => m.t === MsgType.PlayerJoined)).toBe(false)   // does not see players from another room
     expect(rm.rooms.size).toBe(2)
   })
 
-  it('phòng trống quá 60s bị xoá, còn người thì giữ', () => {
+  it('a room empty for over 60s is deleted; a room with players is kept', () => {
     let now = 0
     const rm = new RoomManager(map, () => now)
     const { room, player } = rm.join('r', 'A', fake().t)
     now = 1_000_000
     rm.sweep()
-    expect(rm.rooms.size).toBe(1)   // còn người
+    expect(rm.rooms.size).toBe(1)   // still has players
     room.leave(player.id)
     now += EMPTY_ROOM_TTL_MS - 1
     rm.sweep()
@@ -81,17 +81,17 @@ describe('RoomManager', () => {
   })
 })
 
-describe('bộ nhân vật theo phòng', () => {
-  it('chọn lúc tạo phòng, người vào sau dùng bộ của phòng; Welcome báo bộ đó', () => {
+describe('character set per room', () => {
+  it('chosen at room creation, later joiners use the room set; Welcome reports that set', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake(), b = fake()
     const first = rm.join('r', 'A', a.t, 0, 'auto', 'robot')
-    const second = rm.join('r', 'B', b.t, 0, 'auto', 'copRobber')   // xin copRobber nhưng phòng đã là robot
+    const second = rm.join('r', 'B', b.t, 0, 'auto', 'copRobber')   // asks for copRobber but the room is already robot
     expect(first.room.characterSet).toBe('robot')
     expect(second.room.characterSet).toBe('robot')
     expect(b.got[0]).toMatchObject({ t: MsgType.Welcome, characterSet: 'robot' })
   })
-  it('mặc định saberDesert (Bão Cát Sa Mạc)', () => {
+  it('defaults to saberDesert (Desert Sandstorm)', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake()
     rm.join('x', 'A', a.t)

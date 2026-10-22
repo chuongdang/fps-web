@@ -1,5 +1,5 @@
-// Đánh hơi (plan 16, I.3): người trong bán kính hiện lớp đỏ mờ xuyên tường trên màn hình zombie. Dùng capsule trong suốt `depthTest: false`
-// (không phải shader viền) nên rẻ: tối đa 10 capsule dùng lại.
+// Sniffing (plan 16, I.3): players within range show as a faint red overlay through walls on the zombie screen. Uses transparent capsules with `depthTest: false`
+// (not an outline shader) so it is cheap: at most 10 reused capsules.
 import * as THREE from 'three'
 
 const MAX = 12
@@ -14,7 +14,7 @@ export function createSniffFx(scene: THREE.Scene) {
     scene.add(m); meshes.push(m)
   }
   return {
-    /** targets = vị trí chân của người cần hiện; active=false ẩn hết */
+    /** targets = foot positions of the players to show; active=false hides everything */
     update(active: boolean, targets: readonly { pos: [number, number, number]; crouching?: boolean }[], t: number): void {
       mat.opacity = 0.3 + 0.1 * Math.sin(t / 120)
       for (let i = 0; i < MAX; i++) {

@@ -4,9 +4,9 @@ export const weaponSyncStats = { checks: 0, mismatches: 0 }
 
 const tmp = makeWeaponState()
 
-// Reconcile súng giống reconcile vị trí: đặt WeaponState = của server (sau cmd `ack`), chạy lại các cmd
-// chưa ack rồi ghi đè `ws` nếu khác. Chỉ trạng thái (đạn, reload, fire rate); hiệu ứng không phát lại.
-// `pending` đã bỏ cmd ≤ ack.
+// Weapon reconcile works like position reconcile: set WeaponState = the server's (after cmd `ack`), replay the
+// unacked cmds, then overwrite `ws` if different. State only (ammo, reload, fire rate); effects are not replayed.
+// `pending` has already dropped cmds ≤ ack.
 export function reconcileWeapon(ws: WeaponState, server: WeaponState, pending: readonly { cmd: InputCmd }[]): boolean {
   copyWeaponState(tmp, server)
   for (const p of pending) stepWeaponCmd(tmp, p.cmd)

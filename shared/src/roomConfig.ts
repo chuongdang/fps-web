@@ -1,32 +1,32 @@
-// Cài đặt phòng: thể thức + thông số. Server luôn kẹp theo SETTINGS_LIMITS, không tin client.
+// Room settings: mode + parameters. The server always clamps to SETTINGS_LIMITS and never trusts the client.
 export type GameMode = 'elimination' | 'tdm' | 'infection' | 'defense'
 export const GAME_MODES: readonly GameMode[] = ['elimination', 'tdm', 'infection', 'defense']
 export function isGameMode(v: unknown): v is GameMode { return typeof v === 'string' && (GAME_MODES as readonly string[]).includes(v) }
-/** Thể thức zombie (plan 16/17): mọi người cùng phe người (đội A), zombie là phe B; ban đêm + đèn pin; đạn dự trữ vô hạn */
+/** Zombie modes (plan 16/17): everyone is on the human side (team A), zombies are side B; night + flashlight; infinite reserve ammo */
 export function isZombieMode(m: GameMode): boolean { return m === 'infection' || m === 'defense' }
 
 export const MODE_LABEL: Record<GameMode, string> = {
-  elimination: 'Sinh Tử',
-  tdm: 'Hỗn Chiến',
-  infection: 'Lây Nhiễm',
-  defense: 'Thủ Thành',
+  elimination: 'Elimination',
+  tdm: 'Team Deathmatch',
+  infection: 'Infection',
+  defense: 'Defense',
 }
 export const MODE_DESC: Record<GameMode, string> = {
-  elimination: 'Mỗi ván một mạng. Thắng 10 ván trước.',
-  tdm: 'Hồi sinh liên tục. Bắn tới 50 mạng hoặc hết giờ.',
-  infection: 'Zombie mẹ lây nhiễm cả phòng. Trụ tới hết giờ để thắng.',
-  defense: 'Cả đội giữ thành chống 10 đợt zombie, đợt cuối có boss.',
+  elimination: 'One life per round. First to win 10 rounds.',
+  tdm: 'Continuous respawn. Play to 50 kills or until time runs out.',
+  infection: 'The mother zombie infects the whole room. Survive until time runs out to win.',
+  defense: 'The whole team holds the fort against 10 waves of zombies, the last wave has a boss.',
 }
 
 export interface EliminationSettings {
   mode: 'elimination'
-  roundsToWin: number     // 10 → tối đa 19 ván
+  roundsToWin: number     // 10 → at most 19 rounds
   roundTimeSec: number    // 105 (1:45)
-  freezeSec: number       // 5 – đứng yên đầu ván
-  buyTimeSec: number      // 20 – tính từ lúc bắt đầu freeze
-  roundEndSec: number     // 5 – hiện kết quả ván
-  halftimeSec: number     // 10 – nghỉ giữa hiệp, đổi bên
-  matchEndSec: number     // 15 – màn hình kết thúc trận
+  freezeSec: number       // 5 – standing still at round start
+  buyTimeSec: number      // 20 – counted from the start of freeze
+  roundEndSec: number     // 5 – show round result
+  halftimeSec: number     // 10 – half-time break, sides swap
+  matchEndSec: number     // 15 – match end screen
 }
 
 export interface TdmSettings {
@@ -38,32 +38,32 @@ export interface TdmSettings {
 export type Lighting = 'day' | 'night'
 export type DefenseDifficulty = 'easy' | 'normal' | 'hard'
 
-/** Lây Nhiễm (plan 16, phần I) */
+/** Infection (plan 16, part I) */
 export interface InfectionSettings {
   mode: 'infection'
   rounds: number          // 8
-  prepSec: number         // 20 – mọi người là người, tìm chỗ, mua súng
+  prepSec: number         // 20 – everyone is human, find a spot, buy weapons
   roundTimeSec: number    // 180
   roundEndSec: number     // 6
   matchEndSec: number     // 15
   lighting: Lighting      // 'night'
 }
 
-/** Thủ Thành (plan 17) */
+/** Defense (plan 17) */
 export interface DefenseSettings {
   mode: 'defense'
   difficulty: DefenseDifficulty   // 'normal'
   waves: number                   // 10
   intermissionSec: number         // 25
   prepSec: number                 // 30
-  endSec: number                  // 20 – màn thắng/thua trước khi về WARMUP
+  endSec: number                  // 20 – win/lose screen before returning to WARMUP
   lighting: Lighting              // 'night'
 }
 
 export interface RoomConfig {
-  name: string            // tên phòng, 1–32 ký tự
+  name: string            // room name, 1–32 characters
   map: string
-  maxPlayers: number      // 2–10, chẵn
+  maxPlayers: number      // 2–10, even
   settings: EliminationSettings | TdmSettings | InfectionSettings | DefenseSettings
 }
 
@@ -82,7 +82,7 @@ export const SETTINGS_LIMITS = {
 export const MAX_PLAYERS_LIMITS = [2, 10] as const
 export const DEFAULT_MAX_PLAYERS = 10
 
-/** Phần client gửi khi tạo phòng (chưa tin cậy) */
+/** Part the client sends when creating a room (untrusted) */
 export interface RoomOptions {
   mode?: GameMode
   maxPlayers?: number
@@ -94,7 +94,7 @@ function clampInt(v: unknown, [lo, hi]: readonly [number, number], def: number):
   return Math.min(hi, Math.max(lo, n))
 }
 
-/** Số người tối đa: kẹp 2–10 rồi làm tròn xuống số chẵn (mỗi đội bằng nhau) */
+/** Max players: clamp to 2–10 then round down to an even number (equal teams) */
 export function clampMaxPlayers(v: unknown): number {
   const n = clampInt(v, MAX_PLAYERS_LIMITS, DEFAULT_MAX_PLAYERS)
   return n - (n % 2)

@@ -1,15 +1,15 @@
-// Đo độ chính xác của bot (plan 15, B.4/B.8): `npm run bot-bench`. Chạy không giao diện trên Room + Rapier thật.
-// Nếu số đo nằm ngoài khoảng mục tiêu thì chỉnh bots.json, KHÔNG sửa code ngắm để ép kết quả.
+// Bot accuracy benchmark (plan 15, B.4/B.8): `npm run bot-bench`. Runs headless on a real Room + Rapier.
+// If a measurement falls outside the target range, tune bots.json; do NOT change the aiming code to force the result.
 import { MsgType, WEAPONS, type BotDifficulty } from '@fps/shared'
 import { createArena, type Arena } from './arena'
 import { addBot } from './roster'
 import { getBotParams, setBotParams } from './params'
 
 export interface BenchResult {
-  hitRate: number          // trúng / số viên bắn
-  headRate: number         // trúng đầu / số viên trúng
+  hitRate: number          // hits / shots fired
+  headRate: number         // headshots / hits
   shots: number
-  maxHeadStreak: number    // chuỗi viên trúng đầu liên tiếp dài nhất
+  maxHeadStreak: number    // longest streak of consecutive headshots
 }
 
 let saved: Record<BotDifficulty, ReturnType<typeof getBotParams>> | null = null
@@ -24,7 +24,7 @@ const BOT_POS: [number, number, number] = [-10, 0, 5]
 const YAW_PLUS_X = -Math.PI / 2   // forward = (−sin yaw, −cos yaw) = (+1, 0)
 
 async function setup(difficulty: BotDifficulty, seed: number, weapon?: string) {
-  // bài đo chuẩn dùng AK47 (plan B.4): ép bot mua AK, không lựu đạn; trả lại bảng tham số khi xong (restoreParams)
+  // the standard benchmark uses the AK47 (plan B.4): force bots to buy the AK, no grenades; restore the parameter table when done (restoreParams)
   const tbl = { medium: structuredClone(getBotParams('medium')), hard: structuredClone(getBotParams('hard')) }
   saved ??= structuredClone(tbl)
   for (const d of ['medium', 'hard'] as const) { tbl[d].buy = { long: ['ak47'], pistol: [], mid: [], grenades: 0 } }
@@ -33,7 +33,7 @@ async function setup(difficulty: BotDifficulty, seed: number, weapon?: string) {
   const rng = seeded(seed)
   const bot = addBot(a.room, difficulty, 'A', rng)!
   const dummy = await a.addDummy('B', [10, 0, 5])
-  await new Promise(r => setTimeout(r, 100))   // world của bot nạp bất đồng bộ
+  await new Promise(r => setTimeout(r, 100))   // the bots' worlds load asynchronously
   const events: { shot: number; head: boolean | null }[] = []
   let hits = 0, heads = 0
   const send = bot.bot!.transport.send
@@ -44,8 +44,8 @@ async function setup(difficulty: BotDifficulty, seed: number, weapon?: string) {
     }
     send(msg)
   }
-  if (weapon) { /* súng do bot tự mua theo bots.json; weapon chỉ để đối chiếu */ void weapon }
-  // chờ vào trận + mua đồ. Đầu trận mọi người hồi sinh đủ máu: đặt máu vô hạn cho bia SAU tick đầu tiên (không thì bot bắn chết bia lúc khởi động rồi bia hồi sinh về căn cứ)
+  if (weapon) { /* the weapon is bought by the bot per bots.json; `weapon` is only for reference */ void weapon }
+  // wait for the match to start + shopping. At the start everyone respawns with full health: set infinite health on the target AFTER the first tick (otherwise the bot kills the target during startup and the target respawns at its base)
   a.step(2)
   dummy.player.hp = 1e9
   a.step(60 * 4)
@@ -64,7 +64,7 @@ function result(events: { shot: number; head: boolean | null }[], shots: number,
   return { hitRate: hits / Math.max(1, shots), headRate: heads / Math.max(1, hits), shots, maxHeadStreak: maxStreak }
 }
 
-/** Bia người đứng yên ở 20m (hoặc chạy ngang qua lại `strafeSpeed` m/s), bắn tới đủ `rounds` viên */
+/** Human target standing still at 20m (or strafing back and forth at `strafeSpeed` m/s), shoot until `rounds` shots */
 export async function benchAccuracy(difficulty: BotDifficulty, opts: { strafeSpeed?: number; rounds?: number; seed?: number } = {}): Promise<BenchResult> {
   const rounds = opts.rounds ?? 300
   const s = await setup(difficulty, opts.seed ?? 1)
@@ -80,7 +80,7 @@ export async function benchAccuracy(difficulty: BotDifficulty, opts: { strafeSpe
       if (dummy.player.state.pos[2] < zc - amp) dir = 1
       dummy.player.state.vel = [0, 0, dir * opts.strafeSpeed]
     }
-    bot.state.pos[0] = BOT_POS[0]; bot.state.pos[2] = BOT_POS[2]   // giữ bot đúng chỗ: bài này đo ngắm, không đo di chuyển
+    bot.state.pos[0] = BOT_POS[0]; bot.state.pos[2] = BOT_POS[2]   // keep the bot in place: this benchmark measures aiming, not movement
   }
   for (let t = 0; t < 60 * 900 && bot.shotsFired - startShots < rounds; t += 60) {
     a.step(60, hold)
@@ -97,25 +97,25 @@ export async function benchAccuracy(difficulty: BotDifficulty, opts: { strafeSpe
   return r
 }
 
-/** Thời gian từ lúc địch ló ra (đột ngột, đứng yên, trong tầm nhìn) tới phát bắn đầu tiên */
+/** Time from the enemy popping out (suddenly, standing still, in line of sight) to the first shot */
 export async function benchReaction(difficulty: BotDifficulty, trials = 24): Promise<{ meanMs: number; minMs: number; maxMs: number }> {
   const s = await setup(difficulty, 99)
   const { a, bot, dummy } = s
   const times: number[] = []
   const hold = () => { bot.state.pos[0] = BOT_POS[0]; bot.state.pos[2] = BOT_POS[2] }
   for (let i = 0; i < trials; i++) {
-    // giấu địch sau lưng bot (ngoài tầm nhìn), chờ bot yên, rồi cho ló ra phía trước
+    // hide the enemy behind the bot (out of sight), wait for the bot to settle, then pop it out in front
     dummy.player.state.pos = [-18, 0, 5]
     s.place()
     a.step(60 * 2, hold)
     s.place()
-    bot.weapon.ammo[bot.weapon.current] = WEAPONS[bot.weapon.current]!.magSize; bot.weapon.reloadEndMs = 0   // mỗi lần thử bắt đầu với băng đầy, không đang nạp
+    bot.weapon.ammo[bot.weapon.current] = WEAPONS[bot.weapon.current]!.magSize; bot.weapon.reloadEndMs = 0   // each attempt starts with a full magazine and no reload in progress
     dummy.player.state.pos = [10, 0, 5]
     const base = bot.shotsFired
     let ticks = 0
     while (bot.shotsFired === base && ticks < 60 * 6) { a.step(1, hold); ticks++ }
     if (bot.shotsFired > base) times.push(ticks * 1000 / 60)
-    a.step(60 * 2, hold)   // bot nghỉ/nạp trước lần sau
+    a.step(60 * 2, hold)   // bot rests/reloads before the next attempt
   }
   a.dispose()
   restoreParams()
@@ -131,16 +131,16 @@ export const TARGETS = {
 
 async function main(): Promise<void> {
   const fmt = (x: number) => `${(x * 100).toFixed(1)}%`
-  console.log(`súng: ${WEAPONS[0]!.name} (bot tự mua theo bots.json)`)
+  console.log(`weapon: ${WEAPONS[0]!.name} (bot buys per bots.json)`)
   for (const d of ['medium', 'hard'] as const) {
     const still = await benchAccuracy(d)
     const run = await benchAccuracy(d, { strafeSpeed: 6 })
     const react = await benchReaction(d)
     const t = TARGETS
     console.log(`\n== ${d.toUpperCase()} ==`)
-    console.log(`bia đứng yên 20m   : trúng ${fmt(still.hitRate)} (mục tiêu ${fmt(t.still[d].hit[0])}–${fmt(t.still[d].hit[1])}), trúng đầu/trúng ${fmt(still.headRate)} (≤ ${fmt(t.still[d].head)}), ${still.shots} viên, chuỗi đầu dài nhất ${still.maxHeadStreak}`)
-    console.log(`bia chạy 6 m/s 20m : trúng ${fmt(run.hitRate)} (mục tiêu ${fmt(t.strafe[d].hit[0])}–${fmt(t.strafe[d].hit[1])}), ${run.shots} viên`)
-    console.log(`từ thấy → phát đầu : TB ${react.meanMs.toFixed(0)}ms [${react.minMs.toFixed(0)}–${react.maxMs.toFixed(0)}] (mục tiêu ${t.react[d][0]}–${t.react[d][1]}ms)`)
+    console.log(`still target 20m  : hit ${fmt(still.hitRate)} (target ${fmt(t.still[d].hit[0])}–${fmt(t.still[d].hit[1])}), headshots/hits ${fmt(still.headRate)} (≤ ${fmt(t.still[d].head)}), ${still.shots} shots, longest headshot streak ${still.maxHeadStreak}`)
+    console.log(`running target 6 m/s 20m: hit ${fmt(run.hitRate)} (target ${fmt(t.strafe[d].hit[0])}–${fmt(t.strafe[d].hit[1])}), ${run.shots} shots`)
+    console.log(`seen → first shot : mean ${react.meanMs.toFixed(0)}ms [${react.minMs.toFixed(0)}–${react.maxMs.toFixed(0)}] (target ${t.react[d][0]}–${t.react[d][1]}ms)`)
   }
 }
 

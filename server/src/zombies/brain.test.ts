@@ -11,7 +11,7 @@ beforeAll(async () => { nav = buildNav(await createWorld(map), map, defaultMovem
 
 interface Result { reached: boolean; t: number; maxY: number; pos: Vec3; usedKinds: Set<number>; stuckMs: number }
 
-// Mô phỏng một zombie (world Rapier thật, stepMovement của zombie) đi từ `from` tới `to`
+// Simulate a zombie (real Rapier world, the zombie's stepMovement) walking from `from` to `to`
 async function run(from: Vec3, to: Vec3, ability: { hole: boolean; leap: boolean }, runSpeed = 9.5, seconds = 40): Promise<Result> {
   const world: CollisionWorld = await createWorld(map)
   const cfg = zombieMovement(defaultMovement, runSpeed)
@@ -35,24 +35,24 @@ async function run(from: Vec3, to: Vec3, ability: { hole: boolean; leap: boolean
   return { reached: false, t: seconds, maxY, pos: [...s.pos], usedKinds: used, stuckMs: stuck }
 }
 
-describe('bộ não zombie (T.4)', () => {
-  it('walker tới được căn cứ A và không dùng cạnh Hole', async () => {
+describe('zombie brain (T.4)', () => {
+  it('walker reaches base A and does not use Hole edges', async () => {
     const r = await run([-14, 0, 5.5], [-24, 0, 5.5], { hole: false, leap: false })
     console.log('walker', r.reached, r.t.toFixed(1), [...r.usedKinds], r.pos.map(v => +v.toFixed(1)), 'maxY', r.maxY.toFixed(1))
     expect(r.reached).toBe(true)
-    expect(r.usedKinds.has(3)).toBe(false)   // (map hiện tại: khe có bệ 0,5m nên walker vẫn nhảy qua được bằng cạnh Jump thường — xem PROGRESS)
+    expect(r.usedKinds.has(3)).toBe(false)   // (current map: the gap has a 0.5m sill, so the walker can still jump across via a normal Jump edge — see PROGRESS)
   }, 60_000)
 
-  it('crawler chui qua khe tường thành vào căn cứ A', async () => {
+  it('crawler squeezes through the city wall gap into base A', async () => {
     const r = await run([-14, 0, 5.5], [-24, 0, 5.5], { hole: true, leap: false })
     console.log('crawler', r.reached, r.t.toFixed(1), [...r.usedKinds], r.pos.map(v => +v.toFixed(1)), 'maxY', r.maxY.toFixed(1))
     expect(r.reached).toBe(true)
     expect(r.usedKinds.has(3)).toBe(true)
-    expect(r.maxY).toBeLessThan(2)   // không leo tường
+    expect(r.maxY).toBeLessThan(2)   // does not climb the wall
     expect(r.t).toBeLessThan(10)
   }, 60_000)
 
-  it('leaper bật E từ đất lên gờ tường', async () => {
+  it('leaper uses E to jump from the ground onto the wall ledge', async () => {
     const r = await run([-14, 0, 12], [-19.2, 4.2, 12], { hole: false, leap: true })
     console.log('leaper', r.reached, r.t.toFixed(1), [...r.usedKinds], r.pos.map(v => +v.toFixed(1)), 'maxY', r.maxY.toFixed(1))
     expect(r.reached).toBe(true)

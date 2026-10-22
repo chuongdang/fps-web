@@ -1,5 +1,5 @@
-// Thể thức chơi (task 13). Mọi chỗ khác nhau giữa các thể thức nằm trong class thể thức; phần còn lại của server chỉ gọi qua room.mode.
-import type { EconomyConfig, GameMode, MatchStateMsg, RoomConfig, ScoreboardRow, TeamId } from '@fps/shared'
+// Game modes (task 13). Everything that differs between modes lives in the mode class; the rest of the server only calls through room.mode.
+import type { EconomyConfig, GameMode, MatchStateMsg, RoomConfig, RoomStatus, ScoreboardRow, TeamId } from '@fps/shared'
 import type { Player, Room } from '../room'
 import { TdmMode } from './tdm'
 import { EliminationMode } from './elimination'
@@ -9,43 +9,43 @@ import { DefenseMode } from './defense'
 export interface MatchMode {
   readonly mode: GameMode
   economy(): EconomyConfig
-  /** Gọi mỗi tick sau khi chốt chết/hồi sinh: máy trạng thái trận */
+  /** Called every tick after deaths/respawns are settled: the match state machine */
   tick(room: Room, now: number): void
-  /** `p` đã nằm trong room.players và đã nhận Welcome/đội */
+  /** `p` is already in room.players and has received Welcome/team */
   onPlayerJoin(room: Room, p: Player): void
-  /** Sau khi `p` đã bị xoá khỏi room.players */
+  /** After `p` has been removed from room.players */
   onPlayerLeave(room: Room, p: Player): void
-  /** `victim` vừa chết (alive=false, killStreak còn nguyên). Trả số tiền thưởng đã cộng cho `killer` (0 nếu không tính) */
+  /** `victim` just died (alive=false, killStreak untouched). Returns the reward money added to `killer` (0 if none) */
   onKill(room: Room, killer: Player | null, victim: Player): number
-  /** Chạy một lần sau khi chốt xong các ca chết của tick (luật đội động...) */
+  /** Runs once after the tick's deaths are settled (dynamic team rules, etc.) */
   afterDeaths(room: Room): void
-  /** ms chờ hồi sinh sau khi chết; null = không hồi sinh cho tới khi mode tự hồi sinh */
+  /** ms to wait before respawning after death; null = no respawn until the mode respawns the player itself */
   respawnDelayMs(room: Room, p?: Player): number | null
-  canBuy(room: Room, p: Player, nowMs: number): boolean   // ngoài kiểm tra còn sống + khu mua
+  canBuy(room: Room, p: Player, nowMs: number): boolean   // besides the alive + buy-zone checks
   canSwitchTeam(room: Room, p: Player): boolean
-  statusText(room: Room): string
+  roomStatus(room: Room): RoomStatus   // for the lobby room list
   stateMessage(room: Room): MatchStateMsg
-  // ── Móc tuỳ chọn cho thể thức zombie (plan 16/17)
-  /** Đội mọi người vào khi join (zombie: phe người 'A'); có = bỏ luật cân bằng đội */
+  // ── Optional hooks for the zombie modes (plan 16/17)
+  /** Team everyone joins on connect (zombie modes: the human side 'A'); if set, team balancing is skipped */
   joinTeam?(room: Room): TeamId
-  /** Mua ở bất cứ đâu (bỏ kiểm tra khu mua) */
+  /** Buy anywhere (skips the buy-zone check) */
   buyAnywhere?(room: Room, p: Player): boolean
-  /** `p` vừa hết máu (hp ≤ 0). Trả true = thể thức đã xử lý (không tính là chết) */
+  /** `p` just ran out of health (hp <= 0). Returns true = the mode handled it (not counted as a death) */
   onLethal?(room: Room, p: Player): boolean
-  /** Điểm hồi sinh riêng; null/thiếu = luật mặc định */
+  /** Mode-specific respawn point; null/missing = default rule */
   pickSpawn?(room: Room, p: Player): { pos: [number, number, number]; yaw: number } | null
-  /** Sau mỗi cmd của `p` đã chạy (phím nhấn): chiêu riêng của thể thức (Q đánh hơi...) */
+  /** After each cmd of `p` has run (pressed keys): mode-specific abilities (Q sniff, etc.) */
   onCmd?(room: Room, p: Player, buttons: number): void
-  /** Sau mỗi lần một người/zombie nhận sát thương `applied` từ `shooter` (thống kê đợt) */
+  /** After a player/zombie takes `applied` damage from `shooter` (wave statistics) */
   onDamage?(room: Room, shooter: Player, target: Player, applied: number): void
-  /** Thêm cột riêng của thể thức vào một dòng bảng điểm */
+  /** Add the mode's own columns to a scoreboard row */
   scoreboardRow?(room: Room, p: Player, row: ScoreboardRow): void
-  /** Lệnh debug riêng của thể thức (M.8); undefined nếu không hỗ trợ */
+  /** Mode-specific debug command (M.8); undefined if unsupported */
   devEndRound?(room: Room, winner: 'A' | 'B' | 'draw'): boolean
   devSetRound?(room: Room, round: number): boolean
-  /** /zombie, /human (plan 16): đổi vai người chơi để thử */
+  /** /zombie, /human (plan 16): switch a player's role for testing */
   devSetRole?(room: Room, p: Player, role: 'zombie' | 'human'): boolean
-  /** /wave n, /clearwave (Thủ Thành) */
+  /** /wave n, /clearwave (Defense) */
   devSetWave?(room: Room, wave: number): boolean
   devClearWave?(room: Room): boolean
 }

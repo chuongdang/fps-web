@@ -1,12 +1,12 @@
-# Chuyển súng `.blend` → `.glb` bằng Blender headless
+# Convert gun `.blend` → `.glb` with headless Blender
 
-Tài liệu này gồm 2 phần: **phần A cho người dùng** (cài Blender, làm một lần), **phần B cho Claude Code** (script tự động).
+This document has 2 parts: **part A for the user** (install Blender, one-time), **part B for Claude Code** (automated script).
 
 ---
 
-## Phần A – Người dùng làm (một lần)
+## Part A – The user does (one-time)
 
-### A1. Cài Blender (bản 4.x trở lên)
+### A1. Install Blender (version 4.x or later)
 
 Windows (PowerShell):
 ```powershell
@@ -18,66 +18,66 @@ macOS:
 brew install --cask blender
 ```
 
-Hoặc tải bản cài từ trang chính thức blender.org.
+Or download the installer from the official blender.org site.
 
-### A2. Cho terminal gọi được lệnh `blender`
+### A2. Make the `blender` command callable from the terminal
 
-Kiểm tra:
+Check:
 ```bash
 blender --version
 ```
 
-Nếu báo "không tìm thấy lệnh":
-- **Windows:** thêm thư mục cài Blender vào PATH. Thường là `C:\Program Files\Blender Foundation\Blender 4.x\` (thay `4.x` bằng bản bạn cài). Mở *Start → "Edit the system environment variables" → Environment Variables → Path → New*, dán đường dẫn, mở lại terminal.
-- **macOS:** chạy lệnh sau một lần:
+If it says "command not found":
+- **Windows:** add the Blender install folder to PATH. Usually `C:\Program Files\Blender Foundation\Blender 4.x\` (replace `4.x` with the version you installed). Open *Start → "Edit the system environment variables" → Environment Variables → Path → New*, paste the path, and reopen the terminal.
+- **macOS:** run this command once:
   ```bash
   sudo ln -s /Applications/Blender.app/Contents/MacOS/Blender /usr/local/bin/blender
   ```
 
-Chạy lại `blender --version`, thấy in ra số phiên bản là xong.
+Run `blender --version` again; you are done when it prints a version number.
 
-### A3. Đặt file vào repo
+### A3. Put the files in the repo
 
 ```
 assets/source/guns/rifle.blend
 assets/source/guns/pistol.blend
 ```
 
-Texture rời (nếu có, file `.png`/`.jpg` đi kèm) để **cùng thư mục** với file `.blend`.
+Loose textures (if any, accompanying `.png`/`.jpg` files) go in the **same folder** as the `.blend` file.
 
-### A4. Giao việc cho Claude Code
+### A4. Hand the work to Claude Code
 
-Prompt mẫu:
-> Đọc CLAUDE.md và plan/tools-blend-to-glb.md. Làm phần B cho file assets/source/guns/rifle.blend, súng loại rifle. Xong thì báo cáo kèm kết quả inspect trước và sau.
+Sample prompt:
+> Read CLAUDE.md and plan/tools-blend-to-glb.md. Do part B for the file assets/source/guns/rifle.blend, gun type rifle. When done, report with the inspect results from before and after.
 
-### A5. Tự kiểm tra kết quả
+### A5. Check the result yourself
 
-Kéo thả file `.glb` vào trang **gltf-viewer.donmccurdy.com** để xem nhanh: có đủ texture không, có đủ bộ phận không. Sau đó xem trong trang viewer của dự án (bước B5) để kiểm tra tỉ lệ và hướng nòng.
+Drag and drop the `.glb` file onto **gltf-viewer.donmccurdy.com** for a quick look: are all the textures there, are all the parts there. Then look in the project's viewer page (step B5) to check scale and barrel direction.
 
 ---
 
-## Phần B – Claude Code làm
+## Part B – Claude Code does
 
-Mục tiêu đầu ra: `client/public/models/<tên>.glb` thoả mãn:
+Target output: `client/public/models/<name>.glb` that satisfies:
 
-| Yêu cầu | Giá trị |
+| Requirement | Value |
 |---|---|
-| Đơn vị | mét. Rifle dài 0,8–1,0m; pistol 0,18–0,25m |
-| Hướng nòng | **−Z** trong Three.js (tương đương **+Y** trong Blender) |
-| Trục lên | +Y trong Three.js (+Z trong Blender) |
-| Gốc toạ độ | tại tay cầm (chỗ tay phải nắm) |
-| Node bắt buộc | `muzzle` (Empty ở đầu nòng) |
-| Node nên có | `mag` (băng đạn, mesh riêng), `eject` (cửa văng vỏ đạn) |
-| Số tam giác | ≤ 20.000 |
-| Texture | nhúng trong glb, ≤ 1024px |
+| Unit | meters. Rifle 0.8–1.0m long; pistol 0.18–0.25m |
+| Barrel direction | **−Z** in Three.js (equivalent to **+Y** in Blender) |
+| Up axis | +Y in Three.js (+Z in Blender) |
+| Origin | at the grip (where the right hand holds) |
+| Required node | `muzzle` (an Empty at the muzzle tip) |
+| Nodes that should exist | `mag` (magazine, separate mesh), `eject` (shell ejection port) |
+| Triangle count | ≤ 20,000 |
+| Textures | embedded in the glb, ≤ 1024px |
 
-### B1. Script dùng chung
+### B1. Shared script
 
-Tạo `tools/blender/gun_tool.py`:
+Create `tools/blender/gun_tool.py`:
 
 ```python
 """
-Dùng:
+Usage:
   blender -b <file.blend> --python tools/blender/gun_tool.py -- inspect
   blender -b <file.blend> --python tools/blender/gun_tool.py -- normalize <params.json> <out.glb>
 """
@@ -137,7 +137,7 @@ def normalize(params_path, out_path):
     p = json.load(open(params_path, encoding="utf-8"))
     scene = bpy.context.scene
 
-    # 1) Gom mọi object gốc (không có parent) vào một Empty "GunRoot"
+    # 1) Gather every root object (no parent) under one Empty "GunRoot"
     root = bpy.data.objects.new("GunRoot", None)
     scene.collection.objects.link(root)
     for o in list(scene.objects):
@@ -146,14 +146,14 @@ def normalize(params_path, out_path):
             o.parent = root
             o.matrix_world = mw
 
-    # 2) Biến đổi: dời điểm tay cầm về gốc, xoay, scale
-    grip = Vector(p.get("grip", [0, 0, 0]))           # toạ độ tay cầm, hệ Blender, TRƯỚC biến đổi
-    rot = p.get("rotate_deg", [0, 0, 0])               # xoay XYZ (độ) để nòng chĩa +Y, trên là +Z
+    # 2) Transform: move the grip point to the origin, rotate, scale
+    grip = Vector(p.get("grip", [0, 0, 0]))           # grip coordinates, Blender space, BEFORE the transform
+    rot = p.get("rotate_deg", [0, 0, 0])               # XYZ rotation (degrees) so the barrel points +Y, up is +Z
     s = p.get("scale", 1.0)
     M = Matrix.Scale(s, 4) @ Euler([radians(a) for a in rot], 'XYZ').to_matrix().to_4x4() @ Matrix.Translation(-grip)
     root.matrix_world = M
 
-    # 3) Thêm Empty muzzle / eject (toạ độ hệ Blender, TRƯỚC biến đổi)
+    # 3) Add Empties muzzle / eject (coordinates in Blender space, BEFORE the transform)
     for name in ("muzzle", "eject"):
         if name in p and bpy.data.objects.get(name) is None:
             e = bpy.data.objects.new(name, None)
@@ -163,25 +163,25 @@ def normalize(params_path, out_path):
             e.matrix_parent_inverse = Matrix.Identity(4)
             e.location = Vector(p[name])
 
-    # 4) Đổi tên object theo map (ví dụ băng đạn)
+    # 4) Rename objects via a map (for example the magazine)
     for old, new in p.get("rename", {}).items():
         o = bpy.data.objects.get(old)
         if o: o.name = new
 
-    # 5) Giảm polygon nếu cần
+    # 5) Reduce polygons if needed
     ratio = p.get("decimate_ratio")
     if ratio and ratio < 1.0:
         for o in mesh_objects():
             m = o.modifiers.new("Decimate", 'DECIMATE')
             m.ratio = ratio
 
-    # 6) Tìm texture bị mất đường dẫn trong thư mục của file .blend
+    # 6) Look for textures with missing paths in the .blend file's folder
     try:
         bpy.ops.file.find_missing_files(directory=os.path.dirname(bpy.data.filepath))
     except Exception as ex:
         print("find_missing_files:", ex)
 
-    # 7) Xuất GLB
+    # 7) Export GLB
     bpy.ops.export_scene.gltf(
         filepath=out_path,
         export_format='GLB',
@@ -199,24 +199,24 @@ else:
     print("unknown mode", mode)
 ```
 
-### B2. Inspect file gốc
+### B2. Inspect the source file
 
 ```bash
 blender -b assets/source/guns/rifle.blend --python tools/blender/gun_tool.py -- inspect
 ```
 
-Đọc JSON giữa `INSPECT_JSON_BEGIN/END`, xác định:
-1. **Trục dài nhất** của `size` = trục của nòng.
-2. **Đầu nòng ở đầu nào** của trục đó: tìm object tên chứa `barrel`, `muzzle`, `silencer`; nếu không có thì đầu nòng thường là phía **xa** object tên chứa `stock`/`butt` (báng súng). Không chắc → **hỏi người dùng**, đừng đoán.
-3. **Tỉ lệ**: chiều dài trục nòng so với yêu cầu (rifle 0,8–1,0m) → tính `scale`.
-4. **Tay cầm**: object tên chứa `grip`/`handle`; lấy tâm của nó. Không có thì ước lượng: rifle ~ 35% chiều dài tính từ báng, ở mép dưới.
-5. **Băng đạn**: object tên chứa `mag`/`clip`/`magazine` → đưa vào `rename` thành `mag`. Nếu băng đạn dính liền thân súng (không có object riêng) → ghi vào báo cáo, **không** tự cắt mesh.
-6. **Texture**: image có `exists: false` → báo người dùng tên file bị thiếu.
-7. `total_tris` > 20.000 → đặt `decimate_ratio = 20000 / total_tris` (làm tròn xuống 0,05).
+Read the JSON between `INSPECT_JSON_BEGIN/END` and determine:
+1. The **longest axis** of `size` = the barrel axis.
+2. **Which end of that axis the muzzle is on**: look for an object whose name contains `barrel`, `muzzle`, `silencer`; if there is none, the muzzle is usually the side **far** from the object whose name contains `stock`/`butt` (the gun stock). Not sure → **ask the user**, do not guess.
+3. **Scale**: the barrel-axis length versus the requirement (rifle 0.8–1.0m) → compute `scale`.
+4. **Grip**: an object whose name contains `grip`/`handle`; take its center. If there is none, estimate: for a rifle ~35% of the length measured from the stock, at the lower edge.
+5. **Magazine**: an object whose name contains `mag`/`clip`/`magazine` → put it into `rename` as `mag`. If the magazine is fused to the gun body (no separate object) → note it in the report, **do not** cut the mesh yourself.
+6. **Textures**: an image with `exists: false` → tell the user the name of the missing file.
+7. `total_tris` > 20,000 → set `decimate_ratio = 20000 / total_tris` (rounded down to 0.05).
 
-### B3. Viết file params
+### B3. Write the params file
 
-`assets/source/guns/rifle.params.json`, ví dụ:
+`assets/source/guns/rifle.params.json`, for example:
 
 ```json
 {
@@ -230,22 +230,22 @@ blender -b assets/source/guns/rifle.blend --python tools/blender/gun_tool.py -- 
 }
 ```
 
-- `grip`, `muzzle`, `eject` tính theo **toạ độ gốc của file** (số đọc từ inspect), script tự biến đổi.
-- `rotate_deg` chọn sao cho **sau khi xoay**: nòng chĩa **+Y**, phía trên súng là **+Z** (hệ Blender).
+- `grip`, `muzzle`, `eject` are in the file's **original coordinates** (numbers read from inspect); the script transforms them itself.
+- Choose `rotate_deg` so that **after rotating**: the barrel points **+Y** and the top of the gun is **+Z** (Blender space).
 
-### B4. Xuất và inspect lại
+### B4. Export and inspect again
 
 ```bash
 blender -b assets/source/guns/rifle.blend --python tools/blender/gun_tool.py -- normalize assets/source/guns/rifle.params.json client/public/models/rifle.glb
 ```
 
-Không lưu đè file `.blend` gốc (chế độ `-b` không tự lưu, đừng thêm lệnh save).
+Do not overwrite the original `.blend` file (`-b` mode does not save by itself; do not add a save command).
 
-Kiểm tra lại bằng cách import file glb vào Blender trống:
+Verify by importing the glb into an empty Blender:
 ```bash
 blender -b --python-expr "import bpy; bpy.ops.wm.read_factory_settings(use_empty=True); bpy.ops.import_scene.gltf(filepath='client/public/models/rifle.glb')" --python tools/blender/gun_tool.py -- inspect
 ```
-Sau khi import, trục của Blender lại về Z-up, nên phải thấy: nòng theo **+Y**, size đúng mét, có object `muzzle`, `total_tris` ≤ 20.000, image đều `packed` hoặc nhúng.
+After import, Blender's axes are back to Z-up, so you should see: the barrel along **+Y**, size correct in meters, an object `muzzle`, `total_tris` ≤ 20,000, and every image `packed` or embedded.
 
 ```
 cd /Users/I762313/projects/personal/fps-web && \
@@ -253,23 +253,23 @@ blender -b assets/source/guns/m16.blend --python tools/blender/gun_tool.py -- no
 blender -b assets/source/guns/ak47.blend --python tools/blender/gun_tool.py -- normalize assets/source/guns/ak47.params.json client/public/models/ak47.glb 2>&1 | grep -E "(rebuilt|EXPORTED|Error)"
 ```
 
-### B5. Trang viewer trong dự án
+### B5. Viewer page in the project
 
-Tạo `client/viewer.html` (route dev `/viewer.html?model=rifle`):
-- Load glb bằng `GLTFLoader`, đặt ở gốc.
-- `GridHelper` ô 0,1m, `AxesHelper` 0,5m.
-- Một khối hộp đỏ 1m dài theo −Z cạnh súng làm thước đo.
-- Quả cầu nhỏ màu vàng tại vị trí node `muzzle` (`getObjectByName('muzzle').getWorldPosition`).
-- OrbitControls để xoay xem.
+Create `client/viewer.html` (dev route `/viewer.html?model=rifle`):
+- Load the glb with `GLTFLoader`, placed at the origin.
+- `GridHelper` with 0.1m cells, `AxesHelper` 0.5m.
+- A 1m-long red box along −Z next to the gun as a ruler.
+- A small yellow sphere at the `muzzle` node position (`getObjectByName('muzzle').getWorldPosition`).
+- OrbitControls for rotating the view.
 
-Nghiệm thu:
-- [x] Nòng chĩa theo trục **−Z** (cùng chiều thước đỏ).
-- [x] Chiều dài đúng loại súng so với thước 1m.
-- [x] Quả cầu vàng nằm đúng đầu nòng.
-- [x] Gốc toạ độ (giao điểm AxesHelper) nằm ở tay cầm.
-- [x] Texture hiện đúng màu, không trắng/không hồng.
+Acceptance:
+- [x] The barrel points along the **−Z** axis (same direction as the red ruler).
+- [x] The length is right for the gun type compared to the 1m ruler.
+- [x] The yellow sphere sits exactly at the muzzle tip.
+- [x] The origin (the AxesHelper intersection) is at the grip.
+- [x] Textures show the right colors, not white/not pink.
 
-### B6. Nén (sau khi B5 đạt)
+### B6. Compression (after B5 passes)
 
 ```bash
 npx @gltf-transform/cli optimize client/public/models/ak47.glb client/public/models/ak47.glb --texture-compress webp --texture-size 1024
@@ -277,14 +277,14 @@ npx @gltf-transform/cli optimize client/public/models/ak47.glb client/public/mod
 npx @gltf-transform/cli optimize client/public/models/m16.glb client/public/models/m16.glb --texture-compress webp --texture-size 1024
 ```
 
-Nếu sau khi nén game báo lỗi decoder: thêm `MeshoptDecoder` (từ `three/examples/jsm/libs/meshopt_decoder.module.js`) vào `GLTFLoader` bằng `loader.setMeshoptDecoder(...)`. Mở lại viewer kiểm tra lần nữa.
+If the game reports a decoder error after compression: add `MeshoptDecoder` (from `three/examples/jsm/libs/meshopt_decoder.module.js`) to `GLTFLoader` with `loader.setMeshoptDecoder(...)`. Open the viewer again to re-check.
 
 ---
 
-## Pitfall
+## Pitfalls
 
-- **Vật liệu phức tạp:** glTF chỉ hiểu node *Principled BSDF* + texture nối thẳng vào. Material dùng nhiều node trộn, procedural texture sẽ bị mất/ra màu trơn. Nếu viewer hiện sai màu mà inspect báo đủ image → báo người dùng, cần "bake" texture trong Blender (việc này làm tay trong giao diện, Claude Code không tự làm).
-- **Lỗi tham số API:** tên tham số của `export_scene.gltf` có thể khác nhau giữa các bản Blender. Nếu báo `unrecognized keyword`, bỏ tham số đó và chạy lại, ghi chú vào báo cáo; không tự viết exporter khác.
-- **Đơn vị file gốc:** nhiều model làm theo centimet nên size ra số hàng chục/hàng trăm. Luôn tính `scale` từ `size` thực tế, đừng giả định.
-- **Object ẩn:** file có thể chứa object ẩn (bản nháp, LOD thấp). Xem danh sách trong inspect; object rõ ràng là phụ (tên chứa `LOD1`, `old`, `backup`) → hỏi người dùng có xoá không.
-- **Không sửa file `.blend` gốc.** Mọi thay đổi chỉ nằm trong lần chạy headless.
+- **Complex materials:** glTF only understands *Principled BSDF* nodes + textures wired in directly. Materials that use many mixing nodes or procedural textures will be lost or come out a flat color. If the viewer shows wrong colors while inspect reports all images present → tell the user, the textures need to be "baked" in Blender (done by hand in the UI; Claude Code does not do it itself).
+- **API parameter errors:** the parameter names of `export_scene.gltf` can differ between Blender versions. If it reports `unrecognized keyword`, drop that parameter and rerun, and note it in the report; do not write a different exporter yourself.
+- **Source file units:** many models are built in centimeters so the size comes out in the tens/hundreds. Always compute `scale` from the actual `size`, do not assume.
+- **Hidden objects:** the file may contain hidden objects (drafts, low LODs). Look at the list in inspect; objects clearly auxiliary (name contains `LOD1`, `old`, `backup`) → ask the user whether to delete them.
+- **Do not modify the original `.blend` file.** All changes exist only within the headless run.

@@ -38,8 +38,8 @@ export function cacheControlOf(urlPath: string): string | null {
 }
 
 /**
- * Đổi đường dẫn URL thành đường dẫn file nằm TRONG `root`; null nếu có dấu hiệu đi ngược thư mục.
- * Từ chối: mã hoá hỏng, ký tự NUL, dấu `\`, đoạn `..`, và kết quả nằm ngoài `root` (kể cả sau khi giải mã %2e%2e).
+ * Turns a URL path into a file path INSIDE `root`; null if it looks like a directory traversal.
+ * Rejects: broken encoding, NUL characters, `\`, `..` segments, and results outside `root` (including after decoding %2e%2e).
  */
 export function resolveSafe(root: string, rawPath: string): string | null {
   let p: string
@@ -57,7 +57,7 @@ function send(res: ServerResponse, code: number, text: string): void {
   res.end(text)
 }
 
-/** Handler HTTP phục vụ file tĩnh từ `root` (thư mục `game/`), có SPA fallback về index.html. */
+/** HTTP handler serving static files from `root` (the `game/` folder), with an SPA fallback to index.html. */
 export function createStaticHandler(root: string): (req: IncomingMessage, res: ServerResponse) => void {
   const base = resolve(root)
 
@@ -70,7 +70,7 @@ export function createStaticHandler(root: string): (req: IncomingMessage, res: S
     let st = await stat(file).catch(() => null)
     if (st?.isDirectory()) { file = join(file, 'index.html'); cachePath = '/index.html'; st = await stat(file).catch(() => null) }
     if (!st) {
-      // Không có file và không có đuôi → route của SPA; có đuôi → thật sự 404
+      // No file and no extension -> SPA route; with an extension -> a real 404
       if (extname(urlPath)) return send(res, 404, 'Not Found')
       file = join(base, 'index.html'); cachePath = '/index.html'
       st = await stat(file).catch(() => null)

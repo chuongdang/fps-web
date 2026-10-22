@@ -1,29 +1,29 @@
-# Phase 3 – Multiplayer di chuyển ⚠️
+# Phase 3 – Multiplayer movement ⚠️
 
-Mục tiêu: nhiều người cùng phòng, thấy nhau chạy nhảy mượt, của mình thì phản hồi tức thì. **Chưa bắn nhau** (để phase 4).
+Goal: several players in the same room, seeing each other run and jump smoothly, with your own character responding instantly. **No shooting each other yet** (that is phase 4).
 
-Phase này làm **từng task một, test kỹ rồi mới qua task sau**. Thứ tự task được sắp để mỗi bước đều kiểm chứng được.
+Do this phase **one task at a time, testing thoroughly before moving to the next task**. The tasks are ordered so that every step can be verified.
 
-## Bức tranh tổng
+## Big picture
 
 ```
-Client (mỗi tick 60Hz)                  Server (mỗi tick 60Hz)
-  đọc phím + chuột → InputCmd{seq}  ──►   xếp vào hàng đợi của người đó
-  tự chạy stepMovement ngay (predict)      lấy input ra, chạy stepMovement
-  lưu cmd vào pendingInputs                ghi lastProcessedSeq
-                                          mỗi 3 tick: gửi Snapshot cho từng client
-  nhận Snapshot ◄──────────────────────
-   - bản thân: reconcile (đặt lại state server, chạy lại các input chưa xử lý)
-   - người khác: bỏ vào buffer, vẽ trễ 100ms bằng nội suy
+Client (every 60Hz tick)                Server (every 60Hz tick)
+  read keys + mouse → InputCmd{seq}  ──►   queue it in that player's queue
+  run stepMovement immediately (predict)    take inputs out, run stepMovement
+  store the cmd in pendingInputs            record lastProcessedSeq
+                                          every 3 ticks: send a Snapshot to each client
+  receive Snapshot ◄──────────────────────
+   - self: reconcile (reset to the server state, replay the unprocessed inputs)
+   - others: put into a buffer, draw 100ms late using interpolation
 ```
 
-## Message (`shared/src/protocol.ts`)
+## Messages (`shared/src/protocol.ts`)
 
 ```ts
 // Client → Server
 type C2S =
   | { t: 1; name: string; room: string }            // Join
-  | { t: 2; cmds: InputCmd[] }                      // Inputs (thường 1 cmd/gói)
+  | { t: 2; cmds: InputCmd[] }                      // Inputs (usually 1 cmd/packet)
   | { t: 3; clientTime: number };                   // Ping
 
 // Server → Client
@@ -38,21 +38,21 @@ interface NetPlayer {
   id: number;
   pos: Vec3; vel: Vec3;
   yaw: number; pitch: number;
-  flags: number;          // bit: grounded, crouching, sliding
+  flags: number;          // bits: grounded, crouching, sliding
   slideTimer: number; slideCooldown: number;
 }
 ```
 
-- `ack` = `lastProcessedSeq` của **chính client nhận** gói này, nên mỗi client nhận snapshot riêng.
-- Snapshot phải chứa **đủ mọi trường của PlayerState** để client đặt lại state của mình chính xác (thiếu `slideTimer` là reconcile lệch ngay khi trượt).
-- `serverTime` = ms kể từ lúc server khởi động (`performance.now()` của server).
+- `ack` = the `lastProcessedSeq` of **the client receiving this packet**, so each client receives its own snapshot.
+- The snapshot must contain **every field of PlayerState** so the client can reset its own state exactly (missing `slideTimer` makes reconcile drift as soon as you slide).
+- `serverTime` = ms since the server started (the server's `performance.now()`).
 
 ---
 
 ## Task 3.1 – Transport + netsim
 
-Làm:
-- Interface chung (client và server mỗi bên một bản cài đặt):
+Do:
+- A shared interface (client and server each have their own implementation):
   ```ts
   interface Transport {
     send(msg): void;
@@ -60,119 +60,119 @@ Làm:
     onClose(cb: () => void): void;
   }
   ```
-- Cài đặt bằng WebSocket, `binaryType = 'arraybuffer'`, encode/decode msgpack.
-- **Netsim** (bọc ngoài Transport, chỉ bật ở dev): độ trễ mỗi chiều `latencyMs`, dao động `jitterMs`. Gói được giữ lại bằng `setTimeout` rồi mới giao, **nhưng phải giữ đúng thứ tự** (WebSocket là TCP, không bao giờ đảo thứ tự): thời điểm giao của gói sau ≥ gói trước.
-- Điều khiển netsim bằng query string: `?lat=80&jit=10`.
+- Implement with WebSocket, `binaryType = 'arraybuffer'`, msgpack encode/decode.
+- **Netsim** (wraps the Transport, enabled only in dev): per-direction latency `latencyMs`, fluctuation `jitterMs`. Packets are held with `setTimeout` before being delivered, **but order must be preserved** (WebSocket is TCP and never reorders): a later packet's delivery time ≥ the earlier packet's.
+- Control netsim with a query string: `?lat=80&jit=10`.
 
-Nghiệm thu:
-- [ ] Client gửi Ping, server trả Pong, overlay hiện RTT. Với `?lat=80` RTT ~160ms.
-- [ ] Bật jitter 30ms: thứ tự gói vẫn đúng (log seq, không bao giờ giảm).
+Acceptance:
+- [ ] The client sends Ping, the server replies Pong, and the overlay shows RTT. With `?lat=80` RTT is ~160ms.
+- [ ] With 30ms jitter on: packet order is still correct (log seq, it never decreases).
 
 ---
 
 ## Task 3.2 – Room + join/leave
 
-Làm:
-- Server: `Map<roomId, Room>`. Join vào phòng chưa có thì tạo mới. Phòng trống quá 60 giây thì xoá.
-- Mỗi người chơi trong room: `{ id, name, transport, state: PlayerState, inputQueue: InputCmd[], lastProcessedSeq, lastCmd }`.
-- Join: gán id tăng dần, đặt ở một spawn ngẫu nhiên (đội tính ở phase 5, tạm thời dùng spawn đội A/B xen kẽ), gửi Welcome, báo PlayerJoined cho người khác.
-- Client: màn hình nhập tên + mã phòng, rồi vào game.
+Do:
+- Server: `Map<roomId, Room>`. Joining a room that does not exist creates it. A room that stays empty for over 60 seconds is deleted.
+- Each player in a room: `{ id, name, transport, state: PlayerState, inputQueue: InputCmd[], lastProcessedSeq, lastCmd }`.
+- Join: assign an incrementing id, place at a random spawn (teams are handled in phase 5; for now alternate between team A/B spawns), send Welcome, notify others with PlayerJoined.
+- Client: a screen to enter a name + room code, then enter the game.
 
-Nghiệm thu:
-- [ ] 2 tab cùng phòng: tab này thấy log "người kia vào". Đóng một tab: tab kia thấy "đã rời".
-- [ ] 2 phòng khác mã không thấy nhau.
-
----
-
-## Task 3.3 – Đồng bộ đồng hồ
-
-Làm (`client/src/net/clock.ts`):
-- Mỗi 1 giây gửi Ping `{clientTime: performance.now()}`.
-- Nhận Pong: `rtt = now − clientTime`; `offset = serverTime + rtt/2 − now`.
-- Giữ 8 mẫu gần nhất, dùng **mẫu có RTT nhỏ nhất** làm offset (ít bị nhiễu nhất).
-- `serverNow() = performance.now() + offset`. Không cho `serverNow()` chạy lùi: nếu offset mới làm thời gian lùi, điều chỉnh dần (tối đa 1ms mỗi frame).
-
-Nghiệm thu:
-- [ ] Overlay hiện `serverNow()` của client và `serverTime` trong snapshot mới nhất: chênh nhau ≈ RTT/2.
-- [ ] Bật/tắt jitter: `serverNow()` không nhảy giật.
+Acceptance:
+- [ ] 2 tabs in the same room: this tab logs "the other player joined". Close one tab: the other sees "left".
+- [ ] 2 rooms with different codes cannot see each other.
 
 ---
 
-## Task 3.4 – Server sim + snapshot + "client câm"
+## Task 3.3 – Clock synchronization
 
-Mục đích: kiểm tra server chạy đúng **trước** khi có prediction. Client lúc này chỉ gửi input và vẽ đúng những gì server nói (sẽ bị trễ, đó là bình thường).
+Do (`client/src/net/clock.ts`):
+- Every 1 second send a Ping `{clientTime: performance.now()}`.
+- On Pong: `rtt = now − clientTime`; `offset = serverTime + rtt/2 − now`.
+- Keep the 8 most recent samples and use the **sample with the smallest RTT** for the offset (the least noisy).
+- `serverNow() = performance.now() + offset`. Do not let `serverNow()` run backwards: if a new offset would make time go back, adjust gradually (at most 1ms per frame).
 
-Server (`simulation.ts`), mỗi tick:
-1. Với mỗi người chơi: lấy tối đa `MAX_INPUTS_PER_TICK` cmd từ hàng đợi (theo thứ tự seq), mỗi cmd chạy `stepMovement` một lần, cập nhật `lastProcessedSeq`, `lastCmd`.
-2. Nếu hàng đợi trống: chạy `stepMovement` với `lastCmd` nhưng bỏ các bit Jump/Fire/Reload, **không** tăng `lastProcessedSeq`.
-3. Hàng đợi dài hơn `MAX_INPUT_QUEUE`: bỏ bớt cmd cũ nhất.
-4. Bỏ qua cmd có `seq ≤ lastProcessedSeq` (trùng/cũ).
-5. Kiểm tra cmd hợp lệ: pitch trong ±1.56, yaw hữu hạn, buttons chỉ chứa bit đã định nghĩa. Sai → bỏ cmd.
-6. Mỗi `SNAPSHOT_EVERY_TICKS` tick: gửi Snapshot cho từng client (với `ack` riêng).
-
-Server loop: dùng `setInterval` 1ms hoặc vòng `setTimeout` tự hiệu chỉnh, tính số tick cần chạy theo thời gian thực đã trôi (accumulator), **không** tin `setInterval(…, 16)` chạy đúng nhịp.
-
-Client: gửi InputCmd mỗi tick (task 1.2), vẽ mọi người (kể cả mình) ở vị trí snapshot mới nhất. Người khác vẽ bằng capsule màu.
-
-Nghiệm thu:
-- [ ] 2 tab: chạy ở tab A, tab B thấy A di chuyển (giật cục 20 lần/giây là đúng ở bước này).
-- [ ] Ở tab A, nhân vật của mình chạy được, trễ theo ping (`?lat=100` thấy trễ rõ).
-- [ ] Server log số tick/giây = 60 ± 1 trong 1 phút.
-- [ ] Gửi cmd trùng seq (sửa tạm client để gửi 2 lần): server không chạy 2 lần.
+Acceptance:
+- [ ] The overlay shows the client's `serverNow()` and the `serverTime` in the latest snapshot: they differ by ≈ RTT/2.
+- [ ] Toggling jitter on/off: `serverNow()` does not jump.
 
 ---
 
-## Task 3.5 – Interpolation người khác
+## Task 3.4 – Server sim + snapshot + "dumb client"
 
-Làm (`client/src/net/interpolation.ts`):
-- Mỗi người khác có buffer `{serverTime, state}[]`, giữ ~1 giây.
-- Mỗi frame: `renderTime = serverNow() − INTERP_DELAY_MS`.
-- Tìm 2 snapshot `a`, `b` với `a.serverTime ≤ renderTime < b.serverTime`. `t = (renderTime − a.serverTime) / (b.serverTime − a.serverTime)`.
-- Vị trí: `lerp`. yaw: `lerpAngle`. pitch: `lerp`. Cờ (ngồi, trượt): lấy của `a`.
-- Không có `b` (snapshot đến muộn): giữ nguyên ở snapshot cuối, tối đa 250ms, sau đó đứng yên (**không** ngoại suy xa).
-- Ghi `renderTime` mỗi frame vào biến toàn cục `currentRenderTime` (phase 4 dùng khi bắn).
+Purpose: check that the server runs correctly **before** adding prediction. At this point the client only sends input and draws exactly what the server says (it will lag, which is normal).
 
-Nghiệm thu:
-- [ ] Tab B thấy A di chuyển mượt, không giật.
-- [ ] Với `?jit=30`: vẫn mượt.
-- [ ] A quay 180° qua mốc ±π: B thấy A quay ngắn nhất, không xoay vòng cả vòng tròn.
+Server (`simulation.ts`), each tick:
+1. For each player: take up to `MAX_INPUTS_PER_TICK` cmds from the queue (in seq order), run `stepMovement` once per cmd, and update `lastProcessedSeq`, `lastCmd`.
+2. If the queue is empty: run `stepMovement` with `lastCmd` but with the Jump/Fire/Reload bits stripped, **without** increasing `lastProcessedSeq`.
+3. If the queue is longer than `MAX_INPUT_QUEUE`: drop the oldest cmds.
+4. Ignore cmds with `seq ≤ lastProcessedSeq` (duplicate/stale).
+5. Validate the cmd: pitch within ±1.56, yaw finite, buttons contain only defined bits. Invalid → drop the cmd.
+6. Every `SNAPSHOT_EVERY_TICKS` ticks: send a Snapshot to each client (with its own `ack`).
+
+Server loop: use a 1ms `setInterval` or a self-correcting `setTimeout` loop, and compute the number of ticks to run from the real time elapsed (accumulator); **do not** trust `setInterval(…, 16)` to run on beat.
+
+Client: send an InputCmd every tick (task 1.2), draw everyone (including yourself) at the latest snapshot position. Others are drawn as colored capsules.
+
+Acceptance:
+- [ ] 2 tabs: run in tab A, tab B sees A moving (choppy at 20 times/second is correct at this step).
+- [ ] In tab A, your own character can run, delayed by ping (with `?lat=100` the delay is clearly visible).
+- [ ] The server logs ticks/second = 60 ± 1 over 1 minute.
+- [ ] Sending a cmd with a duplicate seq (temporarily change the client to send it twice): the server does not run it twice.
+
+---
+
+## Task 3.5 – Interpolating other players
+
+Do (`client/src/net/interpolation.ts`):
+- Each other player has a buffer `{serverTime, state}[]`, keeping ~1 second.
+- Each frame: `renderTime = serverNow() − INTERP_DELAY_MS`.
+- Find 2 snapshots `a`, `b` with `a.serverTime ≤ renderTime < b.serverTime`. `t = (renderTime − a.serverTime) / (b.serverTime − a.serverTime)`.
+- Position: `lerp`. yaw: `lerpAngle`. pitch: `lerp`. Flags (crouch, slide): take from `a`.
+- No `b` (a snapshot arrived late): hold at the last snapshot for at most 250ms, then stand still (**do not** extrapolate far).
+- Write `renderTime` each frame to the global variable `currentRenderTime` (phase 4 uses it when shooting).
+
+Acceptance:
+- [ ] Tab B sees A move smoothly, with no stutter.
+- [ ] With `?jit=30`: still smooth.
+- [ ] A turns 180° across the ±π boundary: B sees A turn the short way, not spin a full circle.
 
 ---
 
 ## Task 3.6 – Prediction + reconciliation ⚠️
 
-Tham khảo cách làm trong repo MOBA (`MOBA_REPO` trong `00-overview.md`), cùng ý tưởng input replay.
+See the approach in the MOBA repo (`MOBA_REPO` in `00-overview.md`), which uses the same input replay idea.
 
-Làm (`client/src/net/prediction.ts`):
-- Mỗi tick: tạo cmd, chạy `stepMovement` ngay trên state dự đoán, đẩy `{cmd, stateAfter}` vào `pending`, gửi cmd.
-- Nhận Snapshot:
-  1. Xoá khỏi `pending` mọi cmd có `seq ≤ ack`.
-  2. `serverState` = state của mình trong snapshot.
-  3. So `serverState` với `stateAfter` đã lưu cho cmd `seq = ack` (nếu còn): ghi sai số vào overlay.
-  4. **Luôn** đặt `predicted = serverState` rồi chạy lại `stepMovement` cho tất cả cmd còn trong `pending` (theo thứ tự), cập nhật lại `stateAfter` của từng cmd.
-- Làm mượt hiển thị: nếu vị trí sau reconcile lệch so với vị trí đang vẽ < 1m, giữ một `visualOffset` = (vị trí cũ − vị trí mới) và giảm dần `visualOffset *= 0.85` mỗi frame. Lệch ≥ 1m thì nhảy thẳng (teleport).
-- Collider của mình trong world client phải được đặt lại vị trí `serverState` trước khi replay (Rapier giữ vị trí collider riêng).
+Do (`client/src/net/prediction.ts`):
+- Each tick: build a cmd, run `stepMovement` immediately on the predicted state, push `{cmd, stateAfter}` into `pending`, and send the cmd.
+- On receiving a Snapshot:
+  1. Remove from `pending` every cmd with `seq ≤ ack`.
+  2. `serverState` = your own state in the snapshot.
+  3. Compare `serverState` with the saved `stateAfter` for the cmd with `seq = ack` (if it is still there): write the error to the overlay.
+  4. **Always** set `predicted = serverState`, then re-run `stepMovement` for all cmds still in `pending` (in order), updating each cmd's `stateAfter`.
+- Display smoothing: if the position after reconcile differs from the position being drawn by < 1m, keep a `visualOffset` = (old position − new position) and decay it with `visualOffset *= 0.85` each frame. If the difference is ≥ 1m, jump straight (teleport).
+- Your own collider in the client world must be reset to the `serverState` position before replaying (Rapier keeps its own collider position).
 
-Nghiệm thu:
-- [ ] `?lat=100`: bấm W nhân vật đi **ngay lập tức**, không trễ.
-- [ ] Chạy, nhảy, trượt, lên ramp liên tục 1 phút với `?lat=100&jit=20`: sai số reconcile trên overlay hầu hết = 0, thỉnh thoảng rất nhỏ; không giật thấy bằng mắt.
-- [ ] Sửa tạm server để đẩy người chơi lệch 2m: client nhảy về vị trí đúng (teleport), không kẹt.
+Acceptance:
+- [ ] `?lat=100`: pressing W moves the character **immediately**, with no delay.
+- [ ] Running, jumping, sliding, and going up ramps continuously for 1 minute with `?lat=100&jit=20`: the reconcile error on the overlay is mostly 0, occasionally very small; no visible stutter.
+- [ ] Temporarily change the server to push the player 2m off: the client jumps back to the correct position (teleport), without getting stuck.
 
-Pitfall (đọc trước khi code):
-- Sai số reconcile luôn khác 0 dù chỉ đi thẳng → `stepMovement` client và server **không giống nhau**: kiểm tra cùng `MovementConfig`, cùng map, cùng version Rapier, snapshot thiếu trường nào của PlayerState.
-- Sai số chỉ xuất hiện khi trượt → snapshot thiếu `slideTimer`/`slideCooldown`.
-- Sai số khi lên/xuống ramp → collider của mình không được đặt lại trước replay, hoặc trạng thái `grounded` không được đồng bộ.
-- Đừng "sửa" bằng cách bỏ qua reconcile khi sai số nhỏ; gốc phải là sai số = 0.
+Pitfalls (read before coding):
+- The reconcile error is always non-zero even when just walking straight → client and server `stepMovement` are **not identical**: check the same `MovementConfig`, the same map, the same Rapier version, and which PlayerState fields the snapshot is missing.
+- The error only appears when sliding → the snapshot is missing `slideTimer`/`slideCooldown`.
+- The error when going up/down ramps → your own collider is not reset before the replay, or the `grounded` state is not synced.
+- Do not "fix" it by skipping reconcile when the error is small; the root goal is error = 0.
 
 ---
 
-## Task 3.7 – Ghost + kiểm thử ping cao
+## Task 3.7 – Ghost + high-ping testing
 
-Làm:
-- Phím F5: vẽ "bóng ma" wireframe ở vị trí server thật của mình (từ snapshot mới nhất) và của người khác (snapshot mới nhất, không nội suy).
-- Overlay F3 thêm: RTT, offset đồng hồ, số cmd trong `pending`, sai số reconcile lớn nhất 5 giây gần nhất, số snapshot nhận/giây.
+Do:
+- F5 key: draw a wireframe "ghost" at the true server position of yourself (from the latest snapshot) and of others (latest snapshot, not interpolated).
+- Add to the F3 overlay: RTT, clock offset, number of cmds in `pending`, the largest reconcile error in the last 5 seconds, snapshots received per second.
 
-Nghiệm thu (bài kiểm tra cuối phase):
-- [ ] 3 tab cùng phòng, mỗi tab một mức `?lat=` khác nhau (20, 80, 150). Tất cả chạy nhảy, ai cũng thấy người khác mượt.
-- [ ] Nhân vật của mình luôn phản hồi tức thì ở mọi mức ping.
-- [ ] Bóng ma của mình đi theo sau nhân vật đúng khoảng trễ ping, không lệch đường.
+Acceptance (end-of-phase test):
+- [ ] 3 tabs in the same room, each with a different `?lat=` (20, 80, 150). Everyone runs and jumps, and everyone sees the others smoothly.
+- [ ] Your own character always responds instantly at every ping level.
+- [ ] Your own ghost trails behind the character by exactly the ping delay, without drifting off the path.

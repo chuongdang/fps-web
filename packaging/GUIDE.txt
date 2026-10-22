@@ -1,0 +1,26 @@
+FPS WEB {version} – SELF-HOSTED SERVER GUIDE
+
+1) Extract the zip file into a folder (for example the Desktop). Do not run it directly from inside the zip.
+
+2) WINDOWS
+   - Double-click FPSWeb.exe.
+   - If a "Windows protected your PC" screen appears: click "More info" → "Run anyway".
+   - If the Firewall asks for permission: tick "Private networks" → click "Allow access".
+     (If you do not allow it, friends on your network will not be able to join.)
+
+3) MAC
+   - Double-click the FPSWeb file.
+   - If it says it cannot be opened because the developer cannot be verified:
+     open System Settings → Privacy & Security → scroll down, click "Open Anyway" next to the FPSWeb line,
+     then double-click FPSWeb again and choose "Open".
+   - If your Mac asks to allow incoming network connections: choose "Allow".
+
+4) A black window (Terminal/Console) appears and the browser opens the game automatically.
+   - Friends on the same wifi/LAN: open a browser and type the "Friends on the same network" address shown in the black window.
+   - Use a recent version of Chrome, Edge or Firefox.
+
+5) To stop the server: close the black window.
+
+6) To change the port: open config.json with Notepad/TextEdit, edit "port", save, and run again.
+
+Having trouble? Take a screenshot of the black window and send it to the person who sent you the game.

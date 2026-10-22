@@ -9,8 +9,8 @@ const _dir = new THREE.Vector3()
 const _perp = new THREE.Vector3()
 
 /**
- * IK giải tích 2 khớp. Ghi khuỷu vào `elbow` và bàn tay vào `hand` (không cấp phát).
- * Ngoài tầm với: duỗi thẳng về phía target. Khuỷu luôn nằm phía `pole`.
+ * Analytic two-joint IK. Writes the elbow into `elbow` and the hand into `hand` (no allocation).
+ * Out of reach: extends straight toward the target. The elbow always lies on the `pole` side.
  */
 export function solveTwoBone(
   a: number, b: number,
@@ -26,7 +26,7 @@ export function solveTwoBone(
   const h = Math.sqrt(Math.max(a * a - x * x, 0))
   _perp.subVectors(pole, shoulder)
   _perp.addScaledVector(_dir, -_perp.dot(_dir))
-  if (_perp.lengthSq() < 1e-10) {   // pole nằm trên đường vai–tay: chọn trục bất kỳ vuông góc
+  if (_perp.lengthSq() < 1e-10) {   // pole on the shoulder-hand line: pick any perpendicular axis
     _perp.set(0, 1, 0)
     if (Math.abs(_dir.y) > 0.99) _perp.set(1, 0, 0)
     _perp.addScaledVector(_dir, -_perp.dot(_dir))
@@ -43,22 +43,22 @@ const _up = new THREE.Vector3()
 const _elbow = new THREE.Vector3()
 const _hand = new THREE.Vector3()
 
-// Đặt mesh (hộp dài theo +Z local) tại `from`, trục Z hướng tới `to`, up = `up`
+// Place a mesh (box long along local +Z) at `from`, with its Z axis pointing to `to`, up = `up`
 function aim(mesh: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3, up: THREE.Vector3): void {
   mesh.position.copy(from)
   _o.copy(from)
-  _m.lookAt(to, _o, up)   // lookAt(eye, target): trục Z = eye − target = to − from
+  _m.lookAt(to, _o, up)   // lookAt(eye, target): Z axis = eye − target = to − from
   mesh.quaternion.setFromRotationMatrix(_m)
 }
 
-// Hộp đơn vị dài theo +Z (0..1), dùng chung; kích thước đặt bằng scale nên chỉnh F9 thấy ngay
+// Shared unit box long along +Z (0..1); size is set by scale, so F9 tweaks show immediately
 let unitBox: THREE.BoxGeometry | null = null
 function getUnitBox(): THREE.BoxGeometry {
   if (!unitBox) { unitBox = new THREE.BoxGeometry(1, 1, 1); unitBox.translate(0, 0, 0.5) }
   return unitBox
 }
 
-/** Tay khối hộp: bắp tay + cẳng tay + bàn tay. `style` là hàm để đọc số mới nhất mỗi lần giải. */
+/** Blocky arm: upper arm + forearm + hand. `style` is a function so the latest values are read on every solve. */
 export class BlockArm {
   readonly root = new THREE.Group()
   readonly meshes: THREE.Mesh[]
@@ -70,7 +70,7 @@ export class BlockArm {
   private foreMat: THREE.MeshLambertMaterial
   private sleeveToElbow: boolean
 
-  constructor(private style: () => ArmStyle, private sleeveColor: number, private skinColor: number) {   // màu đổi sau này: setColors
+  constructor(private style: () => ArmStyle, private sleeveColor: number, private skinColor: number) {   // colours can change later: setColors
     const mk = (color: number) => {
       const m = new THREE.Mesh(getUnitBox(), new THREE.MeshLambertMaterial({ color, transparent: true }))
       m.castShadow = false
@@ -86,7 +86,7 @@ export class BlockArm {
     this.sleeveToElbow = true
   }
 
-  /** shoulder/target/pole trong hệ của parent của root. */
+  /** shoulder/target/pole in the space of the root's parent. */
   solve(shoulder: THREE.Vector3, target: THREE.Vector3, pole: THREE.Vector3): { reached: boolean } {
     const s = this.style()
     const reached = solveTwoBone(s.upperLen, s.foreLen, shoulder, target, pole, _elbow, _hand)
@@ -94,12 +94,12 @@ export class BlockArm {
       this.sleeveToElbow = !!s.sleeveToElbow
       this.foreMat.color.setHex(this.sleeveToElbow ? this.sleeveColor : this.skinColor)
     }
-    _up.subVectors(pole, shoulder)   // up = hướng pole: tay không xoắn quanh trục của nó
+    _up.subVectors(pole, shoulder)   // up = pole direction: the arm does not twist around its own axis
     aim(this.upper, shoulder, _elbow, _up)
     aim(this.fore, _elbow, _hand, _up)
     this.upper.scale.set(s.thickness, s.thickness, s.upperLen)
     this.fore.scale.set(s.thickness * 0.92, s.thickness * 0.92, s.foreLen)
-    // bàn tay: khối lập phương tâm tại điểm cầm (hộp đơn vị bắt đầu ở 0 nên lùi nửa cạnh dọc trục Z)
+    // hand: a cube centred on the grip point (the unit box starts at 0, so shift back half a side along Z)
     this.handMesh.quaternion.copy(this.fore.quaternion)
     this.handMesh.scale.setScalar(s.handSize)
     this.handMesh.position.copy(_hand)
@@ -123,13 +123,13 @@ export class BlockArm {
   }
 
   get reached(): boolean { return this.reachedLast }
-  /** Khuỷu và bàn tay của lần giải gần nhất (cho debug) */
+  /** Elbow and hand from the most recent solve (for debugging) */
   readonly elbowPos = new THREE.Vector3()
   readonly handPos = new THREE.Vector3()
 
   setVisible(v: boolean): void { this.root.visible = v }
 
   dispose(): void {
-    for (const m of this.mats) m.dispose()   // hình hộp dùng chung nên không dispose
+    for (const m of this.mats) m.dispose()   // the box geometry is shared, so do not dispose it
   }
 }

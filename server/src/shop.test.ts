@@ -18,7 +18,7 @@ const flat: CollisionWorld = {
 }
 
 function setup() {
-  const rm = new RoomManager(map, () => 0, { ...MATCH, minPlayersToStart: 99 })   // không tự chạy trận: test chỉnh phase tay
+  const rm = new RoomManager(map, () => 0, { ...MATCH, minPlayersToStart: 99 })   // does not start matches on its own: tests set the phase by hand
   const mk = (name: string, team: TeamId) => {
     const msgs: AnyMsg[] = []
     const t: Transport = { send: m => { msgs.push(m) }, onMessage: () => {}, onClose: () => {} }
@@ -35,8 +35,8 @@ function setup() {
 const at = (p: Player, x: number, y: number, z: number) => { p.state.pos = [x, y, z] }
 const last = (msgs: AnyMsg[], t: number) => [...msgs].reverse().find(m => m.t === t)
 
-describe('mua súng (H.3)', () => {
-  it('trong căn cứ: mua SMG → trừ tiền, cầm luôn, đạn đầy; BuyResult + MoneyEvent', () => {
+describe('buying guns (H.3)', () => {
+  it('inside the base: buy SMG -> money deducted, equipped immediately, full ammo; BuyResult + MoneyEvent', () => {
     const { room, a } = setup()
     at(a.p, -25, 0, 0)
     handleBuy(room, a.p, 'smg')
@@ -50,7 +50,7 @@ describe('mua súng (H.3)', () => {
     expect(a.msgs.filter(m => m.t === MsgType.MoneyEvent)).toContainEqual({ t: MsgType.MoneyEvent, delta: -1250, reason: 'buy' })
   })
 
-  it('mua tiếp Shotgun cùng dòng: bán SMG 80%, còn $650, MoneyEvent sell +1000', () => {
+  it('then buy a Shotgun of the same class: SMG sold at 80%, $650 left, MoneyEvent sell +1000', () => {
     const { room, a } = setup()
     at(a.p, -25, 0, 0)
     handleBuy(room, a.p, 'smg'); handleBuy(room, a.p, 'shotgun')
@@ -59,14 +59,14 @@ describe('mua súng (H.3)', () => {
     expect(a.msgs.filter(m => m.t === MsgType.MoneyEvent)).toContainEqual({ t: MsgType.MoneyEvent, delta: 1000, reason: 'sell' })
   })
 
-  it('mua lựu đạn (G.1): $300/quả, tối đa 2, không tự cầm, lần 3 bị từ chối max_carry', () => {
+  it('buying grenades (G.1): $300 each, max 2, not auto-equipped, the 3rd is rejected with max_carry', () => {
     const { room, a } = setup()
     at(a.p, -25, 0, 0)
     const cur = a.p.weapon.current, slot = a.p.weapon.slot
     handleBuy(room, a.p, 'm67'); room.serverNow += 300
-    expect(a.p.money).toBe(1700); expect(a.p.loadout.slots[4]).toEqual({ key: 'm67', paid: 300, count: 1 })
+    expect(a.p.money).toBe(1700); expect(a.p.loadout.slots[4]).toEqual({ key: 'm67', paid: 300, count: 1, counts: { m67: 1 } })
     expect(a.p.weapon.slots[4]).toBe(weaponByKey('m67')!.id)
-    expect(a.p.weapon.current).toBe(cur); expect(a.p.weapon.slot).toBe(slot)   // vẫn cầm súng cũ
+    expect(a.p.weapon.current).toBe(cur); expect(a.p.weapon.slot).toBe(slot)   // still holding the old gun
     handleBuy(room, a.p, 'm67'); room.serverNow += 300
     expect(a.p.money).toBe(1400); expect(a.p.loadout.slots[4]!.count).toBe(2)
     handleBuy(room, a.p, 'm67')
@@ -74,12 +74,12 @@ describe('mua súng (H.3)', () => {
     expect(a.p.money).toBe(1400)
   })
 
-  it('từ chối: ngoài khu (giữa map / trên gờ tường / đỉnh tháp), chết, hết trận, thiếu tiền, đã có', () => {
+  it('rejected: outside the zone (mid-map / on a wall ledge / tower top), dead, match over, not enough money, already owned', () => {
     const { room, a } = setup()
-    const reason = () => { room.serverNow += 300; return (last(a.msgs, MsgType.BuyResult) as { ok: boolean; reason?: string }).reason }   // cách nhau > 1/5s để không dính giới hạn spam
+    const reason = () => { room.serverNow += 300; return (last(a.msgs, MsgType.BuyResult) as { ok: boolean; reason?: string }).reason }   // spaced > 1/5s apart to avoid the spam limit
     at(a.p, 0, 0, 0); handleBuy(room, a.p, 'smg'); expect(reason()).toBe('out_of_zone')
-    at(a.p, -25, 4.1, 0); handleBuy(room, a.p, 'smg'); expect(reason()).toBe('out_of_zone')      // trên gờ tường/ramp cao
-    at(a.p, -17, 0, 0); handleBuy(room, a.p, 'smg'); expect(reason()).toBe('out_of_zone')        // ngoài tường thành
+    at(a.p, -25, 4.1, 0); handleBuy(room, a.p, 'smg'); expect(reason()).toBe('out_of_zone')      // on a wall ledge / high ramp
+    at(a.p, -17, 0, 0); handleBuy(room, a.p, 'smg'); expect(reason()).toBe('out_of_zone')        // outside the castle wall
     at(a.p, -25, 0, 0)
     handleBuy(room, a.p, 'sniper'); expect(reason()).toBe('not_enough_money')
     handleBuy(room, a.p, 'm16'); expect(reason()).toBe('already_owned')
@@ -90,7 +90,7 @@ describe('mua súng (H.3)', () => {
     expect(a.p.money).toBe(ECONOMY.startMoney)
   })
 
-  it('tối đa 5 lệnh Buy mỗi giây', () => {
+  it('at most 5 Buy commands per second', () => {
     const { room, a } = setup()
     at(a.p, -25, 0, 0)
     room.serverNow = 5000
@@ -101,7 +101,7 @@ describe('mua súng (H.3)', () => {
     expect((last(a.msgs, MsgType.BuyResult) as { ok: boolean }).ok).toBe(true)
   })
 
-  it('đội B mua ở căn cứ x dương; đổi bên thì ngược lại', () => {
+  it('team B buys in the positive-x base; swapping sides reverses it', () => {
     const { room, a, b } = setup()
     at(b.p, 25, 0, 0); handleBuy(room, b.p, 'smg')
     expect((last(b.msgs, MsgType.BuyResult) as { ok: boolean }).ok).toBe(true)
@@ -114,7 +114,7 @@ describe('mua súng (H.3)', () => {
     expect((last(a.msgs, MsgType.BuyResult) as { reason?: string }).reason).toBe('out_of_zone')
   })
 
-  it('snapshot gửi riêng money + loadout + súng; NetPlayer có killStreak', () => {
+  it('snapshot sends money + loadout + guns privately; NetPlayer has killStreak', () => {
     const { room, a } = setup()
     at(a.p, -25, 0, 0); handleBuy(room, a.p, 'smg'); a.p.killStreak = 4
     sendSnapshots(room, 0, 0)
@@ -126,13 +126,13 @@ describe('mua súng (H.3)', () => {
   })
 })
 
-describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
+describe('rewards, kill streak, losing guns on death (H.3)', () => {
   function kill(room: ReturnType<typeof setup>['room'], killer: Player, victim: Player) {
     victim.hp = 0; victim.killerId = killer.id
     room.finalizeDeaths()
   }
 
-  it('hạ 1 mạng +$500, chuỗi tăng; nạn nhân chuỗi về 0', () => {
+  it('a kill gives +$500, streak goes up; the victim streak resets to 0', () => {
     const { room, a, b } = setup()
     kill(room, a.p, b.p)
     expect(a.p.money).toBe(2500); expect(a.p.killStreak).toBe(1); expect(b.p.killStreak).toBe(0)
@@ -140,7 +140,7 @@ describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
     expect(last(b.msgs, MsgType.Kill)).toMatchObject({ reward: 500, victimStreak: 0 })
   })
 
-  it('hạ người có chuỗi ≥ 3 → +$1000 (bounty); sau đó nạn nhân hồi sinh với chuỗi 0', () => {
+  it('killing a player with a streak >= 3 -> +$1000 (bounty); the victim then respawns with streak 0', () => {
     const { room, a, b } = setup()
     b.p.killStreak = 3
     kill(room, a.p, b.p)
@@ -151,7 +151,7 @@ describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
     expect(b.p.killStreak).toBe(0)
   })
 
-  it('tiền không vượt $16000; không thưởng khi chưa PLAYING hoặc đồng đội', () => {
+  it('money is capped at $16000; no reward before PLAYING or for teammates', () => {
     const { room, a, b } = setup()
     a.p.money = 15800
     kill(room, a.p, b.p)
@@ -162,7 +162,7 @@ describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
     expect(a2.p.money).toBe(2000)
   })
 
-  it('mua Sniper, chết, hồi sinh: về bộ mặc định của đội (Cớm: Colt + M16), tiền giữ nguyên', () => {
+  it('buy Sniper, die, respawn: back to the team default loadout (Cops: Colt + M16), money unchanged', () => {
     const { room, a, b } = setup()
     a.p.money = 8000
     at(a.p, -25, 0, 0); handleBuy(room, a.p, 'sniper')
@@ -172,10 +172,10 @@ describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
     expect(a.p.loadout.slots.map(w => w?.key ?? null)).toEqual(['knife', 'colt', null, 'm16', null])
     expect(a.p.weapon.slots).toEqual([weaponByKey('knife')!.id, weaponByKey('colt')!.id, -1, weaponByKey('m16')!.id, -1])
     expect(a.p.weapon).toMatchObject({ slot: 3, current: weaponByKey('m16')!.id })
-    expect(a.p.money).toBe(3250 + 500 * 0)   // a là nạn nhân: không đổi
+    expect(a.p.money).toBe(3250 + 500 * 0)   // a is the victim: unchanged
   })
 
-  it('trận mới: mọi người $2000, bộ mặc định, chuỗi 0 (+ MoneyEvent reset)', () => {
+  it('new match: everyone $2000, default loadout, streak 0 (+ MoneyEvent reset)', () => {
     const { room, a } = setup()
     a.p.money = 9000; a.p.killStreak = 5
     room.resetEconomy(a.p)
@@ -183,7 +183,7 @@ describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
     expect(last(a.msgs, MsgType.MoneyEvent)).toMatchObject({ delta: 2000, reason: 'reset' })
   })
 
-  it('bảng điểm: tiền chỉ gửi cho đồng đội, đối phương không thấy', () => {
+  it('scoreboard: money is only sent to teammates, opponents cannot see it', () => {
     const { room, a, b } = setup()
     a.p.money = 5000; b.p.money = 7000
     broadcastScoreboard(room)
@@ -196,27 +196,27 @@ describe('thưởng, chuỗi hạ, mất súng khi chết (H.3)', () => {
   })
 })
 
-describe('đổi súng theo ô + tốc độ (H.1/H.4)', () => {
+describe('switching guns by slot + speed (H.1/H.4)', () => {
   const cmd = (seq: number, weapon: number, buttons = 0): InputCmd => ({ seq, buttons, yaw: 0, pitch: 0, weapon })
   const speedWith = (slot: number) => {
     const { room, a } = setup()
     for (let i = 0; i < 180; i++) { enqueueCmds(a.p, [cmd(i, slot, Btn.Forward)], i * 1000 / 60); stepPlayer(a.p, defaultMovement, room) }
     return Math.hypot(a.p.state.vel[0], a.p.state.vel[2])
   }
-  it('cầm dao chạy nhanh hơn cầm súng dài; ô trống không đổi súng', () => {
+  it('holding a knife is faster than holding a long gun; an empty slot does not switch guns', () => {
     expect(speedWith(0)).toBeGreaterThan(speedWith(3) + 0.5)
     const { room, a } = setup()
     enqueueCmds(a.p, [cmd(0, 2)], 0); stepPlayer(a.p, defaultMovement, room)
-    expect(a.p.weapon.slot).toBe(3)   // ô 2 trống
+    expect(a.p.weapon.slot).toBe(3)   // slot 2 is empty
   })
-  it('cmd còn bay mang ô cũ sau khi mua không kéo súng về ô cũ', () => {
+  it('an in-flight cmd carrying the old slot after a buy does not pull the gun back to the old slot', () => {
     const { room, a } = setup()
     at(a.p, -25, 0, 0)
     enqueueCmds(a.p, [cmd(0, 3)], 0); stepPlayer(a.p, defaultMovement, room)
     handleBuy(room, a.p, 'smg')
     enqueueCmds(a.p, [cmd(1, 3), cmd(2, 3)], 20); stepPlayer(a.p, defaultMovement, room)
     expect(a.p.weapon.current).toBe(weaponByKey('smg')!.id)
-    enqueueCmds(a.p, [cmd(3, 2)], 30); stepPlayer(a.p, defaultMovement, room)   // client bấm ô 2: đã cầm rồi
+    enqueueCmds(a.p, [cmd(3, 2)], 30); stepPlayer(a.p, defaultMovement, room)   // client pressed slot 2: already holding it
     expect(a.p.weapon.slot).toBe(2)
   })
 })

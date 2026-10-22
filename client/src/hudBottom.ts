@@ -1,5 +1,6 @@
-// HUD dưới màn hình (H.6): tiền + máu bên trái, 4 ô vũ khí ở giữa, đạn bên phải. DOM thuần, chỉ ghi khi giá trị đổi.
-import { CATEGORY_LABEL, SLOT_COUNT, WEAPON_BY_KEY } from '@fps/shared'
+// Bottom-of-screen HUD (H.6): money + health on the left, 4 weapon slots in the middle, ammo on the right. Plain DOM, only writes when a value changes.
+import { SLOT_COUNT, WEAPON_BY_KEY } from '@fps/shared'
+import { t } from './i18n'
 import { weaponIcon } from './weaponIcon'
 
 const STYLE = `
@@ -44,12 +45,24 @@ function div(cls: string, parent?: HTMLElement): HTMLDivElement {
   return d
 }
 
+/** Number of displayed slots and the key label of each, as in CS 1.6 (1 primary, 2 pistol, 3 knife, 4 grenade) */
+export const HUD_SLOTS = 4
+export const HUD_KEY_LABEL: readonly string[] = ['1', '2', '3', '4']
+/** Logical slot (CATEGORY_SLOT) of displayed slots 2–4; displayed slot 1 is the primary weapon, chosen by primarySlotToShow */
+const HUD_LOGIC_SLOT: readonly number[] = [-1, 1, 0, 4]
+
+/** Primary weapon shown in slot "1": the held weapon if it is a primary, otherwise the rifle if owned, otherwise the mid-range weapon */
+export function primarySlotToShow(keys: readonly (string | null)[], active: number): number {
+  if ((active === 2 || active === 3) && keys[active]) return active
+  return keys[3] ? 3 : 2
+}
+
 export function createBottomHud() {
   const st = document.createElement('style')
   st.textContent = STYLE
   document.head.appendChild(st)
 
-  // Trái dưới: tiền + máu
+  // Bottom left: money + health
   const left = div('hb hb-left')
   const moneyRow = div('hb-money', left)
   moneyRow.innerHTML = '<span class="cur">$</span><span class="num">0</span>'
@@ -58,25 +71,25 @@ export function createBottomHud() {
   hpRow.innerHTML = HEART + '<span class="v">100</span>'
   const hpVal = hpRow.querySelector('.v') as HTMLElement
 
-  // Giữa dưới: 4 ô vũ khí
+  // Bottom middle: 4 weapon slots following the CS 1.6 keys – 1 primary, 2 pistol, 3 knife, 4 grenade. Slot 1 merges rifle and mid-range (shows the held / owned one)
   const slotsBox = div('hb hb-slots')
   const slotEls: HTMLDivElement[] = []
-  for (let i = 0; i < SLOT_COUNT; i++) {
+  for (let i = 0; i < HUD_SLOTS; i++) {
     const s = div('hb-slot empty', slotsBox)
-    const k = document.createElement('div'); k.className = 'k'; k.textContent = String(i + 1)
+    const k = document.createElement('div'); k.className = 'k'; k.textContent = HUD_KEY_LABEL[i]!
     s.appendChild(k)
     slotEls.push(s)
   }
   let slotKey = ''
 
-  // Phải dưới: đạn + tên súng
+  // Bottom right: ammo + weapon name
   const right = div('hb hb-right')
   const ammoEl = div('hb-ammo', right)
   const wnameEl = div('hb-wname', right)
   let ammoKey = ''
 
-  // Tiền: số chạy dần tới giá trị mới trong 400ms
-  let shown = 0, from = 0, target = 0, t = 400
+  // Money: the number counts up to the new value over 400ms
+  let shown = 0, from = 0, target = 0, tween = 400
   let first = true
   function flash(up: boolean): void {
     moneyNum.style.transition = 'none'
@@ -89,17 +102,26 @@ export function createBottomHud() {
   let infinite = false
   return {
     setMoneyVisible(v: boolean): void { moneyRow.style.display = v ? '' : 'none' },
-    /** Offline + tiền vô hạn: hiện `∞` thay cho số tiền */
+    /** Offline + infinite money: show `∞` instead of the amount */
     setInfiniteMoney(v: boolean): void { infinite = v; moneyNum.textContent = v ? '∞' : String(shown) },
-    /** Ẩn cả cụm HUD dưới (khi đang xem đồng đội) */
+    /** Hide the whole bottom HUD cluster (while spectating a teammate) */
     setVisible(v: boolean): void { const d = v ? '' : 'none'; left.style.display = d; slotsBox.style.display = d; right.style.display = d },
+    /** Touch: tapping slot d (0..3, the displayed order = keys 1..4) calls fn(d). The bar is otherwise click-through, so this only turns it on. */
+    onSlotTap(fn: (displayedSlot: number) => void): void {
+      slotEls.forEach((el, d) => {
+        el.style.pointerEvents = 'auto'
+        el.style.touchAction = 'none'
+        el.setAttribute('data-slot', String(d + 1))
+        el.addEventListener('pointerdown', e => { e.preventDefault(); fn(d) })
+      })
+    },
     setMoney(v: number): void {
       if (first) { first = false; shown = from = target = v; moneyNum.textContent = infinite ? '∞' : String(v); return }
       if (v === target) return
       if (!infinite) flash(v > target)
-      from = shown; target = v; t = 0
+      from = shown; target = v; tween = 0
     },
-    /** +$500 bay lên cạnh số tiền rồi mờ đi (600ms). bounty: to hơn, vàng */
+    /** A floating +$500 rises next to the money number and fades out (600ms). bounty: bigger, gold */
     floatMoney(delta: number, bounty = false): void {
       const f = document.createElement('div')
       f.className = 'hb-float'
@@ -113,13 +135,15 @@ export function createBottomHud() {
       hpVal.textContent = String(Math.max(0, Math.round(v)))
       hpRow.classList.toggle('low', v > 0 && v < 30)
     },
-    /** keys: key súng ở 4 ô (null = trống); active = ô đang cầm */
+    /** keys: weapon key in each slot (null = empty); active = slot being held */
     setSlots(keys: readonly (string | null)[], active: number, counts?: readonly (number | null)[]): void {
       const k = keys.join(',') + '|' + active + '|' + (counts ? counts.join(',') : '')
       if (k === slotKey) return
       slotKey = k
-      for (let i = 0; i < SLOT_COUNT; i++) {
-        const el = slotEls[i]!
+      const primary = primarySlotToShow(keys, active)
+      for (let d = 0; d < HUD_SLOTS; d++) {
+        const i = d === 0 ? primary : HUD_LOGIC_SLOT[d]!   // logical slot displayed at position d
+        const el = slotEls[d]!
         const key = keys[i] ?? null
         el.classList.toggle('empty', key === null)
         el.classList.toggle('active', i === active && key !== null)
@@ -133,7 +157,7 @@ export function createBottomHud() {
         if (key) {
           const def = WEAPON_BY_KEY.get(key)
           el.insertBefore(weaponIcon(key, def?.name ?? key), el.firstChild)
-          el.title = def ? CATEGORY_LABEL[def.category] : ''
+          el.title = def ? t(`category.${def.category}`) : ''
         }
       }
     },
@@ -141,14 +165,14 @@ export function createBottomHud() {
       const key = `${name}|${cur}|${mag}|${reloading}|${melee}|${consumable}|${infinite}`
       if (key === ammoKey) return
       ammoKey = key
-      ammoEl.textContent = consumable ? `×${cur}` : melee ? '—' : reloading ? 'RELOAD' : `${cur} / ${infinite ? '∞' : mag}`
+      ammoEl.textContent = consumable ? `×${cur}` : melee ? '—' : reloading ? t('hud.ammo.reload') : `${cur} / ${infinite ? '∞' : mag}`
       ammoEl.classList.toggle('low', !melee && !consumable && !reloading && mag > 0 && cur <= mag * 0.25)
       wnameEl.textContent = name
     },
     tick(dtMs: number): void {
       if (shown === target) return
-      t += dtMs
-      const k = Math.min(1, t / 400)
+      tween += dtMs
+      const k = Math.min(1, tween / 400)
       shown = k >= 1 ? target : Math.round(from + (target - from) * (1 - (1 - k) * (1 - k)))
       if (!infinite) moneyNum.textContent = String(shown)
     },

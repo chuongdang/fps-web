@@ -1,7 +1,7 @@
 import { INTERP_DELAY_MS, lerp, lerpAngle, type NetPlayer } from '@fps/shared'
 
-const BUFFER_MS = 1000       // giữ ~1 giây snapshot mỗi người
-const STALE_MS = 250         // quá mốc này không có snapshot mới thì coi là đứng yên (không ngoại suy)
+const BUFFER_MS = 1000       // keep ~1 second of snapshots per player
+const STALE_MS = 250         // past this with no new snapshot, treat the player as standing still (no extrapolation)
 
 interface Entry {
   serverTime: number
@@ -20,7 +20,7 @@ interface Entry {
   reviveP?: number
 }
 
-// Trạng thái đã nội suy, tái sử dụng mỗi frame (không cấp phát)
+// Interpolated state, reused every frame (no allocation)
 export interface InterpPlayer {
   id: number
   pos: [number, number, number]
@@ -29,32 +29,32 @@ export interface InterpPlayer {
   flags: number
   weapon: number
   killStreak: number
-  adsT: number   // mức ngắm 0..1 (vẽ súng lên má)
+  adsT: number   // aim level 0..1 (draws the gun up to the cheek)
   hp: number
-  hpMax: number          // zombie: máu tối đa (thanh máu trên đầu); người: 0
-  ztype?: string         // zombie: loại → tint/cỡ/tên
+  hpMax: number          // zombie: max HP (overhead health bar); human: 0
+  ztype?: string         // zombie: type → tint/size/name
   zscale?: number
-  downLeft?: number      // Thủ Thành: người gục — ms còn lại
-  reviveP?: number       // tiến độ được cứu 0..1
-  stale: boolean   // snapshot cuối đã cũ hơn STALE_MS so với renderTime
+  downLeft?: number      // Defense: downed player, ms remaining
+  reviveP?: number       // revive progress 0..1
+  stale: boolean   // last snapshot is older than STALE_MS relative to renderTime
 }
 
-// Phase 4 dùng khi bắn: thời điểm server mà người chơi đang "nhìn thấy" ở frame này
+// Phase 4 uses this when shooting: the server time the player is "seeing" in this frame
 export const interp = { currentRenderTime: 0, delayMs: INTERP_DELAY_MS }
 
 const MAX_ONE_WAY_MS = 250
 const DELAY_SLEW_MS_PER_FRAME = 1
 
-// serverNow ước lượng giờ thật của server, còn snapshot đến muộn thêm trễ một chiều. Nếu chỉ lùi
-// INTERP_DELAY_MS cố định thì ping cao sẽ không còn snapshot "b" để nội suy. Nên lùi thêm đúng
-// bằng trễ một chiều. Đổi delay từ từ (≤1ms/frame) để người khác không bị trượt/nhảy.
+// serverNow estimates the server's real time, while snapshots arrive late by the one-way delay. Only lagging by a fixed
+// INTERP_DELAY_MS would leave no snapshot "b" to interpolate to at high ping, so also lag by exactly
+// the one-way delay. Change the delay slowly (≤1ms/frame) so other players don't slide or jump.
 export class InterpDelay {
   private _value = INTERP_DELAY_MS
   private started = false
 
   get value(): number { return this._value }
 
-  // Gọi mỗi frame với trễ một chiều ước lượng (ms)
+  // Call every frame with the estimated one-way delay (ms)
   update(oneWayMs: number): number {
     const target = INTERP_DELAY_MS + Math.min(Math.max(oneWayMs, 0), MAX_ONE_WAY_MS)
     if (!this.started) { this._value = target; this.started = oneWayMs > 0 }
@@ -69,7 +69,7 @@ export class Interpolator {
   private out = new Map<number, InterpPlayer>()
   private list: InterpPlayer[] = []
 
-  // Nhận snapshot: thêm vào buffer từng người (trừ selfId), xoá người không còn trong snapshot
+  // On snapshot: add to each player's buffer (except selfId), remove players no longer in the snapshot
   push(serverTime: number, players: NetPlayer[], selfId = -1): void {
     const seen = new Set<number>()
     for (const p of players) {
@@ -87,7 +87,7 @@ export class Interpolator {
     }
   }
 
-  // Gọi mỗi frame với serverNow() hiện tại; trả về danh sách dùng lại (hợp lệ tới lần gọi sau)
+  // Call every frame with the current serverNow(); returns a reused list (valid until the next call)
   sample(serverNow: number, delayMs = INTERP_DELAY_MS): InterpPlayer[] {
     const renderTime = serverNow - delayMs
     interp.currentRenderTime = renderTime
@@ -106,7 +106,7 @@ export class Interpolator {
     const first = buf[0]!
     const last = buf[buf.length - 1]!
     if (renderTime >= last.serverTime) {
-      // Snapshot đến muộn: giữ ở snapshot cuối, không ngoại suy
+      // Snapshot arrived late: hold the last one, no extrapolation
       this.copy(o, last)
       o.stale = renderTime - last.serverTime > STALE_MS
       return
@@ -124,7 +124,7 @@ export class Interpolator {
     o.pos[2] = lerp(a.pos[2], b.pos[2], t)
     o.yaw = lerpAngle(a.yaw, b.yaw, t)
     o.pitch = lerp(a.pitch, b.pitch, t)
-    o.flags = a.flags   // cờ ngồi/trượt: lấy của a
+    o.flags = a.flags   // crouch/slide flags: taken from a
     o.weapon = a.weapon
     o.killStreak = a.killStreak
     o.adsT = lerp(a.adsT, b.adsT, t)

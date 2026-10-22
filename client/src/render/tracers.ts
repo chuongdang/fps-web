@@ -2,11 +2,11 @@ import * as THREE from 'three'
 
 const POOL = 24
 const LIFE_MS = 90
-const START_OFFSET = 0.6   // bắt đầu cách mắt một chút, như đầu nòng
-const STREAK = 3           // chiều dài vệt (m)
+const START_OFFSET = 0.6   // starts a little away from the eye, like the muzzle
+const STREAK = 3           // streak length (m)
 
-// Vệt đạn của người khác (ShotFx): một đoạn ngắn lao dọc tia bắn rồi biến mất, không phải đường dài liên tục.
-// Pool cố định, không cấp phát mỗi phát.
+// Other players' tracers (ShotFx): a short streak that flies along the shot ray and vanishes, not a long continuous line.
+// Fixed pool, nothing allocated per shot.
 export function createTracers(scene: THREE.Scene) {
   const lines: THREE.Line[] = []
   const age: number[] = []
@@ -39,7 +39,7 @@ export function createTracers(scene: THREE.Scene) {
         age[i]! += dtMs
         const l = lines[i]!
         if (age[i]! >= LIFE_MS) { l.visible = false; continue }
-        // Đầu vệt chạy từ nòng tới điểm trúng; đuôi cách đầu STREAK mét (không lùi quá nòng)
+        // The streak head travels from the muzzle to the hit point; the tail trails the head by STREAK metres (never behind the muzzle)
         const dist = dst[i]!
         const head = START_OFFSET + (dist - START_OFFSET) * (age[i]! / LIFE_MS)
         const tail = Math.max(Math.min(START_OFFSET, dist), head - STREAK)

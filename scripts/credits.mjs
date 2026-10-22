@@ -1,10 +1,10 @@
-// K.6: đối chiếu asset trong client/public với assets/CREDITS.json và sinh CREDITS.txt
+// K.6: cross-check assets in client/public against assets/CREDITS.json and generate CREDITS.txt
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
-export const UNVERIFIED = 'CHƯA XÁC MINH'
+export const UNVERIFIED = 'UNVERIFIED'
 
-// File chỉ phục vụ dev, không phải asset của bên thứ ba cần ghi công
+// Dev-only files, not third-party assets that need credit
 const IGNORE = new Set(['viewer.html'])
 
 function walk(dir, out = []) {
@@ -16,9 +16,12 @@ function walk(dir, out = []) {
   return out
 }
 
+// The user's personal sounds (gitignored, not packaged): no credit needed, never part of the release
+const LOCAL_PREFIX = 'sounds/local/'
+
 export function listPublicAssets(root) {
   const pub = join(root, 'client', 'public')
-  return walk(pub).map(p => relative(pub, p).split(sep).join('/')).filter(f => !IGNORE.has(f)).sort()
+  return walk(pub).map(p => relative(pub, p).split(sep).join('/')).filter(f => !IGNORE.has(f) && !f.startsWith(LOCAL_PREFIX)).sort()
 }
 
 /** @returns {{ entries: any[], missing: string[], stale: string[], unverified: string[] }} */
@@ -36,12 +39,12 @@ export function checkCredits(root) {
 }
 
 export function creditsText(entries, version) {
-  const lines = [`FPS WEB ${version} – GHI CÔNG TÁC GIẢ`, '', 'Các tài nguyên (model, âm thanh, hình ảnh) bên thứ ba dùng trong game:', '']
+  const lines = [`FPS WEB ${version} – CREDITS`, '', 'Third-party assets (models, sounds, images) used in the game:', '']
   for (const e of entries) {
     lines.push(`- ${e.file}`)
-    lines.push(`    Tác giả:   ${e.author}`)
-    lines.push(`    Nguồn:     ${e.source}${e.url ? ` (${e.url})` : ''}`)
-    lines.push(`    Giấy phép: ${e.license}`)
+    lines.push(`    Author:    ${e.author}`)
+    lines.push(`    Source:    ${e.source}${e.url ? ` (${e.url})` : ''}`)
+    lines.push(`    License:   ${e.license}`)
   }
   return lines.join('\n') + '\n'
 }

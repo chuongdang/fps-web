@@ -1,5 +1,5 @@
-// Ban đêm + đèn pin (plan 16, ZF.3). Số đèn trong scene luôn CỐ ĐỊNH (đổi số đèn làm three biên dịch lại shader → giật):
-// mọi đèn tạo sẵn, tắt bằng intensity = 0. Đèn pin người khác: tối đa MAX_OTHER_SPOTS cái gần nhất là SpotLight thật, còn lại vẽ nón sáng giả.
+// Night + flashlights (plan 16, ZF.3). The number of lights in the scene is always FIXED (changing it makes three recompile shaders -> stutter):
+// every light is pre-created and switched off with intensity = 0. Other players' flashlights: at most the MAX_OTHER_SPOTS nearest are real SpotLights, the rest are drawn as fake light cones.
 import * as THREE from 'three'
 import { NetFlag } from '@fps/shared'
 
@@ -20,7 +20,7 @@ export const NIGHT = {
   zombieOverlay: 'rgba(150,20,20,0.16)',
 }
 
-// Đèn đường đặt cố định trên đỉnh tường thành (theo map). Map khác chưa có thì không có đèn đường.
+// Street lamps sit at fixed positions on top of the fort walls (per map). Maps without an entry have no street lamps.
 const LAMPS: Record<string, [number, number, number][]> = {
   Deathmatch: [[-19.6, 5.2, -11.3], [-19.6, 5.2, 0], [-19.6, 5.2, 11.3], [19.6, 5.2, -11.3], [19.6, 5.2, 0], [19.6, 5.2, 11.3]],
 }
@@ -28,11 +28,13 @@ const LAMPS: Record<string, [number, number, number][]> = {
 export interface NightPlayer { id: number; pos: [number, number, number]; yaw: number; pitch?: number; flags: number }
 
 export interface NightRig {
-  /** Bật/tắt chế độ ban đêm của phòng */
+  /** Turn the room's night mode on/off */
   setNight(on: boolean): void
-  /** Mình là zombie: nhìn đêm (ambient ×3, lọc đỏ) */
+  /** Local player is a zombie: night vision (ambient x3, red filter) */
   setZombieVision(on: boolean): void
-  /** Mỗi frame: đèn pin của mình (theo camera) + của người khác */
+  /** The room's map is known (or changed): put the street lamps where that map has them */
+  setMap(mapName: string): void
+  /** Every frame: own flashlight (follows the camera) + other players' */
   update(camera: THREE.Camera, selfFlash: boolean, others: readonly NightPlayer[]): void
   readonly night: boolean
 }
@@ -47,24 +49,34 @@ export function createNight(scene: THREE.Scene, hemi: THREE.HemisphereLight, sun
   const nightFog = new THREE.FogExp2(NIGHT.fogColor, NIGHT.fogDensity)
   const nightBg = new THREE.Color(NIGHT.background)
 
-  // Đèn đường: tạo đủ MAX_LAMPS, thừa thì cường độ 0
-  const lampPos = LAMPS[mapName] ?? []
+  // Street lamps: create MAX_LAMPS, unused ones get intensity 0
+  let lampPos = LAMPS[mapName] ?? []
   const lamps: THREE.PointLight[] = []
+  const bulbs: THREE.Mesh[] = []
   const lampBulbs = new THREE.Group()
   const bulbGeo = new THREE.SphereGeometry(0.18, 8, 6)
   const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })
   for (let i = 0; i < MAX_LAMPS; i++) {
     const l = new THREE.PointLight(NIGHT.lampColor, 0, NIGHT.lampRange, 1.4)
     l.castShadow = false
-    const p = lampPos[i]
-    if (p) { l.position.set(p[0], p[1], p[2]); const b = new THREE.Mesh(bulbGeo, bulbMat); b.position.copy(l.position); lampBulbs.add(b) }
+    const b = new THREE.Mesh(bulbGeo, bulbMat)
+    lampBulbs.add(b)
     scene.add(l)
     lamps.push(l)
+    bulbs.push(b)
   }
+  function placeLamps(): void {
+    for (let i = 0; i < MAX_LAMPS; i++) {
+      const p = lampPos[i]
+      if (p) { lamps[i]!.position.set(p[0], p[1], p[2]); bulbs[i]!.position.copy(lamps[i]!.position) }
+      bulbs[i]!.visible = !!p
+    }
+  }
+  placeLamps()
   lampBulbs.visible = false
   scene.add(lampBulbs)
 
-  // Đèn pin: [0] của mình, [1..4] của người khác gần nhất
+  // Flashlights: [0] is own, [1..4] are the nearest other players'
   const spots: THREE.SpotLight[] = []
   for (let i = 0; i <= MAX_OTHER_SPOTS; i++) {
     const s = new THREE.SpotLight(NIGHT.flashColor, 0, FLASH_RANGE, FLASH_ANGLE, 0.45, 1.6)
@@ -72,15 +84,15 @@ export function createNight(scene: THREE.Scene, hemi: THREE.HemisphereLight, sun
     scene.add(s); scene.add(s.target)
     spots.push(s)
   }
-  // Nón sáng giả cho đèn pin ở xa (không phải đèn thật): nón cộng sáng, đỉnh ở đèn, mở rộng theo hướng chiếu
+  // Fake light cone for distant flashlights (not a real light): additive cone, apex at the lamp, widening along the beam
   const coneGeo = new THREE.ConeGeometry(Math.tan(FLASH_ANGLE) * 14, 14, 16, 1, true)
-  coneGeo.translate(0, -7, 0)   // đỉnh ở gốc, mở xuống −Y
-  coneGeo.rotateX(-Math.PI / 2) // mở theo −Z (hướng nhìn của dự án)
+  coneGeo.translate(0, -7, 0)   // apex at the origin, opening toward -Y
+  coneGeo.rotateX(-Math.PI / 2) // opens toward -Z (the project's look direction)
   const coneMat = new THREE.MeshBasicMaterial({ color: 0xfff2d6, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })
   const cones: THREE.Mesh[] = []
   for (let i = 0; i < MAX_FAKE_CONES; i++) { const m = new THREE.Mesh(coneGeo, coneMat); m.visible = false; m.frustumCulled = false; scene.add(m); cones.push(m) }
 
-  // Lớp lọc đỏ khi làm zombie
+  // Red filter overlay when playing as a zombie
   const overlay = document.createElement('div')
   overlay.style.cssText = `position:fixed;inset:0;pointer-events:none;z-index:5;background:${NIGHT.zombieOverlay};display:none;mix-blend-mode:multiply`
   document.body.appendChild(overlay)
@@ -119,6 +131,7 @@ export function createNight(scene: THREE.Scene, hemi: THREE.HemisphereLight, sun
     get night() { return night },
     setNight(on) { if (on === night) return; night = on; applyBase() },
     setZombieVision(on) { if (on === zombieVision) return; zombieVision = on; applyBase() },
+    setMap(name) { lampPos = LAMPS[name] ?? []; placeLamps(); applyBase() },
     update(camera, selfFlash, others) {
       for (const s of spots) s.intensity = 0
       for (const c of cones) c.visible = false
@@ -127,7 +140,7 @@ export function createNight(scene: THREE.Scene, hemi: THREE.HemisphereLight, sun
       if (selfFlash) {
         camera.getWorldPosition(_pos)
         camera.getWorldDirection(_dir)
-        // lệch xuống một chút để vệt sáng như cầm ở tay, không chói ngay trước mắt
+        // offset down a little so the beam looks hand-held and does not glare right in front of the eye
         self.position.set(_pos.x + _dir.x * 0.3, _pos.y - 0.12, _pos.z + _dir.z * 0.3)
         self.target.position.set(_pos.x + _dir.x * 10, _pos.y + _dir.y * 10, _pos.z + _dir.z * 10)
         self.intensity = NIGHT.flashIntensity

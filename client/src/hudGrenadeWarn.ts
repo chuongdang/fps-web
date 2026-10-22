@@ -1,4 +1,5 @@
-// Cảnh báo lựu đạn gần (G.9): icon đỏ dưới tâm ngắm + mũi tên quay theo hướng quả gần nhất. Quả của đồng đội bị bỏ qua (do caller lọc).
+// Nearby grenade warning (G.9): a red icon under the crosshair + an arrow rotating toward the nearest grenade. Teammates' grenades are ignored (filtered by the caller).
+import { t } from './i18n'
 import { GRENADE } from '@fps/shared'
 import { weaponIcon } from './weaponIcon'
 
@@ -16,7 +17,7 @@ export function createGrenadeWarning() {
   arrow.style.cssText = `position:absolute;left:-12px;top:${-ARROW_RADIUS_PX - 12}px;width:24px;height:24px;` +
     'background:#ff3030;clip-path:polygon(50% 0,100% 100%,50% 70%,0 100%);filter:drop-shadow(0 0 3px #000)'
   ring.appendChild(arrow)
-  const icon = weaponIcon('m67', 'Lựu đạn', 'width:44px;height:44px;filter:sepia(1) saturate(8) hue-rotate(-35deg) drop-shadow(0 0 4px #000)')
+  const icon = weaponIcon('m67', t('category.grenade'), 'width:44px;height:44px;filter:sepia(1) saturate(8) hue-rotate(-35deg) drop-shadow(0 0 4px #000)')
   const iconBox = document.createElement('div')
   iconBox.style.cssText = 'position:absolute;left:-22px;top:46px;width:44px;height:44px'
   iconBox.appendChild(icon)
@@ -27,8 +28,8 @@ export function createGrenadeWarning() {
   let shown = false
   return {
     /**
-     * Gọi mỗi frame. Duyệt `n` phần tử đầu của `src`; chọn quả gần nhất trong GRENADE.warnRadius.
-     * yaw: hướng nhìn (forward = (−sin, −cos), right = (cos, −sin)).
+     * Call every frame. Scans the first `n` entries of `src`; picks the nearest grenade within GRENADE.warnRadius.
+     * yaw: view direction (forward = (−sin, −cos), right = (cos, −sin)).
      */
     update<T>(dt: number, eye: { x: number; y: number; z: number }, yaw: number, src: readonly T[], pos: (g: T) => WarnGrenade, skip: (g: T) => boolean): void {
       let best = Infinity, bx = 0, bz = 0
@@ -43,13 +44,13 @@ export function createGrenadeWarning() {
       const on = best <= GRENADE.warnRadius
       if (on !== shown) { shown = on; root.style.display = on ? '' : 'none' }
       if (!on) return
-      const near = 1 - best / GRENADE.warnRadius          // 0 xa … 1 sát
+      const near = 1 - best / GRENADE.warnRadius          // 0 far … 1 very close
       phase += dt * Math.PI * 2 * (BLINK_SLOW_HZ + (BLINK_FAST_HZ - BLINK_SLOW_HZ) * near)
       const pulse = 0.55 + 0.45 * Math.sin(phase)
       root.style.opacity = String((0.3 + 0.7 * near) * pulse + 0.1)
       const f = bx * -Math.sin(yaw) + bz * -Math.cos(yaw)
       const r = bx * Math.cos(yaw) + bz * -Math.sin(yaw)
-      ring.style.transform = `rotate(${Math.atan2(r, f)}rad)`   // 0 = phía trước (mũi tên chỉ lên)
+      ring.style.transform = `rotate(${Math.atan2(r, f)}rad)`   // 0 = straight ahead (the arrow points up)
     },
   }
 }

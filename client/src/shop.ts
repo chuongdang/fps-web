@@ -1,24 +1,30 @@
-// Giỏ hàng + menu cửa hàng (H.7). Chỉ hiển thị và gửi lệnh Buy; tiền/loadout/vùng mua do server quyết định.
-import { CATEGORY_LABEL, CATEGORY_SLOT, ECONOMY, GRENADE, type EconomyConfig, WEAPONS, quoteBuy, type Loadout, type OwnedWeapon, type WeaponCategory } from '@fps/shared'
-import { WEAPON_LABEL, weaponIcon } from './weaponIcon'
+// Shopping cart + shop menu (H.7). Only displays and sends the Buy command; money/loadout/buy zone are decided by the server.
+import { CATEGORY_SLOT, ECONOMY, type EconomyConfig, WEAPONS, grenadeCount, maxCarryOf, quoteBuy, type Loadout, type OwnedWeapon } from '@fps/shared'
+import { weaponLabel, weaponIcon } from './weaponIcon'
+import { t } from './i18n'
+import { IS_TOUCH } from './touch/mode'
+import { hudIcon } from './hudIcons'
 
 export interface ShopDeps {
   money(): number
   loadout(): (OwnedWeapon | null)[]
-  eco?(): EconomyConfig            // luật kinh tế của thể thức (mặc định Hỗn Chiến)
-  canShop(): boolean              // đang trong khu mua, còn sống, trận chưa ENDED, đang online
-  send(key: string): void         // gửi lệnh Buy
+  eco?(): EconomyConfig            // economy rules of the game mode (default: Team Deathmatch)
+  canShop(): boolean              // in the buy zone, alive, match not ENDED, online
+  onDenied?(): void               // the player asked to open the menu but cannot (tell them why)
+  send(key: string): void         // send the Buy command
   onOpenChange?(open: boolean): void
   sounds: { ok(): void; fail(): void }
 }
 
-// Menu 2 cấp: phím số cấp 1 (2–5) chọn dòng súng, cấp 2 chọn loại. Mua AK47 = B 4 2.
-interface GroupDef { num: number; cat: WeaponCategory; items: [number, string][] }
+// Two-level menu as in CS 1.6: B opens it, a level-1 number key picks a group (1 Pistols, 2 Shotguns, 3 SMGs, 4 Rifles, 8 Equipment), level 2 picks the item, 0 exits.
+// Buying an AK47 = B 4 2. Equipment: 4 = HE grenade, 5 = smoke grenade (the same numbers as the CS 1.6 Equipment menu).
+interface GroupDef { num: number; label: string /* i18n key */; items: [number, string][] }
 const GROUPS: GroupDef[] = [
-  { num: 2, cat: 'pistol', items: [[1, 'colt'], [2, 'rulo']] },
-  { num: 3, cat: 'mid', items: [[1, 'shotgun'], [2, 'smg']] },
-  { num: 4, cat: 'long', items: [[1, 'm16'], [2, 'ak47'], [6, 'sniper']] },
-  { num: 5, cat: 'grenade', items: [[1, GRENADE.key]] },
+  { num: 1, label: 'hud.shop.group.pistols', items: [[1, 'colt'], [2, 'rulo']] },
+  { num: 2, label: 'hud.shop.group.shotguns', items: [[1, 'shotgun']] },
+  { num: 3, label: 'hud.shop.group.smgs', items: [[1, 'smg']] },
+  { num: 4, label: 'hud.shop.group.rifles', items: [[1, 'm16'], [2, 'ak47'], [3, 'sniper']] },
+  { num: 8, label: 'hud.shop.group.equipment', items: [[4, 'm67'], [5, 'smoke']] },
 ]
 
 const STYLE = `
@@ -59,6 +65,29 @@ const STYLE = `
 .shop-row.shake{animation:shop-shake 150ms linear}
 @keyframes shop-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
 .shop-foot{font-size:12px;color:#9aa0aa;margin-top:10px;line-height:1.4}
+/* Touch (plan 19): one sheet instead of two sliding panels. The group rail is on the left, the items of the selected group right next to it
+   (the first group is preselected, so opening the menu already shows weapons: open, tap a weapon = bought). Finger-sized targets (>= 44px),
+   no keyboard hints, a close button, and the cart hides while the sheet is open (it no longer hops around the screen). */
+.shop-x{display:none;flex:none;width:44px;height:44px;margin:-10px -8px -10px 4px;align-items:center;justify-content:center;font:22px sans-serif;color:#fff;cursor:pointer}
+html.touch .shop-x{display:flex}
+html.touch .shop-cart{padding:12px 14px;opacity:.6}
+html.touch .shop-cart svg{width:40px;height:40px}
+html.touch .shop-cart.shift{visibility:hidden}
+html.touch.hand-left .shop-cart{left:auto;right:24px}   /* left-handed: the Fire arc is on the left */
+html.touch .shop-cart span:first-of-type{display:none}   /* the "(B)" key hint */
+html.touch .shop-panel{top:68px;max-height:calc(100vh - 76px);max-height:calc(100dvh - 76px);width:150px;padding:10px 8px;border-radius:0;transition:none;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}   /* below the Scoreboard / Switch team buttons and the room label */
+html.touch .shop-sub{left:150px;width:min(320px,calc(100vw - 160px));border-radius:0 12px 12px 0;transform:translateX(-200%)}
+html.touch .shop-sub.open{transform:translateX(0)}
+html.touch .shop-head{font-size:15px;margin-bottom:4px;align-items:center;gap:6px}
+html.touch .shop-grp{padding:9px 8px;font-size:16px;min-height:44px;box-sizing:border-box}
+html.touch .shop-grp.sel{background:rgba(255,255,255,.22)}
+html.touch .shop-row{padding:8px 6px;min-height:56px;box-sizing:border-box}
+html.touch .shop-row:active{background:rgba(255,255,255,.18)}
+html.touch .shop-row.has-sub{padding-bottom:20px}
+html.touch .shop-row .ico{width:72px;height:32px}
+html.touch .shop-row .ico img{width:72px;height:32px}
+html.touch .shop-row .sub{left:92px}
+html.touch .shop-grp .badge,html.touch .shop-row .badge,html.touch .shop-foot{display:none}
 `
 
 const CART = '<svg viewBox="0 0 24 24"><path d="M2 3h3l2.2 11.2a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.5L21 7H6"/><circle cx="10" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/></svg>'
@@ -79,8 +108,12 @@ export function createShop(deps: ShopDeps) {
   document.body.appendChild(panel)
   const head = document.createElement('div')
   head.className = 'shop-head'
-  head.innerHTML = '<span>CỬA HÀNG</span><span class="m"></span>'
+  head.innerHTML = `<span>${t('hud.shop.title')}</span><span class="m"></span>`
   const moneyEl = head.querySelector('.m') as HTMLElement
+  const closeBtn = document.createElement('span')   // touch only (CSS): there is no B / 0 key on a phone
+  closeBtn.className = 'shop-x'; closeBtn.appendChild(hudIcon('close', '20px'))
+  closeBtn.setAttribute('role', 'button'); closeBtn.setAttribute('aria-label', t('hud.shop.close'))
+  head.appendChild(closeBtn)
   panel.appendChild(head)
 
   const sub = document.createElement('div')
@@ -95,7 +128,7 @@ export function createShop(deps: ShopDeps) {
     const gel = document.createElement('div'); gel.className = 'shop-grp'
     const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = `(${g.num})`
     const txt = document.createElement('span')
-    txt.textContent = CATEGORY_LABEL[g.cat]
+    txt.textContent = t(g.label)
     const cur = document.createElement('span'); cur.className = 'cur'
     txt.appendChild(cur)
     gel.append(badge, txt)
@@ -110,8 +143,8 @@ export function createShop(deps: ShopDeps) {
       const el = document.createElement('div')
       el.className = 'shop-row'
       const bd = document.createElement('span'); bd.className = 'badge'; bd.textContent = `(${num})`
-      const ico = document.createElement('span'); ico.className = 'ico'; ico.appendChild(weaponIcon(w.key, WEAPON_LABEL[w.key] ?? w.name))
-      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = WEAPON_LABEL[w.key] ?? w.name
+      const ico = document.createElement('span'); ico.className = 'ico'; ico.appendChild(weaponIcon(w.key, weaponLabel(w.key, w.name)))
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = weaponLabel(w.key, w.name)
       const pr = document.createElement('span'); pr.className = 'pr'
       const sb = document.createElement('span'); sb.className = 'sub'
       el.append(bd, ico, nm, pr, sb)
@@ -126,7 +159,7 @@ export function createShop(deps: ShopDeps) {
   foot.className = 'shop-line'
   const footTxt = document.createElement('div')
   footTxt.className = 'shop-foot'
-  footTxt.textContent = `Mỗi dòng súng chỉ mang được 1 loại. Mua trùng dòng sẽ tự bán súng đang có (${Math.round((deps.eco?.() ?? ECONOMY).sellRatio * 100)}%).\nLựu đạn tối đa ${GRENADE.maxCarry} quả, không bán lại.`
+  footTxt.textContent = t('hud.shop.footer', { pct: Math.round((deps.eco?.() ?? ECONOMY).sellRatio * 100), he: maxCarryOf('m67'), smoke: maxCarryOf('smoke') })
   footTxt.style.whiteSpace = 'pre-line'
   panel.append(foot, footTxt)
 
@@ -139,8 +172,9 @@ export function createShop(deps: ShopDeps) {
     if (v === open) return
     open = v
     if (!v) selectGroup(null)
+    else if (IS_TOUCH) selectGroup(groups[0] ?? null)
     panel.classList.toggle('open', v)
-    cart.classList.toggle('shift', v)   // menu trượt ra từ mép trái: đẩy giỏ sang phải để không bị đè
+    cart.classList.toggle('shift', v)   // the menu slides out from the left edge: push the cart right so it is not covered
     deps.onOpenChange?.(v)
   }
 
@@ -155,13 +189,18 @@ export function createShop(deps: ShopDeps) {
   function refresh(): void {
     const money = deps.money()
     const lo = asLoadout()
-    const key = `${money}|${lo.slots.map(w => (w ? w.key + w.paid + ':' + (w.count ?? 0) : '-')).join(',')}`
+    const key = `${money}|${lo.slots.map(w => (w ? w.key + w.paid + ':' + JSON.stringify(w.counts ?? w.count ?? 0) : '-')).join(',')}`
     if (key === drawKey) return
     drawKey = key
     moneyEl.textContent = `$${money}`
-    for (const g of groups) {
-      const w = lo.slots[CATEGORY_SLOT[g.def.cat]]
-      g.cur.textContent = w ? (WEAPON_LABEL[w.key] ?? w.key) + (w.count ? ` ×${w.count}` : '') : '—'
+    for (const g of groups) {   // small line under the group name: items owned that belong to this group
+      const have: string[] = []
+      for (const r of g.rows.values()) {
+        const def = WEAPONS.find(w => w.key === r.key)!
+        if (def.consumable) { const n = grenadeCount(lo, r.key); if (n > 0) have.push(`${weaponLabel(r.key)} ×${n}`) }
+        else if (lo.slots[CATEGORY_SLOT[def.category]]?.key === r.key) have.push(weaponLabel(r.key))
+      }
+      g.cur.textContent = have.length ? have.join(' · ') : '—'
     }
     for (const r of rows) {
       const q = quoteBuy(money, lo, r.key, deps.eco?.())
@@ -169,18 +208,19 @@ export function createShop(deps: ShopDeps) {
       const old = lo.slots[CATEGORY_SLOT[def.category]] ?? null
       const owned = !q.ok && q.reason === 'already_owned'
       const full = !q.ok && q.reason === 'max_carry'
-      const cnt = def.consumable ? (old?.count ?? 0) : 0
-      r.pr.textContent = owned ? 'Đang dùng' : full ? `Đã đủ (${cnt}/${GRENADE.maxCarry})` : def.consumable && cnt > 0 ? `${cnt}/${GRENADE.maxCarry} · $${def.price}` : `$${def.price}`
+      const cnt = def.consumable ? grenadeCount(lo, r.key) : 0
+      const maxN = maxCarryOf(r.key)
+      r.pr.textContent = owned ? t('hud.shop.inUse') : full ? t('hud.shop.full', { cnt, max: maxN }) : def.consumable && cnt > 0 ? `${cnt}/${maxN} · $${def.price}` : `$${def.price}`
       r.pr.classList.toggle('bad', !q.ok && q.reason === 'not_enough_money')
       r.el.classList.toggle('dim', !q.ok)
       r.el.classList.toggle('owned', owned)
       let sub = ''
       if (old && !owned && !def.consumable) {
-        const oldName = WEAPON_LABEL[old.key] ?? old.key
+        const oldName = weaponLabel(old.key)
         const refund = q.refund
         sub = refund > 0
-          ? `bán ${oldName} +$${refund} · ${q.net >= 0 ? 'trả' : 'nhận'} $${Math.abs(q.net)}`
-          : `${oldName} cấp sẵn, không bán lại`
+          ? t(q.net >= 0 ? 'hud.shop.sellPay' : 'hud.shop.sellGet', { name: oldName, refund, amount: Math.abs(q.net) })
+          : t('hud.shop.issued', { name: oldName })
       }
       r.sub.textContent = sub
       r.el.classList.toggle('has-sub', sub !== '')
@@ -207,14 +247,16 @@ export function createShop(deps: ShopDeps) {
   }
 
   cart.addEventListener('click', () => api.toggle())
+  closeBtn.addEventListener('click', () => setOpen(false))
 
   const api = {
     get isOpen(): boolean { return open },
-    toggle(): void { if (open) setOpen(false); else if (deps.canShop()) setOpen(true) },
+    toggle(): void { if (open) setOpen(false); else if (deps.canShop()) setOpen(true); else deps.onDenied?.() },
     close(): void { setOpen(false) },
-    /** Phím số khi menu mở: cấp 1 chọn dòng súng (2–5), cấp 2 chọn loại. true nếu đã xử lý (không đổi súng) */
+    /** Number key while the menu is open: level 1 picks a group (1–4, 8), level 2 picks an item, 0 exits. Returns true if handled (no weapon switch) */
     digit(n: number): boolean {
       if (!open) return false
+      if (n === 0) { setOpen(false); return true }   // 0 = exit, as in CS 1.6
       if (!selected) {
         const g = groups.find(x => x.def.num === n)
         if (g) openGroup(g)
@@ -222,23 +264,23 @@ export function createShop(deps: ShopDeps) {
       }
       const r = selected.rows.get(n)
       if (r) buyKey(r.key)
-      else { const g = groups.find(x => x.def.num === n); if (g) openGroup(g) }   // bấm số dòng khác khi đang ở cấp 2: nhảy sang dòng đó
+      else { const g = groups.find(x => x.def.num === n); if (g) openGroup(g) }   // pressing another group number while on level 2: jump to that group
       return true
     },
-    onBuyResult(ok: boolean, key: string): void { feedback(key, ok); if (ok) setOpen(false) },   // mua xong tự đóng cửa hàng
-    /** Gọi mỗi frame: tự đóng khi ra khỏi khu mua / chết / hết trận, cập nhật giỏ + danh sách */
+    onBuyResult(ok: boolean, key: string): void { feedback(key, ok); if (ok) setOpen(false) },   // close the shop after a purchase
+    /** Call every frame: closes itself when leaving the buy zone / dying / match end, updates the cart + list */
     tick(): void {
       const can = deps.canShop()
       cart.classList.toggle('on', can)
       if (!can && open) setOpen(false)
       if (open) refresh()
     },
-    /** Thời gian mua còn lại (ms) cạnh giỏ hàng; null = ẩn */
+    /** Remaining buy time (ms) next to the cart; null = hidden */
     setBuyLeft(ms: number | null): void {
-      const t = ms === null ? '' : ` Mua: ${Math.floor(Math.ceil(ms / 1000) / 60)}:${String(Math.ceil(ms / 1000) % 60).padStart(2, '0')}`
-      if (buyEl.textContent !== t) buyEl.textContent = t
+      const text = ms === null ? '' : t('hud.shop.buyTime', { time: `${Math.floor(Math.ceil(ms / 1000) / 60)}:${String(Math.ceil(ms / 1000) % 60).padStart(2, '0')}` })
+      if (buyEl.textContent !== text) buyEl.textContent = text
     },
-    /** Dùng khi mở bằng click lúc đổi trạng thái tiền: buộc vẽ lại */
+    /** Used when opened by click while the money state changes: forces a redraw */
     invalidate(): void { drawKey = '' },
   }
   return api

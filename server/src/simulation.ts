@@ -1,20 +1,22 @@
 import {
   Btn, DT, MatchPhase, NetFlag, INPUT_STARVE_GRACE_TICKS, MAX_INPUTS_PER_TICK, MAX_INPUT_QUEUE, MsgType, SEQ_AHEAD_SLACK_MS, SNAPSHOT_EVERY_TICKS, TICK_RATE, VOID_Y,
-  WEAPONS, ZOMBIE, CLAW_HEAVY_ID, DEFENSE, DOWNED_BUTTON_MASK, DOWNED_WEAPON_SLOT, isValidCmd, movementFor, phaseButtonMask, moveSpeedMul, adsMoveFor, adsWanted, recoverRecoil, stateToNet, stepMovement, stepWeaponCmd,
+  WEAPONS, ZOMBIE, CLAW_HEAVY_ID, DEFENSE, fallDamage, DOWNED_BUTTON_MASK, DOWNED_WEAPON_SLOT, isValidCmd, movementFor, phaseButtonMask, moveSpeedMul, adsMoveFor, adsWanted, recoverRecoil, stateToNet, stepMovement, stepWeaponCmd,
   type MovementConfig, type NetPlayer,
 } from '@fps/shared'
 import type { Player, Room } from './room'
 import { resolveShot } from './shooting'
 import { spawnThrown, stepGrenades } from './grenades'
+import { stepWeaponDrops } from './weaponDrops'
+import { pruneSmokes } from './smoke'
 import { updateMatch } from './match'
 
-// Khi không có input mới, giữ hướng di chuyển nhưng không lặp hành động một lần
+// When there is no new input, keep the movement direction but do not repeat one-shot actions
 const HELD_MASK = ~(Btn.Jump | Btn.Fire | Btn.Reload | Btn.Ability | Btn.Sniff)
 const MAX_CMDS_PER_MSG = 16
 
-// Cmd từ client không đáng tin: sai thì bỏ; hàng đợi quá dài thì bỏ cmd cũ nhất.
-// seq quyết định thời gian của súng (fire rate/reload) nên không được chạy nhanh hơn thời gian thực:
-// cmd có seq vượt quá SEQ_AHEAD_SLACK_MS so với mốc của cmd đầu tiên thì bỏ (seq nhảy cóc, gửi dồn).
+// Client cmds are untrusted: drop invalid ones; if the queue gets too long, drop the oldest cmd.
+// seq drives weapon timing (fire rate/reload), so it must not run faster than real time:
+// a cmd whose seq exceeds SEQ_AHEAD_SLACK_MS relative to the first cmd's reference is dropped (seq jumps, bursts).
 export function enqueueCmds(p: Player, cmds: unknown, nowMs: number = performance.now()): void {
   if (!Array.isArray(cmds)) return
   for (let i = 0; i < cmds.length && i < MAX_CMDS_PER_MSG; i++) {
@@ -28,11 +30,25 @@ export function enqueueCmds(p: Player, cmds: unknown, nowMs: number = performanc
   }
 }
 
-// Biến hình (plan 16): bất tử, đứng yên, không bắn. Client áp cùng luật qua NetFlag.Transform
+// Transforming (plan 16): invulnerable, stationary, cannot shoot. The client applies the same rule via NetFlag.Transform
 function buttonMask(p: Player, room: Room | null): number {
   if (room && room.serverNow < p.transformUntil) return 0
   const m = phaseButtonMask(room?.phase ?? MatchPhase.Playing, p.alive)
-  return p.downed ? m & DOWNED_BUTTON_MASK : m   // gục: không nhảy/ngồi/ném lựu đạn
+  return p.downed ? m & DOWNED_BUTTON_MASK : m   // downed: no jumping/crouching/throwing grenades
+}
+
+// Landing after a fall (not grounded on the previous step, grounded on this one): deduct health by fall speed, CS style.
+// Living players only (zombies jumping from heights is normal; invulnerable right after respawn; downed players take no extra damage).
+// Running out of health from a fall = suicide (killerId = self, like falling off the map).
+function applyFallDamage(p: Player, room: Room | null, wasGrounded: boolean, velYBefore: number, gravity: number): void {
+  if (wasGrounded || !p.state.grounded || !room || !p.alive || p.zstats || p.downed || p.hp <= 0 || room.serverNow < p.invulnUntil) return
+  const damage = fallDamage(-(velYBefore - gravity * DT))   // velocity before movement zeroes vel.y on landing
+  if (damage <= 0) return
+  p.hp -= damage
+  p.lastHurtAt = room.serverNow
+  if (p.hp <= 0) { p.killerId = p.id; p.killWeapon = p.weapon.current; p.killHeadshot = false }
+  const pos = p.state.pos
+  p.transport.send({ t: MsgType.Hurt, origin: [pos[0], pos[1], pos[2]], damage, fall: true })
 }
 
 export function stepPlayer(p: Player, baseCfg: MovementConfig, room: Room | null = null): void {
@@ -41,9 +57,9 @@ export function stepPlayer(p: Player, baseCfg: MovementConfig, room: Room | null
   let ran = 0
   while (ran < MAX_INPUTS_PER_TICK && p.inputQueue.length > 0) {
     const cmd = p.inputQueue.shift()!
-    if (cmd.seq <= p.lastProcessedSeq) continue   // trùng hoặc cũ
-    // Nút bị cấm (chết / đếm ngược / hết trận): bỏ nút, vẫn bước để rơi xuống đất, xoay và ack tiếp.
-    // Client áp cùng phaseButtonMask nên dự đoán khớp.
+    if (cmd.seq <= p.lastProcessedSeq) continue   // duplicate or old
+    // Forbidden buttons (dead / countdown / match over): strip the buttons, still step so the player falls to the ground, turns and keeps being acked.
+    // The client applies the same phaseButtonMask, so prediction matches.
     const mask = buttonMask(p, room)
     let eff = cmd
     if ((cmd.buttons & ~mask) !== 0) {
@@ -51,33 +67,36 @@ export function stepPlayer(p: Player, baseCfg: MovementConfig, room: Room | null
       eff.seq = cmd.seq; eff.yaw = cmd.yaw; eff.pitch = cmd.pitch; eff.weapon = cmd.weapon
       eff.buttons = cmd.buttons & mask; eff.fireRenderTime = cmd.fireRenderTime
     }
-    if (p.downed) {   // gục: chỉ cầm súng ngắn (không có thì không bắn được)
+    if (p.downed) {   // downed: only a pistol can be held (without one, no shooting)
       if (eff === cmd) { eff = p.deadCmd; eff.seq = cmd.seq; eff.yaw = cmd.yaw; eff.pitch = cmd.pitch; eff.buttons = cmd.buttons & mask; eff.fireRenderTime = cmd.fireRenderTime }
       eff.weapon = DOWNED_WEAPON_SLOT
       if ((p.weapon.slots[DOWNED_WEAPON_SLOT] ?? -1) < 0) eff.buttons &= ~(Btn.Fire | Btn.Reload)
     }
-    // Tốc độ theo súng đang cầm TRƯỚC cmd này (đổi súng ở cuối tick); client dự đoán và replay cùng thứ tự
+    // Speed depends on the weapon held BEFORE this cmd (weapon switches happen at the end of the tick); the client predicts and replays in the same order
+    const wasGrounded = p.state.grounded, velYBefore = p.state.vel[1]
     p.state = stepMovement(p.state, eff, p.world, cfg, DT, moveSpeedMul(p.weapon), adsMoveFor(p.weapon), adsWanted(p.weapon, eff.buttons, cmd.seq * 1000 / TICK_RATE))
+    applyFallDamage(p, room, wasGrounded, velYBefore, cfg.gravity)
     p.lastProcessedSeq = cmd.seq
     p.lastCmd = cmd
     p.flashlight = p.alive && !p.zstats && (eff.buttons & Btn.Flashlight) !== 0
     if (room && eff.buttons !== 0) room.mode.onCmd?.(room, p, eff.buttons)
-    // Chạy cả khi chết (nút đã bị mask nên không bắn được): wantSlot/hoàn tất nạp khớp với dự đoán của client
+    // Runs even when dead (buttons are masked so no shooting): wantSlot/reload completion matches the client's prediction
     const ev = stepWeaponCmd(p.weapon, eff)
     if (ev === 'fired' && p.alive) {
       p.shotsFired++
-      p.invulnUntil = 0   // bắn phát hợp lệ đầu tiên thì hết bất tử
+      p.invulnUntil = 0   // the first valid shot ends invulnerability
       if (room) {
         const cur = WEAPONS[p.weapon.current]!
         const windup = cur.id === CLAW_HEAVY_ID ? ZOMBIE.heavyWindupMs : cur.category === 'claw' ? p.zstats?.windupMs ?? 0 : 0
-        if (windup > 0) p.pendingClaw = { at: room.serverNow + windup, cmd: { ...eff }, defId: cur.id }   // cào có báo trước: người lùi kịp thì hụt
+        if (windup > 0) p.pendingClaw = { at: room.serverNow + windup, cmd: { ...eff }, defId: cur.id }   // telegraphed claw: a player who backs off in time is missed
         else resolveShot(p, room, eff, baseCfg)
       }
     } else if (room && p.alive && (ev === 'pull' || ev === 'cancel' || ev === 'threw')) {
-      // Lựu đạn: động tác cho người khác vẽ; ném thật thì tạo quả (state đã là sau cmd này)
+      // Grenade: the animation is drawn for others; a real throw creates the grenade (state is already post this cmd)
       const mode = p.weapon.nade.mode
       if (ev === 'threw') { p.invulnUntil = 0; spawnThrown(room, p, mode, cfg) }
-      const anim = { t: MsgType.GrenadeAnim, playerId: p.id, phase: ev === 'pull' ? 'pulling' : ev === 'threw' ? 'throw' : 'cancel', mode } as const
+      const kind = WEAPONS[p.weapon.current]!.key
+      const anim = { t: MsgType.GrenadeAnim, playerId: p.id, phase: ev === 'pull' ? 'pulling' : ev === 'threw' ? 'throw' : 'cancel', mode, ...(kind === 'm67' ? {} : { kind }) } as const
       for (const o of room.players.values()) o.transport.send(anim)
     }
     recoverRecoil(p.recoil, WEAPONS[p.weapon.current]!, p.weapon, cmd.seq * 1000 / TICK_RATE, DT)
@@ -85,23 +104,25 @@ export function stepPlayer(p: Player, baseCfg: MovementConfig, room: Room | null
   }
   if (ran > 0) { p.starvedTicks = 0; return }
 
-  // Hàng đợi trống. Cmd đến trễ vài ms do jitter là chuyện thường: nếu chạy ngay một bước 'idle'
-  // thì server tiến thêm một bước mà client chưa hề dự đoán → reconcile lệch liên tục. Nên chờ tối
-  // đa INPUT_STARVE_GRACE_TICKS tick (cmd tới sau sẽ được bù, tối đa MAX_INPUTS_PER_TICK mỗi tick).
-  // Người chưa gửi cmd nào (lastCmd null) hoặc im quá lâu thì mới chạy idle.
+  // Queue empty. A cmd arriving a few ms late due to jitter is normal: running an 'idle' step right away
+  // would advance the server one step the client never predicted -> constant reconcile drift. So wait at
+  // most INPUT_STARVE_GRACE_TICKS ticks (a late cmd is made up for, at most MAX_INPUTS_PER_TICK per tick).
+  // Only run idle for players who have sent no cmd yet (lastCmd null) or have been silent too long.
   p.starvedTicks++
   if (p.lastCmd && p.starvedTicks <= INPUT_STARVE_GRACE_TICKS) return
 
-  // Chạy tiếp lastCmd đã bỏ Jump/Fire/Reload, không tăng lastProcessedSeq
+  // Keep running lastCmd with Jump/Fire/Reload removed, without advancing lastProcessedSeq
   const idle = p.idleCmd
   const last = p.lastCmd
   idle.buttons = last ? last.buttons & HELD_MASK & buttonMask(p, room) : 0
   idle.yaw = last ? last.yaw : p.state.yaw
   idle.pitch = last ? last.pitch : p.state.pitch
+  const wasGrounded = p.state.grounded, velYBefore = p.state.vel[1]
   p.state = stepMovement(p.state, idle, p.world, cfg, DT, moveSpeedMul(p.weapon), adsMoveFor(p.weapon), false)
+  applyFallDamage(p, room, wasGrounded, velYBefore, cfg.gravity)
 }
 
-// Cào mạnh tới lúc trúng (đo lại vị trí bây giờ: người lùi kịp thì hụt) + hồi máu zombie
+// Heavy claw reaching its hit time (positions re-measured now: a player who backs off in time is missed) + zombie health regen
 function stepZombieExtras(p: Player, room: Room, baseCfg: MovementConfig): void {
   const pc = p.pendingClaw
   if (pc && room.serverNow >= pc.at) {
@@ -114,25 +135,27 @@ function stepZombieExtras(p: Player, room: Room, baseCfg: MovementConfig): void 
   }
 }
 
-// serverTime = thời điểm của tick này; lịch sử hitbox ghi theo mốc này sau khi mọi người đã bước
+// serverTime = the time of this tick; the hitbox history is recorded at this timestamp after everyone has stepped
 export function stepRoom(room: Room, cfg: MovementConfig, serverTime = room.serverNow, tick?: number): void {
   room.serverNow = serverTime
   room.tick = tick ?? room.tick + 1
   for (const p of room.players.values()) {
-    if (p.bot && p.world) p.bot.drive(room, p, serverTime)   // bot sinh input trước khi bước, như một client gửi cmd
+    if (p.bot && p.world) p.bot.drive(room, p, serverTime)   // the bot generates input before stepping, like a client sending a cmd
     else if (p.npc && p.world && p.alive) p.npc.drive(room, p, serverTime)
     stepPlayer(p, cfg, room)
     stepZombieExtras(p, room, cfg)
-    if (p.alive && p.state.pos[1] < VOID_Y) { p.hp = 0; p.killerId = p.id; p.killWeapon = p.weapon.current; p.killHeadshot = false }   // rớt khỏi map
+    if (p.alive && p.state.pos[1] < VOID_Y) { p.hp = 0; p.killerId = p.id; p.killWeapon = p.weapon.current; p.killHeadshot = false }   // fell off the map
   }
   room.finalizeDeaths()
-  stepGrenades(room)   // sau finalizeDeaths: lựu đạn rơi từ người vừa chết đã vào danh sách
+  pruneSmokes(room)
+  stepGrenades(room)   // after finalizeDeaths: grenades dropped by players who just died are already in the list
+  stepWeaponDrops(room)   // likewise for guns dropped by players who just died
   room.respawnDue()
   updateMatch(room)
   room.history.record(serverTime, room.players.values())
 }
 
-// Snapshot chứa mọi người; chỉ `ack` khác nhau giữa các client
+// The snapshot contains everyone; only `ack` differs between clients
 export function sendSnapshots(room: Room, tick: number, serverTime: number): void {
   if (tick % SNAPSHOT_EVERY_TICKS !== 0 || room.players.size === 0) return
   const players: NetPlayer[] = []
@@ -146,7 +169,7 @@ export function sendSnapshots(room: Room, tick: number, serverTime: number): voi
     players.push(np)
   }
   for (const p of room.players.values()) {
-    if (p.npc) continue   // zombie NPC không có kết nối
+    if (p.npc) continue   // NPC zombies have no connection
     p.transport.send({ t: MsgType.Snapshot, tick, serverTime, ack: p.lastProcessedSeq, players, wpn: p.weapon, money: p.money, loadout: p.loadout.slots })
   }
 }

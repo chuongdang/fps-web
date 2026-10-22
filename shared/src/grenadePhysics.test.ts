@@ -8,8 +8,8 @@ import { DT } from './constants'
 import type { PlayerState } from './movement'
 import mapRaw from '../../assets/maps/deathmatch.json'
 
-// Bản đồ thật (Deathmatch, Rapier thật). Tường thành ở x = −19: cột cao −0,2…2,6 m cách nhau khe rộng 2 m
-// (khe ở z ∈ (−1, 1) nhưng đó là chân ramp; dùng khe (4,67; 6,67)), bệ thấp dưới 0,5 m, đỉnh tường cao tới ~5,25 m. Tường biên tây ở x = −31.
+// Real map (Deathmatch, real Rapier). Castle wall at x = −19: pillars spanning −0.2…2.6 m high, separated by 2 m wide gaps
+// (gap at z ∈ (−1, 1) but that is the ramp foot; use the gap (4.67; 6.67)), low ledge under 0.5 m, wall top up to ~5.25 m. West boundary wall at x = −31.
 const map = loadMap(mapRaw as unknown as MapFile)
 const player = (pos: [number, number, number], yaw: number, pitch: number, vel: [number, number, number] = [0, 0, 0]): PlayerState =>
   ({ pos, vel, yaw, pitch, grounded: true, crouching: false, slideTimer: 0, slideCooldown: 0, adsT: 0 })
@@ -30,56 +30,56 @@ function run(g: GrenadeState, world: CollisionWorld, ticks: number): { events: G
 }
 
 describe('throwInitial', () => {
-  it('ném mạnh: tốc độ theo GRENADE.throwSpeed, pitch + throwUpDeg, cộng 50% vận tốc người ném', async () => {
+  it('strong throw: speed per GRENADE.throwSpeed, pitch + throwUpDeg, plus 50% of the thrower velocity', async () => {
     const w = await createWorld(map)
     const t = throwInitial(player([-25, 0, -3], FACE_PLUS_X, 0, [4, 0, 0]), 'strong', w)
     const sp = GRENADE.throwSpeed.strong, up = GRENADE.throwUpDeg.strong * Math.PI / 180
     expect(t.vel[0]).toBeCloseTo(sp * Math.cos(up) + 2, 4)
     expect(t.vel[1]).toBeCloseTo(sp * Math.sin(up), 4)
     expect(Math.abs(t.vel[2])).toBeLessThan(1e-6)
-    // xuất phát: trước mắt 0,3 m, lệch phải 0,15 m, thấp hơn mắt 0,05 m
+    // start: 0.3 m in front of the eyes, 0.15 m to the right, 0.05 m below the eyes
     expect(t.pos[0]).toBeCloseTo(-25 + 0.3, 4); expect(t.pos[1]).toBeCloseTo(1.6 - 0.05, 4); expect(t.pos[2]).toBeCloseTo(-3 - 0.15 * Math.sin(FACE_PLUS_X), 4)
     w.dispose()
   })
-  it('ném thấp (lob): tốc độ theo GRENADE.throwSpeed.lob', async () => {
+  it('low throw (lob): speed per GRENADE.throwSpeed.lob', async () => {
     const w = await createWorld(map)
     const t = throwInitial(player([-25, 0, -3], FACE_PLUS_X, 0), 'lob', w)
     expect(Math.hypot(...t.vel)).toBeCloseTo(GRENADE.throwSpeed.lob, 4)
     w.dispose()
   })
-  it('đứng sát tường: xuất phát tại mắt (không chui qua tường)', async () => {
+  it('standing against the wall: starts at the eyes (does not pass through the wall)', async () => {
     const w = await createWorld(map)
-    const t = throwInitial(player([-19.45, 0, -3], FACE_PLUS_X, 0), 'strong', w)   // cách mặt tường (−19,2) 0,25 m < 0,3 m phía trước
+    const t = throwInitial(player([-19.45, 0, -3], FACE_PLUS_X, 0), 'strong', w)   // 0.25 m from the wall face (−19.2) < 0.3 m forward offset
     expect(t.pos[0]).toBeCloseTo(-19.45, 6); expect(t.pos[1]).toBeCloseTo(1.6, 6)
     w.dispose()
   })
 })
 
-describe('stepGrenade (Rapier thật)', () => {
-  it('ném cao từ sát tường thành: bay qua đỉnh tường rơi xuống khu giữa', async () => {
+describe('stepGrenade (real Rapier)', () => {
+  it('high throw from against the castle wall: flies over the wall top and lands in the middle area', async () => {
     const w = await createWorld(map)
     const t = throwInitial(player([-21.5, 0, -3], FACE_PLUS_X, 70 * Math.PI / 180), 'strong', w)
     const g = make(t.pos, t.vel)
     const r = run(g, w, 300)
-    expect(r.maxY).toBeGreaterThan(5.3)        // vượt đỉnh tường
-    expect(g.pos[0]).toBeGreaterThan(-18.5)    // đã ở bên kia tường
-    expect(g.pos[1]).toBeLessThan(1)           // rơi xuống đất
+    expect(r.maxY).toBeGreaterThan(5.3)        // clears the wall top
+    expect(g.pos[0]).toBeGreaterThan(-18.5)    // already on the other side of the wall
+    expect(g.pos[1]).toBeLessThan(1)           // fell to the ground
     w.dispose()
   })
 
-  it('ném thẳng vào tường cách 2 m: nảy ngược lại, không xuyên tường', async () => {
+  it('straight throw at a wall 2 m away: bounces back, does not pass through', async () => {
     const w = await createWorld(map)
-    const t = throwInitial(player([-21.2, 0, -3], FACE_PLUS_X, 0), 'strong', w)   // cột tại z = −3 (−4,67…−1)
+    const t = throwInitial(player([-21.2, 0, -3], FACE_PLUS_X, 0), 'strong', w)   // pillar at z = −3 (−4.67…−1)
     const g = make(t.pos, t.vel)
     let minX = 1e9, maxX = -1e9
     for (let i = 0; i < 240; i++) { stepGrenade(g, w, DT); maxX = Math.max(maxX, g.pos[0]); minX = Math.min(minX, g.pos[0]) }
-    expect(maxX).toBeLessThan(-19.2 + 1e-3)    // không vượt mặt tường (cột dày 0,4 quanh x = −19)
-    expect(g.pos[0]).toBeLessThan(-19.5)       // nằm bên này, đã nảy ngược
+    expect(maxX).toBeLessThan(-19.2 + 1e-3)    // does not pass the wall face (pillar 0.4 thick around x = −19)
+    expect(g.pos[0]).toBeLessThan(-19.5)       // on this side, bounced back
     expect(g.pos[1]).toBeLessThan(0.2)
     w.dispose()
   })
 
-  it('thả rơi từ 2 m: nảy vài lần thấp dần rồi nằm yên trong < 2 giây', async () => {
+  it('dropped from 2 m: bounces a few times, lower each time, then rests within < 2 seconds', async () => {
     const w = await createWorld(map)
     const g = make([-5, 2, 5], [0, 0, 0])
     const speeds: number[] = []
@@ -92,12 +92,12 @@ describe('stepGrenade (Rapier thật)', () => {
     expect(speeds.length).toBeGreaterThanOrEqual(2)
     for (let i = 1; i < speeds.length; i++) expect(speeds[i]!).toBeLessThan(speeds[i - 1]!)
     expect(restTick).toBeGreaterThan(0); expect(restTick).toBeLessThan(120)
-    expect(g.pos[1]).toBeLessThan(GRENADE.radius + 0.02)   // nằm trên sàn
+    expect(g.pos[1]).toBeLessThan(GRENADE.radius + 0.02)   // lying on the floor
     expect(g.vel).toEqual([0, 0, 0])
     w.dispose()
   })
 
-  it('tất định: 2 world riêng, cùng đầu vào, 300 tick → từng số giống hệt', async () => {
+  it('deterministic: 2 separate worlds, same input, 300 ticks → every number identical', async () => {
     const w1 = await createWorld(map), w2 = await createWorld(map)
     const t = throwInitial(player([-23, 0, -2], FACE_PLUS_X + 0.2, 0.35, [1, 0, 0.5]), 'strong', w1)
     const a = make(t.pos, t.vel), b = make(t.pos, t.vel)
@@ -109,35 +109,35 @@ describe('stepGrenade (Rapier thật)', () => {
     w1.dispose(); w2.dispose()
   })
 
-  it('ném vào khe lỗ bắn (rộng 2 m, z ∈ (4,67; 6,67)): đi lọt qua', async () => {
+  it('throw into the firing gap (2 m wide, z ∈ (4.67; 6.67)): passes through', async () => {
     const w = await createWorld(map)
     const t = throwInitial(player([-24, 0, 5.667], FACE_PLUS_X, 0), 'strong', w)
     const g = make(t.pos, t.vel)
     run(g, w, 90)
-    expect(g.pos[0]).toBeGreaterThan(-17)      // qua bức tường x = −19
+    expect(g.pos[0]).toBeGreaterThan(-17)      // past the wall at x = −19
     w.dispose()
   })
 
-  it('lăn trên dốc (ramp) không xuyên xuống dưới', async () => {
+  it('rolling on a ramp does not fall through', async () => {
     const w = await createWorld(map)
-    const g = make([-23, 2.5, 0], [0, 0, 0])   // thả lên ramp (−27,0,0)→(−19,75,4,1,0)
+    const g = make([-23, 2.5, 0], [0, 0, 0])   // dropped onto the ramp (−27,0,0)→(−19,75,4,1,0)
     for (let i = 0; i < 240; i++) stepGrenade(g, w, DT)
     expect(g.pos[1]).toBeGreaterThan(-0.05)
     w.dispose()
   })
 
-  it('ném thấp (lob) trên sàn phẳng: nảy rồi lăn một đoạn và nằm yên (không lăn mãi)', async () => {
+  it('low throw (lob) on flat floor: bounces, rolls a bit and rests (does not roll forever)', async () => {
     const w = await createWorld(map)
     const t = throwInitial(player([-5, 0, 5], FACE_PLUS_X, -0.3), 'lob', w)
     const g = make(t.pos, t.vel)
     const r = run(g, w, 600)
     expect(r.restTick).toBeGreaterThan(0)
-    expect(g.pos[0]).toBeGreaterThan(-4)   // đã đi về phía trước
+    expect(g.pos[0]).toBeGreaterThan(-4)   // already moved forward
     expect(g.pos[1]).toBeLessThan(GRENADE.radius + 0.02)
     w.dispose()
   })
 
-  it('resting: không làm gì, không phát sự kiện', async () => {
+  it('resting: does nothing, emits no events', async () => {
     const w = await createWorld(map)
     const g = make([-5, 0.05, 5], [3, 0, 0]); g.resting = true
     expect(stepGrenade(g, w, DT)).toBeNull(); expect(g.pos).toEqual([-5, 0.05, 5])

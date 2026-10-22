@@ -1,10 +1,10 @@
-# Phase 1 – Đi lại một mình (offline)
+# Phase 1 – Moving around solo (offline)
 
-Mục tiêu: chạy nhảy trượt trong map "Hai thành" thấy sướng tay. **Toàn bộ logic di chuyển nằm trong `shared/`** vì phase 3 server sẽ chạy y hệt.
+Goal: running, jumping and sliding in the "Two Citadels" map feels great. **All movement logic lives in `shared/`**, because in phase 3 the server will run exactly the same code.
 
 ---
 
-## Kiểu dữ liệu (dùng xuyên suốt dự án)
+## Data types (used throughout the project)
 
 ```ts
 // shared/src/movement.ts
@@ -14,72 +14,72 @@ export const Btn = {
 } as const;
 
 export interface InputCmd {
-  seq: number;        // tăng 1 mỗi tick ở client
-  buttons: number;    // bitmask Btn
+  seq: number;        // increments by 1 per tick on the client
+  buttons: number;    // Btn bitmask
   yaw: number;
   pitch: number;
-  weapon: number;     // slot súng (phase 2)
-  fireRenderTime?: number; // phase 4, chỉ có khi đang bắn
+  weapon: number;     // weapon slot (phase 2)
+  fireRenderTime?: number; // phase 4, only present while firing
 }
 
 export interface PlayerState {
-  pos: [number, number, number];  // chân nhân vật (đáy capsule)
+  pos: [number, number, number];  // the character's feet (bottom of the capsule)
   vel: [number, number, number];
   yaw: number;
   pitch: number;
   grounded: boolean;
   crouching: boolean;
-  slideTimer: number;     // > 0 = đang trượt
+  slideTimer: number;     // > 0 = sliding
   slideCooldown: number;
 }
 ```
 
-Chữ ký hàm chính:
+Main function signature:
 
 ```ts
 export function stepMovement(
-  state: PlayerState,       // KHÔNG sửa trực tiếp, trả về state mới
+  state: PlayerState,       // do NOT mutate directly, return a new state
   input: InputCmd,
-  world: CollisionWorld,    // wrapper quanh Rapier, xem dưới
+  world: CollisionWorld,    // wrapper around Rapier, see below
   cfg: MovementConfig,
   dt: number,
 ): PlayerState;
 ```
 
-`CollisionWorld` (trong `shared/src/physics/world.ts`) cung cấp đúng 2 việc:
+`CollisionWorld` (in `shared/src/physics/world.ts`) provides exactly 2 things:
 - `moveCharacter(pos, desiredDelta, crouching) → { pos, grounded, hitCeiling }`
-- `canStand(pos) → boolean` (đủ chỗ để đứng dậy không)
+- `canStand(pos) → boolean` (is there enough room to stand up)
 
-`stepMovement` **không được** đọc thời gian thực, `Math.random`, biến toàn cục, DOM.
+`stepMovement` **must not** read real time, `Math.random`, global variables, or the DOM.
 
 ---
 
-## Task 1.1 – Pointer lock + nhìn chuột
+## Task 1.1 – Pointer lock + mouse look
 
-Làm (`client/src/input.ts`):
-- Click canvas → `requestPointerLock()`. Esc thoát (trình duyệt tự xử lý), hiện overlay "Click để chơi".
-- `mousemove`: `yaw -= movementX * sens`, `pitch -= movementY * sens`, kẹp pitch trong ±89° (±1.553 rad). `sens` mặc định 0.0022 rad/pixel, lưu localStorage.
-- Phím: giữ trạng thái WASD, Space, Ctrl/C (ngồi), R, chuột trái (bắn). Xuất ra hàm `sampleButtons(): number`.
-- Camera: `camera.rotation.order = 'YXZ'`, gán `rotation.y = yaw`, `rotation.x = pitch` **mỗi frame** (không chờ tick, để nhìn chuột không bị trễ).
+Do (`client/src/input.ts`):
+- Click the canvas → `requestPointerLock()`. Esc exits (the browser handles it), show the overlay "Click to play".
+- `mousemove`: `yaw -= movementX * sens`, `pitch -= movementY * sens`, clamp pitch to ±89° (±1.553 rad). `sens` defaults to 0.0022 rad/pixel, saved in localStorage.
+- Keys: hold state for WASD, Space, Ctrl/C (crouch), R, left mouse button (fire). Export a function `sampleButtons(): number`.
+- Camera: `camera.rotation.order = 'YXZ'`, set `rotation.y = yaw`, `rotation.x = pitch` **every frame** (do not wait for the tick, so mouse look has no lag).
 
-Nghiệm thu:
-- [ ] Chuột phải → nhìn sang phải. Chuột lên → ngước lên. Không lộn ngược khi kéo hết cỡ.
-- [ ] Xoay chuột mượt ở màn 144Hz (không giật theo tick 60).
-- [ ] Ctrl+W không đóng tab khi đang khoá chuột (dùng C làm phím ngồi mặc định, Ctrl là phụ).
+Acceptance:
+- [ ] Mouse right → look right. Mouse up → look up. No flipping upside down when dragging to the limit.
+- [ ] Mouse rotation is smooth on a 144Hz display (does not stutter to the 60 tick).
+- [ ] Ctrl+W does not close the tab while the mouse is locked (use C as the default crouch key, Ctrl as secondary).
 
 Pitfall:
-- Một số trình duyệt thỉnh thoảng trả `movementX` đột biến rất lớn khi vừa khoá chuột → bỏ qua giá trị có |movementX| > 300 trong frame đầu.
+- Some browsers occasionally return a huge spike in `movementX` right when the pointer lock starts → ignore values with |movementX| > 300 in the first frame.
 
 ---
 
 ## Task 1.2 – Fixed timestep loop
 
-Làm (`client/src/loop.ts`):
+Do (`client/src/loop.ts`):
 
 ```ts
 let acc = 0, last = performance.now();
 function frame(now: number) {
-  acc += Math.min((now - last) / 1000, 0.25); // kẹp khi tab bị treo
+  acc += Math.min((now - last) / 1000, 0.25); // clamp when the tab was hung
   last = now;
   while (acc >= DT) {
     prevState = currState;
@@ -88,34 +88,34 @@ function frame(now: number) {
     acc -= DT;
   }
   const alpha = acc / DT;
-  renderPlayerAt(lerpState(prevState, currState, alpha)); // vị trí camera
+  renderPlayerAt(lerpState(prevState, currState, alpha)); // camera position
   requestAnimationFrame(frame);
 }
 ```
 
-- Vị trí camera = nội suy giữa `prevState` và `currState` theo `alpha`. Góc nhìn **không** nội suy, dùng yaw/pitch mới nhất từ chuột.
+- Camera position = interpolation between `prevState` and `currState` by `alpha`. The view angle is **not** interpolated; use the latest yaw/pitch from the mouse.
 
-Nghiệm thu:
-- [ ] Đặt màn hình 60Hz và 144Hz: tốc độ chạy giống nhau (đo bằng thời gian chạy hết một bức tường).
-- [ ] Chuyển tab 10 giây rồi quay lại: nhân vật không bị "bắn" đi xa.
+Acceptance:
+- [ ] Set the display to 60Hz and 144Hz: run speed is the same (measure by the time to run along a wall).
+- [ ] Switch tabs for 10 seconds then come back: the character is not "shot" far away.
 
 ---
 
-## Task 1.3 – stepMovement: đi, ma sát, trọng lực, nhảy ⚠️
+## Task 1.3 – stepMovement: walking, friction, gravity, jumping ⚠️
 
-`MovementConfig` mặc định (cảm giác Krunker, chỉnh sau):
+Default `MovementConfig` (Krunker feel, tune later):
 
 ```ts
 export const defaultMovement = {
   runSpeed: 8.5,        // m/s
   crouchSpeed: 4.0,
-  groundAccel: 10,      // kiểu Quake: accel * wishSpeed * dt
+  groundAccel: 10,      // Quake style: accel * wishSpeed * dt
   airAccel: 12,
-  airWishCap: 1.0,      // giới hạn wishSpeed khi trên không (cho air strafe)
+  airWishCap: 1.0,      // cap on wishSpeed while airborne (for air strafe)
   friction: 6,
   stopSpeed: 2.0,
   gravity: 22,
-  jumpVelocity: 7.0,    // cao ~1.1m
+  jumpVelocity: 7.0,    // ~1.1m high
   standHeight: 1.8, crouchHeight: 1.2, radius: 0.4,
   eyeStand: 1.6, eyeCrouch: 1.0,
   slideBoost: 3.0, slideDuration: 0.6, slideFriction: 0.8, slideCooldown: 1.0,
@@ -123,17 +123,17 @@ export const defaultMovement = {
 };
 ```
 
-Thuật toán mỗi tick (đúng thứ tự):
+Algorithm each tick (in exactly this order):
 
-1. `wishDir` = tổng `forward`/`right` theo phím (chỉ dùng yaw), chuẩn hoá; không bấm gì thì `wishDir = 0`.
+1. `wishDir` = sum of `forward`/`right` per the pressed keys (using yaw only), normalized; if nothing is pressed then `wishDir = 0`.
 2. `wishSpeed = crouching ? crouchSpeed : runSpeed`.
-3. Nếu **grounded**:
-   - Nếu đang giữ Jump → nhảy: `vel.y = jumpVelocity`, `grounded = false`, **bỏ qua ma sát tick này**. Giữ Space là tự nhảy lại ngay khi chạm đất (bunny hop kiểu Krunker).
-   - Ngược lại: áp ma sát rồi `accelerate(groundAccel)`.
-4. Nếu **trên không**: `accelerate(airAccel)` với `wishSpeed = min(wishSpeed, airWishCap)`.
+3. If **grounded**:
+   - If Jump is held → jump: `vel.y = jumpVelocity`, `grounded = false`, **skip friction this tick**. Holding Space jumps again right as you touch the ground (Krunker-style bunny hop).
+   - Otherwise: apply friction then `accelerate(groundAccel)`.
+4. If **airborne**: `accelerate(airAccel)` with `wishSpeed = min(wishSpeed, airWishCap)`.
 5. `vel.y -= gravity * dt`.
-6. Gọi `world.moveCharacter(pos, vel * dt, crouching)`. Nếu `grounded` và `vel.y < 0` → `vel.y = 0`. Nếu `hitCeiling` và `vel.y > 0` → `vel.y = 0`.
-7. Giảm `slideTimer`, `slideCooldown` theo dt (task 1.5).
+6. Call `world.moveCharacter(pos, vel * dt, crouching)`. If `grounded` and `vel.y < 0` → `vel.y = 0`. If `hitCeiling` and `vel.y > 0` → `vel.y = 0`.
+7. Decrease `slideTimer`, `slideCooldown` by dt (task 1.5).
 
 ```ts
 function accelerate(vel, wishDir, wishSpeed, accel, dt) {
@@ -155,67 +155,67 @@ function applyFriction(vel, friction, stopSpeed, dt) {
 }
 ```
 
-Cài đặt `moveCharacter` bằng Rapier:
-- Mỗi nhân vật: một capsule collider gắn kinematic body. `controller = world.createCharacterController(0.02)`.
-- `controller.setMaxSlopeClimbAngle(50°)`, `controller.enableSnapToGround(0.3)`, **tắt autostep** (dùng ramp).
+Implementing `moveCharacter` with Rapier:
+- Each character: one capsule collider attached to a kinematic body. `controller = world.createCharacterController(0.02)`.
+- `controller.setMaxSlopeClimbAngle(50°)`, `controller.enableSnapToGround(0.3)`, **autostep off** (use ramps).
 - `controller.computeColliderMovement(collider, delta, filterFlags, filterGroups)` → `computedMovement()`, `computedGrounded()`.
-- `hitCeiling`: delta.y > 0 mà movement thực tế theo y < 50% delta.y.
-- **Người chơi không va chạm nhau**: dùng collision groups, capsule người chơi chỉ va với map. (Đơn giản hoá netcode.)
+- `hitCeiling`: delta.y > 0 but the actual movement along y is < 50% of delta.y.
+- **Players do not collide with each other**: use collision groups, the player capsule only collides with the map. (Simplifies netcode.)
 
-Nghiệm thu:
-- [ ] Chạy thẳng đạt ~8,5 m/s (hiện tốc độ trên debug overlay, task 1.6).
-- [ ] Thả phím: dừng hẳn trong ~0,3 giây, không trượt như băng.
-- [ ] Đi lên ramp lên mặt tường thành được, đi xuống không bị "nảy" khỏi mặt dốc.
-- [ ] Đứng dưới đất nhảy **không** lên được mặt tường 4m.
-- [ ] Nhảy đập đầu vào mặt dưới của gờ/khung lỗ bắn thì rơi xuống ngay, không dính trần.
-- [ ] Trượt dọc tường khi chạy chéo vào tường (không bị dính lại).
-
-Pitfall:
-- Ma sát áp **trước** accelerate, và chỉ khi grounded.
-- Không chuẩn hoá vel khi tính wishDir; chỉ chuẩn hoá wishDir.
-- Nếu đi xuống dốc bị nảy: kiểm tra snap-to-ground đã bật, và bước 6 đặt `vel.y = 0` khi grounded.
-
----
-
-## Task 1.4 – Không trung, bunny hop
-
-Làm: hoàn thiện bước 3–4 ở trên nếu chưa đủ, chỉnh thông số.
-
-Nghiệm thu:
-- [ ] Giữ Space liên tục khi chạy: nhảy lại ngay lúc chạm đất, tốc độ không bị tụt do ma sát.
-- [ ] Trên không, giữ A + kéo chuột sang trái (air strafe) đổi hướng được và tăng tốc nhẹ.
-- [ ] Trên không bấm S không phanh gấp như dưới đất.
-
----
-
-## Task 1.5 – Ngồi + trượt
-
-Quy tắc:
-- Bấm Crouch khi grounded và tốc độ ngang ≥ `slideMinSpeed` và `slideCooldown ≤ 0` → bắt đầu trượt: cộng `slideBoost` theo hướng vận tốc hiện tại, `slideTimer = slideDuration`, `slideCooldown = slideCooldown`.
-- Khi `slideTimer > 0`: ma sát dùng `slideFriction`, **bỏ qua accelerate** (không lái được khi trượt, chỉ xoay nhìn), camera hạ xuống `eyeCrouch`.
-- Hết trượt mà vẫn giữ Crouch → ngồi bình thường. Nhả Crouch → đứng dậy nếu `canStand`, không thì vẫn ngồi.
-- Ngồi: đổi capsule sang `crouchHeight` (giữ chân ở yên chỗ, hạ đỉnh đầu).
-- Camera: chiều cao mắt nội suy mượt ~0,1s, không nhảy cụp.
-
-Nghiệm thu:
-- [ ] Chạy + bấm C: lướt đi một đoạn rõ rệt rồi chậm lại.
-- [ ] Bấm C liên tục không spam trượt được (có cooldown).
-- [ ] Trượt qua lỗ bắn thấp được nếu lỗ đủ cao cho tư thế ngồi (thử chỉnh một lỗ cao 1,3m để test).
-- [ ] Đứng dậy dưới gầm thấp: không đứng được, vẫn ngồi, không kẹt vào trần.
-
----
-
-## Task 1.6 – Test determinism + debug overlay
-
-Làm:
-- Test (vitest, chạy Rapier thật): tạo 2 world từ cùng map, chạy cùng dãy 600 InputCmd (ngẫu nhiên có seed: chạy, nhảy, trượt, xoay), so sánh state mỗi tick → **phải giống hệt** (so sánh từng số, sai số 0).
-- Test: dãy input "chạy thẳng 2 giây" cho tốc độ cuối trong khoảng 8,4–8,6.
-- Overlay (phím F3), góc trên trái, chữ nhỏ: FPS, tốc độ ngang, `grounded`, `slideTimer`, vị trí, yaw/pitch.
-- Panel chỉnh thông số (phím F6): slider cho mọi trường của `MovementConfig`, áp dụng ngay, nút "copy JSON" để dán lại vào code.
-
-Nghiệm thu:
-- [ ] Test determinism pass.
-- [ ] Chỉnh `runSpeed` trên panel thấy tác dụng ngay.
+Acceptance:
+- [ ] Running straight reaches ~8.5 m/s (show the speed on the debug overlay, task 1.6).
+- [ ] Releasing the keys: stops completely within ~0.3 seconds, no ice-like sliding.
+- [ ] Can walk up the ramp onto the citadel wall top, and walking down does not "bounce" off the slope.
+- [ ] Standing on the ground, jumping does **not** reach the 4m wall top.
+- [ ] Jumping and bumping the head on the underside of a ledge/slot frame drops you straight down, no sticking to the ceiling.
+- [ ] Slides along a wall when running diagonally into it (does not get stuck).
 
 Pitfall:
-- Nếu test determinism fail: thường do (1) dùng `Math.random`/thời gian trong `stepMovement`, (2) dùng chung một world cho cả 2 lần chạy, (3) thứ tự tạo collider khác nhau giữa 2 world. Sửa tận gốc, **đừng nới sai số** của test.
+- Apply friction **before** accelerate, and only when grounded.
+- Do not normalize vel when computing wishDir; only normalize wishDir.
+- If walking down a slope bounces: check that snap-to-ground is on, and that step 6 sets `vel.y = 0` when grounded.
+
+---
+
+## Task 1.4 – Air movement, bunny hop
+
+Do: finish steps 3–4 above if they are not complete, and tune the parameters.
+
+Acceptance:
+- [ ] Holding Space continuously while running: jumps again the moment you land, and speed does not drop from friction.
+- [ ] While airborne, holding A + dragging the mouse left (air strafe) changes direction and gains slight speed.
+- [ ] While airborne, pressing S does not brake as sharply as on the ground.
+
+---
+
+## Task 1.5 – Crouch + slide
+
+Rules:
+- Pressing Crouch while grounded and horizontal speed ≥ `slideMinSpeed` and `slideCooldown ≤ 0` → start sliding: add `slideBoost` along the current velocity direction, `slideTimer = slideDuration`, `slideCooldown = slideCooldown`.
+- While `slideTimer > 0`: friction uses `slideFriction`, **skip accelerate** (you cannot steer while sliding, only look around), the camera lowers to `eyeCrouch`.
+- When the slide ends while Crouch is still held → normal crouch. Releasing Crouch → stand up if `canStand`, otherwise stay crouched.
+- Crouch: switch the capsule to `crouchHeight` (keep the feet in place, lower the top of the head).
+- Camera: eye height interpolates smoothly over ~0.1s, no snapping.
+
+Acceptance:
+- [ ] Run + press C: glides a noticeable distance then slows down.
+- [ ] Mashing C does not allow spamming slides (there is a cooldown).
+- [ ] Can slide through a low firing slot if the slot is tall enough for the crouched pose (try tuning one slot to 1.3m high to test).
+- [ ] Standing up under a low overhang: cannot stand, stays crouched, does not get stuck in the ceiling.
+
+---
+
+## Task 1.6 – Determinism test + debug overlay
+
+Do:
+- Test (vitest, running real Rapier): create 2 worlds from the same map, run the same sequence of 600 InputCmd (seeded random: run, jump, slide, turn), compare the state each tick → **must be identical** (compare every number, tolerance 0).
+- Test: the input sequence "run straight for 2 seconds" gives a final speed in the range 8.4–8.6.
+- Overlay (F3 key), top-left corner, small text: FPS, horizontal speed, `grounded`, `slideTimer`, position, yaw/pitch.
+- Parameter tuning panel (F6 key): a slider for every field of `MovementConfig`, applied immediately, with a "copy JSON" button to paste back into the code.
+
+Acceptance:
+- [ ] The determinism test passes.
+- [ ] Changing `runSpeed` on the panel takes effect immediately.
+
+Pitfall:
+- If the determinism test fails: usually because (1) `Math.random`/time is used in `stepMovement`, (2) one world is shared between both runs, (3) colliders are created in a different order between the 2 worlds. Fix the root cause, **do not loosen the test tolerance**.

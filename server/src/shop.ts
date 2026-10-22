@@ -1,11 +1,11 @@
-import { MsgType, SWITCH_MS, TICK_RATE, applyBuy, grenadeCount, inBuyZone, magSizeOf, loadoutWeaponIds, quoteBuy, weaponByKey } from '@fps/shared'
+import { GRENADE_SLOT, MsgType, SWITCH_MS, TICK_RATE, applyBuy, grenadeCount, inBuyZone, magSizeOf, loadoutWeaponIds, quoteBuy, weaponByKey } from '@fps/shared'
 import type { Player, Room } from './room'
 
 function fail(p: Player, key: string, reason: string): void {
   p.transport.send({ t: MsgType.BuyResult, ok: false, reason, key })
 }
 
-// Xử lý lệnh Buy: server tự kiểm mọi thứ (còn sống, pha trận, vị trí server, tiền); client chỉ hiển thị
+// Handles the Buy command: the server validates everything itself (alive, match phase, server position, money); the client only displays
 export function handleBuy(room: Room, p: Player, key: string): void {
   const now = room.serverNow
   while (p.buyTimes.length > 0 && p.buyTimes[0]! <= now - 1000) p.buyTimes.shift()
@@ -20,17 +20,19 @@ export function handleBuy(room: Room, p: Player, key: string): void {
   const q = quoteBuy(p.money, p.loadout, key, room.eco)
   if (!q.ok) return fail(p, key, q.reason)
   const res = applyBuy(p.money, p.loadout, key, room.eco)!
-  // Offline + tiền vô hạn: mua không trừ tiền (cả bot) và không báo MoneyEvent
+  // Offline + infinite money: purchases cost nothing (bots too) and no MoneyEvent is sent
   const free = room.offline && room.infiniteMoney
   p.money = free ? p.money : res.money
   p.loadout = res.loadout
 
-  // Cầm luôn súng vừa mua: đạn đầy, huỷ nạp. Thời gian khoá bắn tính theo seq của cmd gần nhất (cùng thang với stepWeaponCmd)
+  // Equip the weapon just bought: full ammo, cancel reload. The fire lock time is based on the latest cmd seq (same scale as stepWeaponCmd)
   const ws = p.weapon
   const def = weaponByKey(key)!
+  const selectedNade = ws.slots[GRENADE_SLOT] ?? -1   // currently selected grenade type: buying another type must not change the selection
   ws.slots = loadoutWeaponIds(p.loadout)
-  if (def.consumable) {   // lựu đạn: chỉ cất vào ô 5, không tự cầm (đang cầm súng gì thì giữ nguyên)
-    ws.ammo[def.id] = grenadeCount(p.loadout)
+  if (def.consumable) {   // grenade: only stored in the grenade slot, not auto-equipped (whatever weapon is held stays held)
+    ws.ammo[def.id] = grenadeCount(p.loadout, def.key)
+    if (selectedNade >= 0 && (ws.ammo[selectedNade] ?? 0) > 0) ws.slots[GRENADE_SLOT] = selectedNade
     p.transport.send({ t: MsgType.BuyResult, ok: true, key })
     if (!free) p.transport.send({ t: MsgType.MoneyEvent, delta: -q.price, reason: 'buy' })
     return

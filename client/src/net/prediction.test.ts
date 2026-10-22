@@ -20,7 +20,7 @@ const start = (): PlayerState => ({
 const cmd = (seq: number, buttons = Btn.Forward | Btn.Right): InputCmd => ({ seq, buttons, yaw: 0.3, pitch: 0, weapon: 3 })
 const cfg = defaultMovement
 
-// "Server" chạy cùng cmd bằng stepMovement; trả state sau mỗi seq
+// "Server" runs the same cmds through stepMovement; returns the state after each seq
 function serverStates(n: number, mk = cmd): PlayerState[] {
   const out: PlayerState[] = []
   let s = start()
@@ -29,7 +29,7 @@ function serverStates(n: number, mk = cmd): PlayerState[] {
 }
 
 describe('Prediction', () => {
-  it('server khớp client: sai số 0, bỏ cmd đã ack', () => {
+  it('server matches client: zero error, acked cmds are dropped', () => {
     const p = new Prediction(flat, cfg, start())
     for (let i = 0; i < 10; i++) p.step(cmd(i))
     const srv = serverStates(10)
@@ -40,7 +40,7 @@ describe('Prediction', () => {
     expect(Math.hypot(...p.visualOffset)).toBe(0)
   })
 
-  it('replay cho ra đúng state như chạy thẳng, kể cả khi nhảy/ngồi', () => {
+  it('replay produces the same state as running straight through, including jump/crouch', () => {
     const mk = (i: number): InputCmd => cmd(i, Btn.Forward | (i === 3 ? Btn.Jump : 0) | (i > 20 && i < 40 ? Btn.Crouch : 0))
     const p = new Prediction(flat, cfg, start())
     for (let i = 0; i < 60; i++) p.step(mk(i))
@@ -52,17 +52,17 @@ describe('Prediction', () => {
     }
   })
 
-  it('lệch dưới 1m: giữ visualOffset rồi giảm dần ×0.85 mỗi frame', () => {
+  it('error under 1m: keeps visualOffset, then decays it ×0.85 per frame', () => {
     const p = new Prediction(flat, cfg, start())
     for (let i = 0; i < 10; i++) p.step(cmd(i))
     const srv = serverStates(20)
-    p.onSnapshot(2, srv[2]!)                       // sync lần đầu (teleport) → ready
+    p.onSnapshot(2, srv[2]!)                       // first sync (teleport) → ready
     for (let i = 10; i < 20; i++) p.step(cmd(i))
     const before = [...p.predicted.pos]
     const bad = { ...srv[10]!, pos: [srv[10]!.pos[0] + 0.5, srv[10]!.pos[1], srv[10]!.pos[2]] as [number, number, number] }
     p.onSnapshot(10, bad)
     expect(p.lastError).toBeCloseTo(0.5, 6)
-    // vị trí vẽ = predicted + offset phải liền mạch với vị trí cũ
+    // drawn position = predicted + offset must be seamless with the old position
     expect(p.predicted.pos[0] + p.visualOffset[0]).toBeCloseTo(before[0]!, 6)
     const m0 = Math.hypot(...p.visualOffset)
     expect(m0).toBeGreaterThan(0.4)
@@ -72,7 +72,7 @@ describe('Prediction', () => {
     expect(Math.hypot(...p.visualOffset)).toBe(0)
   })
 
-  it('lệch từ 1m trở lên: teleport, không có visualOffset, không kẹt', () => {
+  it('error of 1m or more: teleports, no visualOffset, never gets stuck', () => {
     const p = new Prediction(flat, cfg, start())
     for (let i = 0; i < 10; i++) p.step(cmd(i))
     const srv = serverStates(20)
@@ -82,13 +82,13 @@ describe('Prediction', () => {
     p.onSnapshot(10, pushed)
     expect(p.lastError).toBeCloseTo(2, 6)
     expect(Math.hypot(...p.visualOffset)).toBe(0)
-    // tiếp tục dự đoán từ vị trí server, đi tiếp bình thường
+    // keep predicting from the server position, carry on normally
     const x0 = p.predicted.pos[0]
     p.step(cmd(20))
     expect(p.predicted.pos[0]).not.toBe(x0)
   })
 
-  it('snapshot đầu tiên đặt state (teleport), chưa có offset', () => {
+  it('the first snapshot sets the state (teleport), no offset yet', () => {
     const p = new Prediction(flat, cfg, start())
     expect(p.ready).toBe(false)
     p.step(cmd(0))
@@ -96,10 +96,10 @@ describe('Prediction', () => {
     p.onSnapshot(-1, far)
     expect(p.ready).toBe(true)
     expect(Math.hypot(...p.visualOffset)).toBe(0)
-    expect(p.pending.length).toBe(1)    // cmd 0 chưa ack → replay từ vị trí server
+    expect(p.pending.length).toBe(1)    // cmd 0 not acked → replay from the server position
   })
 
-  it('maxError chỉ tính 5 giây gần nhất', () => {
+  it('maxError only covers the last 5 seconds', () => {
     let now = 0
     const p = new Prediction(flat, cfg, start(), () => now)
     const srv = serverStates(40)
@@ -107,11 +107,11 @@ describe('Prediction', () => {
     p.onSnapshot(5, { ...srv[5]!, pos: [srv[5]!.pos[0] + 0.3, 0, srv[5]!.pos[2]] })
     expect(p.maxError()).toBeCloseTo(0.3, 6)
     now = 6000
-    p.onSnapshot(30, p.pending.find(x => x.cmd.seq === 30)!.stateAfter)   // server khớp dự đoán
+    p.onSnapshot(30, p.pending.find(x => x.cmd.seq === 30)!.stateAfter)   // server matches the prediction
     expect(p.maxError()).toBe(0)
   })
 
-  it('giới hạn pending', () => {
+  it('pending is capped', () => {
     const p = new Prediction(flat, cfg, start())
     for (let i = 0; i < 1000; i++) p.step(cmd(i))
     expect(p.pending.length).toBeLessThanOrEqual(240)

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
 import { SkeletonArm, type FingerBones } from './skeletonArm'
 
-// Khung xương tay giả: vai ở gốc, tay duỗi theo +X (T-pose), bàn tay có 5 ngón mỗi ngón 3 đốt
+// Fake arm skeleton: shoulder at the origin, arm stretched along +X (T-pose), hand with 5 fingers of 3 joints each
 function makeArm(side: 'L' | 'R') {
   const dir = side === 'R' ? 1 : -1
   const root = new THREE.Group()
@@ -17,49 +17,49 @@ function makeArm(side: 'L' | 'R') {
 }
 
 describe('SkeletonArm', () => {
-  it('đo độ dài xương lúc dựng', () => {
+  it('measures bone lengths at build time', () => {
     const { arm } = makeArm('R')
     expect(arm.lenA).toBeCloseTo(0.3); expect(arm.lenB).toBeCloseTo(0.28)
   })
   for (const side of ['R', 'L'] as const) {
-    it(`tay ${side} với tới điểm trong tầm: tâm bàn tay trùng target`, () => {
+    it(`${side} arm reaches an in-range point: palm centre matches target`, () => {
       const { root, arm, hand } = makeArm(side)
       const target = new THREE.Vector3(side === 'R' ? 0.25 : -0.25, -0.2, -0.3)
       const pole = new THREE.Vector3(side === 'R' ? 0.35 : -0.35, -0.6, 0.3)
       const r = arm.solve(target, new THREE.Quaternion(), pole, 1)
       root.updateMatrixWorld(true)
       expect(r.reached).toBe(true)
-      // cổ tay = target lùi palmLen dọc hướng ngón (−Z)
+      // wrist = target moved back by palmLen along the finger direction (-Z)
       const wrist = hand.getWorldPosition(new THREE.Vector3())
       expect(wrist.x).toBeCloseTo(target.x, 2); expect(wrist.y).toBeCloseTo(target.y, 2); expect(wrist.z).toBeCloseTo(target.z + arm.palmLen, 2)
     })
-    it(`tay ${side}: khuỷu nằm phía pole (không gập ngược)`, () => {
+    it(`${side} arm: elbow is on the pole side (not bent backwards)`, () => {
       const { root, arm, fore } = makeArm(side)
       const target = new THREE.Vector3(side === 'R' ? 0.1 : -0.1, 0, -0.4)
       arm.solve(target, new THREE.Quaternion(), new THREE.Vector3(side === 'R' ? 0.4 : -0.4, -0.6, 0.3), 1)
       root.updateMatrixWorld(true)
       const elbow = fore.getWorldPosition(new THREE.Vector3())
-      expect(elbow.y).toBeLessThan(0)   // pole ở dưới
+      expect(elbow.y).toBeLessThan(0)   // pole is below
     })
   }
-  it('ngoài tầm với: duỗi thẳng về phía target, reached=false', () => {
+  it('out of reach: stretches straight toward the target, reached=false', () => {
     const { arm } = makeArm('R')
     expect(arm.solve(new THREE.Vector3(3, 0, -3), new THREE.Quaternion(), new THREE.Vector3(0, -1, 0), 1).reached).toBe(false)
   })
-  it('weight 0: không đổi gì', () => {
+  it('weight 0: changes nothing', () => {
     const { arm, upper } = makeArm('R')
     const q = upper.quaternion.clone()
     arm.solve(new THREE.Vector3(0.2, 0, -0.3), new THREE.Quaternion(), new THREE.Vector3(0.3, -0.6, 0.3), 0)
     expect(upper.quaternion.angleTo(q)).toBe(0)
   })
-  it('weight 0.5: xoay một nửa so với weight 1', () => {
+  it('weight 0.5: rotates half as much as weight 1', () => {
     const a = makeArm('R'), b = makeArm('R')
     const t = new THREE.Vector3(0.2, -0.1, -0.35), pole = new THREE.Vector3(0.35, -0.6, 0.3)
     a.arm.solve(t, new THREE.Quaternion(), pole, 1)
     b.arm.solve(t, new THREE.Quaternion(), pole, 0.5)
     expect(b.upper.quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(a.upper.quaternion.angleTo(new THREE.Quaternion()) / 2, 2)
   })
-  it('không có mixer: reset + solve + grip lặp lại nhiều frame cho kết quả y hệt (không cộng dồn)', () => {
+  it('without a mixer: reset + solve + grip repeated over many frames gives identical results (no accumulation)', () => {
     const { root, arm, upper, fore, hand } = makeArm('R')
     const t = new THREE.Vector3(0.2, -0.1, -0.35), pole = new THREE.Vector3(0.35, -0.6, 0.3), gq = new THREE.Quaternion()
     const snap = () => [upper, fore, hand, arm.fingers.middle[0]!, arm.fingers.index[2]!].map(b => b.quaternion.clone())

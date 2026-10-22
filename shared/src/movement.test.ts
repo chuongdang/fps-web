@@ -52,16 +52,16 @@ describe('stepMovement', () => {
   it('running straight 2 s reaches 8.4–8.6 m/s', async () => {
     const world = await createWorld(loadedMap)
     const spawn: [number, number, number] = [-28, 1, -6]
-    const yaw0  = -Math.PI / 2   // nhìn về +X
+    const yaw0  = -Math.PI / 2   // looks toward +X
 
     let state = makeState(spawn, yaw0)
 
-    // Để nhân vật rơi xuống sàn (~0.5 s)
+    // Let the character fall to the floor (~0.5 s)
     for (let i = 0; i < 30; i++) {
       state = stepMovement(state, { seq: i, buttons: 0, yaw: yaw0, pitch: 0, weapon: 0 }, world, cfg, DT)
     }
 
-    // Chạy thẳng 2 giây
+    // Run straight for 2 seconds
     for (let i = 0; i < TICK_RATE * 2; i++) {
       state = stepMovement(state, { seq: 30 + i, buttons: Btn.Forward, yaw: yaw0, pitch: 0, weapon: 0 }, world, cfg, DT)
     }
@@ -78,7 +78,7 @@ describe('crouch release', () => {
     return s
   }
 
-  it('nhả Ctrl ngoài trống thì đứng dậy ngay', async () => {
+  it('releasing Ctrl in the open stands up immediately', async () => {
     const world = await createWorld(loadedMap)
     let s = settle(world, makeState([-28, 1, -6], 0), 0, 30)
     s = settle(world, s, Btn.Crouch, 30)
@@ -87,7 +87,7 @@ describe('crouch release', () => {
     expect(s.crouching).toBe(false)
   })
 
-  it('nhả Ctrl sát tường (các hướng) vẫn đứng dậy', async () => {
+  it('releasing Ctrl against a wall (all directions) still stands up', async () => {
     const world = await createWorld(loadedMap)
     const base = settle(world, makeState([-28, 1, -6], 0), 0, 30)
     for (const buttons of [Btn.Forward, Btn.Back, Btn.Left, Btn.Right]) {
@@ -109,9 +109,9 @@ describe('slide', () => {
   }
   const hs = (s: PlayerState) => Math.hypot(s.vel[0], s.vel[2])
 
-  it('chạy + Crouch: trượt có boost, chậm dần, hết cooldown mới trượt lại', async () => {
+  it('run + Crouch: slide has a boost, slows down, can slide again only after the cooldown', async () => {
     const world = await createWorld(loadedMap)
-    let s = run(world, makeState([-28, 1, -6], -Math.PI / 2), Btn.Forward, 90)   // chạy tới tốc độ tối đa
+    let s = run(world, makeState([-28, 1, -6], -Math.PI / 2), Btn.Forward, 90)   // run up to max speed
     const before = hs(s)
     expect(before).toBeGreaterThan(cfg.slideMinSpeed)
 
@@ -119,26 +119,26 @@ describe('slide', () => {
     expect(s.slideTimer).toBeGreaterThan(0)
     expect(hs(s)).toBeGreaterThan(before + cfg.slideBoost * 0.9)
 
-    // Trượt không lái được: nhả W vẫn lướt, tốc độ giảm chậm (ma sát thấp)
+    // Sliding cannot be steered: releasing W keeps gliding, speed decays slowly (low friction)
     const v1 = hs(s)
     s = run(world, s, Btn.Crouch, 20)
     expect(hs(s)).toBeLessThan(v1)
     expect(hs(s)).toBeGreaterThan(v1 * 0.6)
 
-    // Nhả rồi bấm lại C khi còn cooldown (~0.5s sau lần trượt đầu): không trượt thêm
+    // Release then press C again during the cooldown (~0.5s after the first slide): no extra slide
     s = run(world, s, Btn.Forward, 5)
     expect(s.slideCooldown).toBeGreaterThan(0)
     s = run(world, s, Btn.Forward | Btn.Crouch, 1)
     expect(s.slideTimer).toBe(0)
 
-    // Hết cooldown, chạy lại đủ nhanh → trượt được lần nữa
+    // Cooldown over, run fast enough again → can slide once more
     s = run(world, s, Btn.Forward, 120)
     expect(s.slideCooldown).toBe(0)
     s = run(world, s, Btn.Forward | Btn.Crouch, 1)
     expect(s.slideTimer).toBeGreaterThan(0)
   })
 
-  it('đi chậm + Crouch: không trượt', async () => {
+  it('walk slowly + Crouch: no slide', async () => {
     const world = await createWorld(loadedMap)
     let s = run(world, makeState([-28, 1, -6], -Math.PI / 2), 0, 30)
     s = run(world, s, Btn.Crouch, 5)
@@ -146,8 +146,8 @@ describe('slide', () => {
   })
 })
 
-describe('tường chắn trời', () => {
-  it('bunny-hop từ viền bệ cao (7.2m) về phía tường không vượt ra khỏi map', async () => {
+describe('sky barrier walls', () => {
+  it('bunny-hop from the edge of the high ledge (7.2m) toward the wall does not leave the map', async () => {
     const world = await createWorld(loadedMap)
     let s = makeState([-15, 7.3, -16], 0)
     for (let i = 0; i < 30; i++) s = stepMovement(s, { seq: i, buttons: 0, yaw: 0, pitch: 0, weapon: 0 }, world, cfg, DT)
@@ -158,7 +158,7 @@ describe('tường chắn trời', () => {
   })
 })
 
-describe('adsT (ngắm)', () => {
+describe('adsT (ADS)', () => {
   const flat = {
     moveCharacter: (pos: [number, number, number], d: [number, number, number]) => ({ pos: [pos[0] + d[0], Math.max(0, pos[1] + d[1]), pos[2] + d[2]] as [number, number, number], grounded: pos[1] + d[1] <= 0, hitCeiling: false }),
     canStand: () => true, castRay: () => null, castSphere: () => null, debugRender: () => ({ vertices: new Float32Array(0), colors: new Float32Array(0) }), dispose: () => {},
@@ -167,7 +167,7 @@ describe('adsT (ngắm)', () => {
   const grounded = (over: Partial<PlayerState> = {}): PlayerState => ({ ...makeState([0, 0, 0], 0), grounded: true, ...over })
   const cmd = (seq: number, buttons = 0) => ({ seq, buttons, yaw: 0, pitch: 0, weapon: 0 })
 
-  it('giữ Aim: adsT tăng tới 1 sau inMs; thả: về 0 sau outMs', () => {
+  it('hold Aim: adsT rises to 1 after inMs; release: back to 0 after outMs', () => {
     let s = grounded()
     for (let i = 0; i < 6; i++) s = stepMovement(s, cmd(i, Btn.Aim), flat, cfg, DT, 1, ADS, true)
     expect(s.adsT).toBeCloseTo(6 * DT * 1000 / 200, 6)
@@ -176,7 +176,7 @@ describe('adsT (ngắm)', () => {
     for (let i = 0; i < 7; i++) s = stepMovement(s, cmd(i), flat, cfg, DT, 1, ADS, false)
     expect(s.adsT).toBe(0)
   })
-  it('trên không hoặc đang trượt: không vào ngắm, adsT tự giảm; súng không ngắm được (ads = null) cũng giảm', () => {
+  it('airborne or sliding: does not enter ADS, adsT decays; a gun without ADS (ads = null) decays too', () => {
     let s = stepMovement(grounded({ grounded: false, adsT: 1 }), cmd(0, Btn.Aim), flat, cfg, DT, 1, ADS, true)
     expect(s.adsT).toBeLessThan(1)
     s = stepMovement(grounded({ slideTimer: 0.3, crouching: true, adsT: 0.5 }), cmd(0, Btn.Aim | Btn.Crouch), flat, cfg, DT, 1, ADS, true)
@@ -184,7 +184,7 @@ describe('adsT (ngắm)', () => {
     s = stepMovement(grounded({ adsT: 1 }), cmd(0, Btn.Aim), flat, cfg, DT, 1, null, true)
     expect(s.adsT).toBeLessThan(1)
   })
-  it('ngắm hẳn chạy chậm theo moveMult', () => {
+  it('full ADS moves slower per moveMult', () => {
     const speed = (ads: boolean) => {
       let s = grounded()
       for (let i = 0; i < 240; i++) s = stepMovement(s, cmd(i, Btn.Forward | (ads ? Btn.Aim : 0)), flat, cfg, DT, 1, ADS, ads)
@@ -192,7 +192,7 @@ describe('adsT (ngắm)', () => {
     }
     expect(speed(true)).toBeCloseTo(speed(false) * 0.5, 1)
   })
-  it('determinism: Aim bật tắt ngẫu nhiên, hai bản state riêng cho kết quả giống hệt', () => {
+  it('determinism: Aim toggled randomly, two separate states give identical results', () => {
     const rng = mulberry32(12345)
     let a = grounded(), b = grounded()
     for (let i = 0; i < 600; i++) {

@@ -1,5 +1,5 @@
 {
-  "_doc": "Đơn vị mét, độ. Toạ độ 3rd person tính từ chân nhân vật, nhìn về -Z, phải là +X. Toạ độ 1st person tính trong không gian camera viewmodel (nhìn -Z). Mọi điểm neo trên súng tính trong hệ toạ độ của súng (gốc = tay cầm, nòng -Z).",
+  "_doc": "Units are metres and degrees. 3rd-person coordinates are measured from the character's feet, facing -Z, right is +X. 1st-person coordinates are in the viewmodel camera space (facing -Z). All anchor points on a gun are in the gun's own coordinate system (origin = grip, muzzle toward -Z).",
   "style": {
     "skinColor": "#e0a77a",
     "sleeveColor": {

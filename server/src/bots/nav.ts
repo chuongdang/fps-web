@@ -1,40 +1,40 @@
-// Lưới di chuyển cho bot (plan 15, B.1): sinh tự động từ collider map bằng Rapier (raycast/quét cầu), không cần vẽ tay.
-// Node = chỗ đứng được (mọi mặt đứng: đất, mặt tường thành, đỉnh tháp, ramp). Cạnh: đi bộ, nhảy (gờ thấp), nhảy xuống (một chiều).
+// Bot navigation grid (plan 15, B.1): generated automatically from the map colliders with Rapier (raycast / sphere sweep), no hand drawing needed.
+// Node = a place one can stand (every standable surface: ground, city wall top, tower top, ramp). Edges: walk, jump (low ledge), drop down (one-way).
 import type { LoadedMap, Vec3, MovementConfig } from '@fps/shared'
 import type { CollisionWorld } from '@fps/shared/physics/world'
 import { addZombieEdges } from './navZombie'
 
 export const NAV_CELL = 1                 // m
-const MIN_NORMAL_Y = 0.7                  // mặt đứng được
-const WALK_MAX_SLOPE = 0.7                // dy / khoảng cách ngang tối đa của cạnh đi bộ (≈35°; ramp của map ≈30–33°)
-const SURFACE_TOL = 0.2                 // sai lệch cao độ cho phép giữa mặt thật và đường thẳng nối hai node
-const JUMP_MAX_DY = 0.95                  // nhảy lên gờ cao tối đa (jumpVelocity 7, g 22 → 1,11m)
-const DROP_MAX = 4.5                      // nhảy xuống tối đa
-const SWEEP_R = 0.35                      // bán kính quả cầu quét (capsule bán kính 0,4)
-const SWEEP_LIFT = 0.5                    // quả cầu quét cách mặt đứng bấy nhiêu (đỡ vướng gờ nhỏ ≤ 0,15m)
-const COVER_RAY_H = 1.2                   // tường cao ≥ 1,2m mới che người ngồi
+const MIN_NORMAL_Y = 0.7                  // standable surface
+const WALK_MAX_SLOPE = 0.7                // max dy / horizontal distance of a walk edge (≈35°; the map's ramps are ≈30–33°)
+const SURFACE_TOL = 0.2                 // allowed height deviation between the real surface and the straight line joining two nodes
+const JUMP_MAX_DY = 0.95                  // max ledge height one can jump up (jumpVelocity 7, g 22 → 1.11m)
+const DROP_MAX = 4.5                      // max drop-down height
+const SWEEP_R = 0.35                      // radius of the swept sphere (capsule radius 0.4)
+const SWEEP_LIFT = 0.5                    // the swept sphere sits this far above the standing surface (avoids catching on small ledges ≤ 0.15m)
+const COVER_RAY_H = 1.2                   // a wall must be ≥ 1.2m high to cover a crouching player
 const COVER_RAY_LEN = 1.2
 const MAX_LAYERS = 8
 const STAND_LIFT = 0.12
 
-// Hole/Leap chỉ dành cho zombie (plan 17, T.4): Hole = bò (ngồi + nhảy) qua lỗ bắn; Leap = chiêu E bật từ đứng yên lên gờ tường / đỉnh tháp
+// Hole/Leap are for zombies only (plan 17, T.4): Hole = crawl (crouch + jump) through an arrow slit; Leap = the E ability, a jump from standing still up to the wall ledge / tower top
 export const EdgeKind = { Walk: 0, Jump: 1, Drop: 2, Hole: 3, Leap: 4 } as const
 export type EdgeKindValue = (typeof EdgeKind)[keyof typeof EdgeKind]
 
 export const Zone = { Mid: 0, BaseA: 1, BaseB: 2, WallA: 3, WallB: 4, TowerA: 5, TowerB: 6 } as const
 export type ZoneId = (typeof Zone)[keyof typeof Zone]
 
-/** 8 hướng: index 0 = +X, đi ngược chiều kim đồng hồ nhìn từ trên (x, z) */
+/** 8 directions: index 0 = +X, counter-clockwise seen from above (x, z) */
 export const DIRS8: readonly (readonly [number, number])[] = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
 ].map(([x, z]) => { const l = Math.hypot(x!, z!); return [x! / l, z! / l] as const })
 
 export interface NavEdge {
   to: number; cost: number; kind: EdgeKindValue
-  face?: [number, number]   // Hole: điểm mặt tường phía mình (x, z) — bộ não zombie tính lúc ngồi + nhảy theo khoảng cách tới đây
+  face?: [number, number]   // Hole: point on the wall face on our side (x, z) — the zombie brain times its crouch + jump by the distance to here
 }
 export interface Waypoint { x: number; y: number; z: number; jump: boolean; kind: EdgeKindValue; face?: [number, number] }
-/** Cạnh đặc biệt nào được phép dùng khi tìm đường (mặc định: không cạnh nào của zombie) */
+/** Which special edges may be used when pathfinding (default: none of the zombie edges) */
 export interface NavAbility { hole?: boolean; leap?: boolean }
 const allowed = (e: NavEdge, ab: NavAbility | undefined): boolean => e.kind < EdgeKind.Hole || (e.kind === EdgeKind.Hole ? !!ab?.hole : !!ab?.leap)
 
@@ -88,13 +88,13 @@ export class NavGrid {
   readonly x: Float32Array
   readonly y: Float32Array
   readonly z: Float32Array
-  readonly cover: Uint8Array      // bitmask 8 hướng có tường che (hướng đó là phía có tường)
+  readonly cover: Uint8Array      // bitmask of the 8 directions with cover (that direction is the side with a wall)
   readonly zone: Uint8Array
   readonly adj: NavEdge[][]
-  private readonly cols = new Map<number, number[]>()   // khoá cột (ix, iz) → các node
+  private readonly cols = new Map<number, number[]>()   // column key (ix, iz) → nodes
   private readonly minX: number
   private readonly minZ: number
-  // A* tái sử dụng
+  // reusable A* buffers
   private readonly g: Float64Array
   private readonly from: Int32Array
   private readonly stamp: Int32Array
@@ -127,7 +127,7 @@ export class NavGrid {
 
   pos(i: number, out: Vec3 = [0, 0, 0]): Vec3 { out[0] = this.x[i]!; out[1] = this.y[i]!; out[2] = this.z[i]!; return out }
 
-  /** Node gần nhất (ưu tiên cùng tầng: lệch cao bị phạt) trong bán kính `maxDist`; -1 nếu không có */
+  /** Nearest node (same floor preferred: height difference is penalised) within radius `maxDist`; -1 if none */
   nearest(px: number, py: number, pz: number, maxDist = 3): number {
     const ix = Math.floor((px - this.minX) / NAV_CELL), iz = Math.floor((pz - this.minZ) / NAV_CELL)
     const r = Math.ceil(maxDist / NAV_CELL)
@@ -139,7 +139,7 @@ export class NavGrid {
         for (const i of list) {
           const ddx = this.x[i]! - px, ddz = this.z[i]! - pz
           let ddy = this.y[i]! - py
-          if (ddy > 1.2) ddy *= 4   // node cao hơn nhiều so với chân: không với tới
+          if (ddy > 1.2) ddy *= 4   // node much higher than the feet: out of reach
           const d = ddx * ddx + ddz * ddz + ddy * ddy
           if (d < bestD) { bestD = d; best = i }
         }
@@ -148,7 +148,7 @@ export class NavGrid {
     return best
   }
 
-  /** Mọi node cách (px, pz) ≤ r theo mặt phẳng ngang và lệch cao ≤ dyMax */
+  /** Every node within r of (px, pz) on the horizontal plane and with height difference ≤ dyMax */
   nodesNear(px: number, py: number, pz: number, r: number, dyMax = 2.5, out: number[] = []): number[] {
     out.length = 0
     const ix = Math.floor((px - this.minX) / NAV_CELL), iz = Math.floor((pz - this.minZ) / NAV_CELL)
@@ -167,8 +167,8 @@ export class NavGrid {
   }
 
   /**
-   * A* giữa hai node. `costFn(node)` cộng thêm chi phí khi bước vào node (≥ 0), vd. né tầm nhìn địch.
-   * Trả danh sách node (gồm cả hai đầu) hoặc null.
+   * A* between two nodes. `costFn(node)` adds extra cost when stepping into a node (≥ 0), e.g. to avoid enemy line of sight.
+   * Returns the list of nodes (both ends included) or null.
    */
   findNodePath(start: number, goal: number, costFn?: (node: number) => number, ability?: NavAbility): number[] | null {
     if (start < 0 || goal < 0) return null
@@ -203,15 +203,15 @@ export class NavGrid {
     return null
   }
 
-  /** Cạnh a → b (nếu có) */
+  /** Edge a → b (if any) */
   edge(a: number, b: number): NavEdge | undefined {
     for (const e of this.adj[a]!) if (e.to === b) return e
     return undefined
   }
 
   /**
-   * Đường đi từ vị trí `from` tới vị trí `to` (làm mượt bằng cách bỏ node trung gian khi đi thẳng được).
-   * Waypoint `jump` = bước vào nó cần nhảy (gờ thấp / nhảy xuống không cần nhảy: chỉ bước ra).
+   * Path from position `from` to position `to` (smoothed by dropping intermediate nodes when a straight walk is possible).
+   * Waypoint `jump` = entering it requires a jump (low ledge; a drop-down needs no jump: just step off).
    */
   findPath(from: Vec3, to: Vec3, costFn?: (node: number) => number, ability?: NavAbility): Waypoint[] | null {
     const s = this.nearest(from[0], from[1], from[2]), t = this.nearest(to[0], to[1], to[2])
@@ -223,7 +223,7 @@ export class NavGrid {
   smooth(nodes: number[]): Waypoint[] {
     const out: Waypoint[] = []
     let i = 0
-    // node đầu là chỗ đang đứng: bỏ nếu còn node sau
+    // the first node is where we are standing: drop it if more nodes follow
     if (nodes.length > 1) i = 1
     const first = nodes[0]!
     let anchor = first
@@ -237,7 +237,7 @@ export class NavGrid {
         anchor = cur; i++
         continue
       }
-      // đi bộ: kéo dài đoạn thẳng tới node xa nhất còn đi thẳng được qua các cạnh đi bộ
+      // walking: extend the straight segment to the farthest node still reachable in a straight line over walk edges
       let far = i
       for (let j = i + 1; j < nodes.length; j++) {
         const ej = this.edge(nodes[j - 1]!, nodes[j]!)
@@ -255,7 +255,7 @@ export class NavGrid {
   private readonly _o: Vec3 = [0, 0, 0]
   private readonly _d: Vec3 = [0, 0, 0]
 
-  /** Đường thẳng a → b đi bộ được: quả cầu quét không chạm gì và mặt sàn dọc đường bám đường thẳng nối hai node */
+  /** The straight line a → b is walkable: the swept sphere hits nothing and the floor along the way follows the straight line joining the two nodes */
   straightWalkable(a: number, b: number): boolean {
     const ax = this.x[a]!, ay = this.y[a]!, az = this.z[a]!
     const bx = this.x[b]!, by = this.y[b]!, bz = this.z[b]!
@@ -275,8 +275,8 @@ function sweepClear(world: CollisionWorld, ax: number, ay: number, az: number, b
 }
 
 /**
- * Đi bộ từ a tới b: mặt sàn dọc đường bám đường thẳng nối hai node (không gờ/vực giữa chừng), và quả cầu quét
- * theo từng đoạn ngắn sát mặt sàn thật không chạm gì (đường thẳng giữa hai node có thể cắt vào dốc).
+ * Walk from a to b: the floor along the way follows the straight line joining the two nodes (no ledge/cliff in between), and a sphere swept
+ * in short segments close to the real floor hits nothing (the straight line between two nodes may cut into a slope).
  */
 function walkable(world: CollisionWorld, ax: number, ay: number, az: number, bx: number, by: number, bz: number, o: Vec3, d: Vec3): boolean {
   const len = Math.hypot(bx - ax, bz - az)
@@ -299,9 +299,9 @@ function walkable(world: CollisionWorld, ax: number, ay: number, az: number, bx:
   return true
 }
 
-/** Sinh lưới cho map. `world` = world va chạm của map (bất kỳ người chơi nào), chỉ dùng truy vấn tĩnh. */
+/** Build the grid for the map. `world` = the map's collision world (any player's), used for static queries only. */
 export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementConfig): NavGrid {
-  // Phạm vi: bao các hộp có thể đi trên đó (bỏ hộp invisible: tường chắn trời)
+  // Extent: enclose the boxes that can be walked on (skip invisible boxes: sky walls)
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = 0
   for (const b of map.boxes) {
     if (b.invisible) continue
@@ -314,6 +314,14 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
     minZ = Math.min(minZ, r.from[2] - r.width / 2, r.to[2] - r.width / 2); maxZ = Math.max(maxZ, r.from[2] + r.width / 2, r.to[2] + r.width / 2)
     maxY = Math.max(maxY, r.from[1], r.to[1])
   }
+  if (map.trimesh) {   // a modelled map: its triangles are the walkable space
+    const v = map.trimesh.vertices
+    for (let i = 0; i < v.length; i += 3) {
+      minX = Math.min(minX, v[i]!); maxX = Math.max(maxX, v[i]!)
+      minZ = Math.min(minZ, v[i + 2]!); maxZ = Math.max(maxZ, v[i + 2]!)
+      maxY = Math.max(maxY, v[i + 1]!)
+    }
+  }
   minX = Math.floor(minX); minZ = Math.floor(minZ)
   const nx = Math.ceil(maxX) - minX, nz = Math.ceil(maxZ) - minZ
 
@@ -322,7 +330,7 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
   const o: Vec3 = [0, 0, 0], d: Vec3 = [0, 0, 0]
   const pos: Vec3 = [0, 0, 0]
 
-  // 1. mọi mặt đứng: bắn tia xuống nhiều lần từ trên cao; mỗi lần trúng thì đi tiếp từ ngay dưới điểm trúng
+  // 1. every standable surface: cast rays downward repeatedly from high up; after each hit continue from just below the hit point
   for (let ix = 0; ix < nx; ix++) {
     for (let iz = 0; iz < nz; iz++) {
       const px = minX + (ix + 0.5) * NAV_CELL, pz = minZ + (iz + 0.5) * NAV_CELL
@@ -335,7 +343,7 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
         const y = startY - hit.dist
         startY = y - 0.02
         if (hit.normal[1] < MIN_NORMAL_Y) continue
-        pos[0] = px; pos[1] = y + STAND_LIFT; pos[2] = pz   // nâng nhẹ: trên dốc đáy capsule cắt mặt nghiêng cạnh chân
+        pos[0] = px; pos[1] = y + STAND_LIFT; pos[2] = pz   // lift slightly: on a slope the capsule bottom cuts the inclined surface next to the foot
         if (!world.canStand(pos)) continue
         list.push(xs.length)
         xs.push(px); ys.push(y); zs.push(pz); colKeys.push(NavGrid.colKey(ix, iz))
@@ -345,7 +353,7 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
   }
   const n = xs.length
 
-  // 2. cạnh
+  // 2. edges
   const adj: NavEdge[][] = Array.from({ length: n }, () => [])
   for (let ix = 0; ix < nx; ix++) {
     for (let iz = 0; iz < nz; iz++) {
@@ -359,10 +367,10 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
           for (const b of colNodes[jx * nz + jz]!) {
             const dy = ys[b]! - ay
             const bx = xs[b]!, bz = zs[b]!
-            // đi bộ (cả lên dốc nhẹ và xuống dốc). Cạnh đi bộ đối xứng: chỉ kiểm 4 hướng đầu rồi thêm cả hai chiều (nửa số truy vấn)
+            // walking (both up gentle slopes and down). Walk edges are symmetric: only check the first 4 directions and add both ways (half the queries)
             if (Math.abs(dy) <= WALK_MAX_SLOPE * h) {
               if (k >= 4) {
-                if (adj[a]!.some(e => e.to === b && e.kind === EdgeKind.Walk)) { walkTo = b; continue }   // đã thêm từ phía b
+                if (adj[a]!.some(e => e.to === b && e.kind === EdgeKind.Walk)) { walkTo = b; continue }   // already added from b's side
               } else if (walkable(world, ax, ay, az, bx, ys[b]!, bz, o, d)) {
                 const len = Math.hypot(h, dy)
                 adj[a]!.push({ to: b, cost: len * (dy < -0.3 ? 1.1 : 1), kind: EdgeKind.Walk })
@@ -371,9 +379,9 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
                 continue
               }
             }
-            // nhảy lên gờ/hộp thấp (chỉ 4 hướng chính để khỏi xuyên góc)
+            // jump up onto a low ledge/box (only the 4 main directions, to avoid cutting corners)
             if (k % 2 === 0 && dy > 0.3 && dy <= JUMP_MAX_DY && sweepClear(world, ax, ay + dy, az, bx, ys[b]!, bz, o, d)) {
-              // chỗ bước lên: thẳng đứng từ a lên độ cao b phải thoáng
+              // the step-up spot: the vertical column from a up to b's height must be clear
               o[0] = ax; o[1] = ay + 0.2; o[2] = az; d[0] = 0; d[1] = 1; d[2] = 0
               if (!world.castSphere(o, d, dy + 0.4, SWEEP_R)) {
                 adj[a]!.push({ to: b, cost: h + 1.5 + dy, kind: EdgeKind.Jump })
@@ -381,13 +389,13 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
               continue
             }
           }
-          // qua gờ thấp (vd. khe tường có lớp bê tông cao 0,5m): nhảy qua sang node cùng tầng
+          // over a low ledge (e.g. a wall gap with a 0.5m concrete lip): jump across to a node on the same level
           if (k % 2 === 0) {
             for (const b of colNodes[jx * nz + jz]!) {
               const dy = ys[b]! - ay
               if (Math.abs(dy) > 0.3 || adj[a]!.some(e => e.to === b)) continue
               if (!sweepClear(world, ax, ay + 1.2, az, xs[b]!, ys[b]! + 1.2, zs[b]!, o, d, 0)) continue
-              // gờ ở giữa phải thấp (≤ JUMP_MAX_DY)
+              // the ledge in the middle must be low (≤ JUMP_MAX_DY)
               o[0] = (ax + xs[b]!) / 2; o[1] = ay + 1.6; o[2] = (az + zs[b]!) / 2
               const hit = world.castRay(o, DOWN, 3)
               if (hit && o[1]! - hit.dist - ay <= JUMP_MAX_DY && o[1]! - hit.dist - ay > 0.2) {
@@ -395,17 +403,17 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
               }
             }
           }
-          // nhảy xuống một chiều từ mép: node thấp hơn nhiều ở cột kế bên, đường ra khỏi mép và cột rơi thoáng
+          // one-way drop from an edge: a much lower node in the adjacent column, with a clear path off the edge and a clear fall column
           for (const b of colNodes[jx * nz + jz]!) {
             const drop = ay - ys[b]!
             if (drop <= WALK_MAX_SLOPE * h + 0.05 || drop > DROP_MAX) continue
             if (walkTo >= 0 && colNodes[jx * nz + jz]!.includes(walkTo) && Math.abs(ys[walkTo]! - ay) < 1) continue
             if (adj[a]!.some(e => e.to === b)) continue
             const bx = xs[b]!, bz = zs[b]!
-            if (!sweepClear(world, ax, ay, az, bx, ay, bz, o, d)) continue          // ra khỏi mép
+            if (!sweepClear(world, ax, ay, az, bx, ay, bz, o, d)) continue          // off the edge
             o[0] = bx; o[1] = ay + 0.5; o[2] = bz
             const down = world.castRay(o, DOWN, drop + 1)
-            if (!down || Math.abs(o[1]! - down.dist - ys[b]!) > 0.1) continue         // cột rơi thoáng, đáp đúng node b
+            if (!down || Math.abs(o[1]! - down.dist - ys[b]!) > 0.1) continue         // clear fall column, lands exactly on node b
             adj[a]!.push({ to: b, cost: h + 1.5 + drop, kind: EdgeKind.Drop })
           }
         }
@@ -413,7 +421,7 @@ export function buildNav(world: CollisionWorld, map: LoadedMap, cfg: MovementCon
     }
   }
 
-  // 3. điểm núp + vùng
+  // 3. cover points + zones
   const cover: number[] = new Array(n).fill(0)
   const zones: number[] = new Array(n)
   for (let i = 0; i < n; i++) {

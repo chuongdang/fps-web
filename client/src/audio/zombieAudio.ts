@@ -1,5 +1,5 @@
-// Âm thanh zombie (plan 16, ZF.5): file nếu có (client/public/sounds/common/*), thiếu thì dùng âm tổng hợp thô để không im lặng.
-// Mọi tiếng của zombie khác phát theo vị trí (panner) để nghe ra hướng. Từ khoá tìm file: zombie growl, zombie scream, monster roar,
+// Zombie audio (plan 16, ZF.5): file if available (client/public/sounds/common/*), otherwise a rough synthesized sound so it is never silent.
+// Every other zombie's sound plays positionally (panner) so the direction can be heard. File search keywords: zombie growl, zombie scream, monster roar,
 // claw swipe, flesh hit, night ambience.
 import { NetFlag } from '@fps/shared'
 import { getGraph, listenerPos, type AudioGraph } from './context'
@@ -19,7 +19,7 @@ const lastPick = new Map<string, string>()
 
 function dist(p: readonly number[]): number { return Math.hypot(p[0]! - listenerPos[0], p[1]! - listenerPos[1], p[2]! - listenerPos[2]) }
 
-/** Nguồn đặt tại `pos` (null = ngay trong đầu, không định vị); trả đầu vào để nối và hàm gỡ */
+/** Source placed at `pos` (null = inside the head, non-positional); returns the input to connect to and a teardown function */
 function source(g: AudioGraph, pos: readonly number[] | null, refDistance = 4): { dest: AudioNode; free: () => void } {
   if (!pos) return { dest: g.master, free: () => {} }
   const d = dist(pos)
@@ -45,7 +45,7 @@ function playBuf(g: AudioGraph, key: string, dest: AudioNode, gainDb: number, ra
   return true
 }
 
-/** Gầm gừ ngẫu nhiên: noise lowpass 400Hz + sawtooth 70–110Hz rung (LFO 6Hz), 0,8s */
+/** Random growl: 400Hz lowpass noise + 70–110Hz sawtooth modulated (6Hz LFO), 0.8s */
 export function playGrowl(pos: readonly number[] | null, deep = 1): void {
   const g = getGraph()
   if (!g || (pos && dist(pos) > MAX_DIST)) return
@@ -68,7 +68,7 @@ export function playGrowl(pos: readonly number[] | null, deep = 1): void {
   setTimeout(s.free, 1500)
 }
 
-/** Tiếng gào: biến thành zombie, zombie mẹ xuất hiện, nhảy E, boss gọi đàn */
+/** Scream: turning into a zombie, mother zombie appears, jump E, boss calls the horde */
 export function playScream(pos: readonly number[] | null, big = false): void {
   const g = getGraph()
   if (!g) return
@@ -95,7 +95,7 @@ export function playClawHit(pos: readonly number[] | null): void {
   setTimeout(s.free, 800)
 }
 
-/** Bước chân nặng, to hơn bước chân người 4 dB */
+/** Heavy footstep, 4 dB louder than a human footstep */
 export function playZombieStep(pos: readonly number[]): void {
   const g = getGraph()
   if (!g || dist(pos) > 28) return
@@ -109,7 +109,7 @@ export function playZombieStep(pos: readonly number[]): void {
 }
 
 const lastHurt = new Map<number, number>()
-/** Trúng đạn: giới hạn 1 lần / 0,3s mỗi zombie */
+/** Bullet hit: limited to once per 0.3s per zombie */
 export function playZombieHurt(id: number, pos: readonly number[]): void {
   const g = getGraph()
   if (!g) return
@@ -139,7 +139,7 @@ export function playZombieDeath(pos: readonly number[]): void {
   setTimeout(s.free, 1500)
 }
 
-/** Nhạc hiệu ngắn khi có người bị lây nhiễm (cả phòng nghe, nhỏ) */
+/** Short jingle when someone is infected (the whole room hears it, quiet) */
 export function playInfectSting(): void {
   const g = getGraph()
   if (!g) return
@@ -150,7 +150,7 @@ export function playInfectSting(): void {
   tone(g.ctx, g.master, { type: 'sine', freq: 311, gainDb: -24, decayMs: 900, when: t + 0.26 })
 }
 
-// ── Nền đêm: gió + côn trùng, lặp ─────────────────────────────────────────────
+// ── Night ambience: wind + insects, looping ─────────────────────────────────────────────
 let ambientTimer = 0
 let ambientNode: { stop: () => void } | null = null
 export function startNightAmbient(low = false): void {
@@ -166,9 +166,9 @@ export function startNightAmbient(low = false): void {
     const src = g.ctx.createBufferSource()
     src.buffer = b; src.loop = true
     src.connect(gain); src.start()
-    parts.push({ stop: () => { try { src.stop() } catch { /* đã dừng */ } src.disconnect() } })
+    parts.push({ stop: () => { try { src.stop() } catch { /* already stopped */ } src.disconnect() } })
   } else {
-    // gió: noise bandpass quét chậm bằng LFO
+    // wind: bandpass noise slowly swept by an LFO
     const len = g.ctx.sampleRate * 2
     const nb = g.ctx.createBuffer(1, len, g.ctx.sampleRate)
     const d = nb.getChannelData(0)
@@ -181,21 +181,21 @@ export function startNightAmbient(low = false): void {
     const wg = g.ctx.createGain(); wg.gain.value = 0.35
     src.connect(bp).connect(wg).connect(gain)
     src.start(); lfo.start()
-    parts.push({ stop: () => { try { src.stop(); lfo.stop() } catch { /* đã dừng */ } src.disconnect(); lfo.disconnect(); bp.disconnect(); wg.disconnect() } })
-    // côn trùng: cú tít ngắn thưa thớt
+    parts.push({ stop: () => { try { src.stop(); lfo.stop() } catch { /* already stopped */ } src.disconnect(); lfo.disconnect(); bp.disconnect(); wg.disconnect() } })
+    // insects: sparse short chirps
     ambientTimer = window.setInterval(() => {
       if (Math.random() < 0.6) tone(g.ctx, gain, { type: 'sine', freq: 3800 + Math.random() * 900, gainDb: -34, decayMs: 70, when: g.ctx.currentTime })
     }, 700)
   }
   ambientNode = { stop: () => { for (const p of parts) p.stop(); gain.disconnect() } }
 }
-export function setAmbientLow(low: boolean): void { void low }   // chỗ nối cho T.8: giữa các đợt nền dịu xuống (chỉnh gain khi có nhu cầu)
+export function setAmbientLow(low: boolean): void { void low }   // hook for T.8: ambience softens between waves (adjust gain when needed)
 export function stopNightAmbient(): void {
   clearInterval(ambientTimer); ambientTimer = 0
   ambientNode?.stop(); ambientNode = null
 }
 
-// ── Tim đập khi zombie ở gần mà không nhìn thấy (cảnh báo mơ hồ) ───────────────
+// ── Heartbeat when a zombie is nearby but unseen (vague warning) ───────────────
 let beatTimer = 0
 export function setNearbyZombieHeartbeat(on: boolean): void {
   if (on && !beatTimer) {
@@ -210,7 +210,7 @@ export function setNearbyZombieHeartbeat(on: boolean): void {
   } else if (!on && beatTimer) { clearInterval(beatTimer); beatTimer = 0 }
 }
 
-// ── Điều khiển mỗi frame: gầm gừ ngẫu nhiên 3–8s, bước chân nặng, tiếng chết ─────
+// ── Per-frame control: random growls every 3–8s, heavy footsteps, death sounds ─────
 interface Zm { id: number; pos: [number, number, number]; flags: number; ztype?: string }
 const nextGrowl = new Map<number, number>()
 const lastPos = new Map<number, [number, number, number, boolean]>()
@@ -240,7 +240,7 @@ export function updateZombieAudio(dt: number, others: readonly Zm[], lookDir: re
       }
       lp[0] = p.pos[0]; lp[1] = p.pos[1]; lp[2] = p.pos[2]
     } else lastPos.set(p.id, [p.pos[0], p.pos[1], p.pos[2], false])
-    // zombie trong 8m mà không nhìn thấy (ở sau lưng/lệch hơn 70° so với hướng nhìn): tim đập
+    // zombie within 8m but unseen (behind / more than 70° off the view direction): heartbeat
     if (d < 8) {
       const dx = (p.pos[0] - listenerPos[0]) / (d || 1), dz = (p.pos[2] - listenerPos[2]) / (d || 1)
       if (dx * lookDir[0] + dz * lookDir[2] < 0.35) near = true

@@ -49,13 +49,13 @@ function buildBulletHoles(scene: THREE.Scene) {
       const mesh = new THREE.Mesh(BH_GEO, BH_MAT)
       const OFFSET = 0.005
 
-      // Đẩy nhẹ theo normal để tránh z-fighting
+      // Nudge slightly along the normal to avoid z-fighting
       mesh.position.set(
         hitPos[0] + normal[0] * OFFSET,
         hitPos[1] + normal[1] * OFFSET,
         hitPos[2] + normal[2] * OFFSET,
       )
-      // lookAt(hitPos - normal): -Z nhìn vào tường → front face (+Z) quay ra ngoài về phía player
+      // lookAt(hitPos - normal): -Z looks into the wall → front face (+Z) points outward, toward the player
       mesh.lookAt(
         hitPos[0] - normal[0],
         hitPos[1] - normal[1],
@@ -73,11 +73,11 @@ function buildBulletHoles(scene: THREE.Scene) {
   }
 }
 
-// ── Tâm ngắm 4 vạch (khoảng hở = độ toé thật của súng) + máu + đạn ──────────────
+// ── 4-line crosshair (gap = the weapon's real spread) + health + ammo ──────────────
 const CROSS_LEN   = 10   // px
-const CROSS_MIN_GAP = 3  // px: khoảng hở tối thiểu để tâm không dính lại khi spread ≈ 0
-const CROSS_FIXED_GAP = 6   // px khi tắt "tâm ngắm động"
-const GAP_TAU_MS  = 30   // làm mượt hiển thị (không ảnh hưởng đạn)
+const CROSS_MIN_GAP = 3  // px: minimum gap so the crosshair lines do not touch when spread ≈ 0
+const CROSS_FIXED_GAP = 6   // px when the "dynamic crosshair" is off
+const GAP_TAU_MS  = 30   // display smoothing (does not affect bullets)
 
 function buildCrosshair() {
   const root = document.createElement('div')
@@ -92,26 +92,26 @@ function buildCrosshair() {
     root.appendChild(b)
     bars.push(b)
   }
-  const dot = document.createElement('div')   // sniper không ngắm: chỉ một chấm xanh viền đen mỏng, tán mờ nhẹ ra ngoài (bắn không ngắm là may rủi)
+  const dot = document.createElement('div')   // sniper unscoped: a single green dot with a thin black outline, slightly blurred outward (unscoped fire is a gamble)
   dot.style.cssText = 'position:absolute;width:5px;height:5px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#7CFF7C;border:1px solid #000;box-shadow:0 0 4px 2px rgba(0,0,0,0.45);display:none'
-  const ring = document.createElement('div')   // shotgun: vòng mờ cho nón của chùm chì
+  const ring = document.createElement('div')   // shotgun: a faint ring for the pellet cone
   ring.style.cssText = 'position:absolute;border:1px solid rgba(124,255,124,0.45);border-radius:50%;display:none;box-sizing:border-box'
   root.append(dot, ring)
   document.body.appendChild(root)
 
   let gap = CROSS_MIN_GAP
-  let fovDeg = 75   // FOV dọc hiện tại của camera chính (đổi khi zoom ngắm)
+  let fovDeg = 75   // current vertical FOV of the main camera (changes when zooming in)
   let dynamic = true
-  let adsT = 0   // ngắm: 4 vạch mờ dần, còn lại một chấm (như Krunker)
+  let adsT = 0   // ADS: the 4 lines fade out, leaving a single dot (like Krunker)
   function place(g: number) {
-    // 0 trái, 1 phải, 2 trên, 3 dưới
+    // 0 left, 1 right, 2 top, 3 bottom
     bars[0]!.style.transform = `translate(${-g - CROSS_LEN}px,-1px)`
     bars[1]!.style.transform = `translate(${g}px,-1px)`
     bars[2]!.style.transform = `translate(-1px,${-g - CROSS_LEN}px)`
     bars[3]!.style.transform = `translate(-1px,${g}px)`
   }
   place(gap)
-  // độ (nửa góc nón) → pixel, theo FOV dọc hiện tại của camera chính
+  // degrees (half cone angle) → pixels, using the main camera's current vertical FOV
   const degToPx = (deg: number) => Math.tan(deg * Math.PI / 180) / Math.tan(fovDeg * Math.PI / 360) * (window.innerHeight / 2)
   let ringShown = false, dotShown = false, barsShown = true
   return {
@@ -119,7 +119,7 @@ function buildCrosshair() {
     setVisible(v: boolean) { root.style.display = v ? '' : 'none' },
     setAds(t: number) { adsT = Math.min(1, Math.max(0, t)) },
     setDynamic(v: boolean) { dynamic = v },
-    /** spreadDeg: nửa góc nón hiện tại; coneDeg > 0 (shotgun) vẽ thêm vòng cho nón chùm; dotOnly: ẩn 4 vạch, chỉ chấm */
+    /** spreadDeg: current cone half-angle; coneDeg > 0 (shotgun) also draws a ring for the pellet cone; dotOnly: hide the 4 lines, show only the dot */
     tick(spreadDeg: number, dtMs: number, coneDeg = 0, dotOnly = false) {
       const target = dynamic ? Math.max(CROSS_MIN_GAP, degToPx(spreadDeg)) : CROSS_FIXED_GAP
       gap += (target - gap) * (1 - Math.exp(-dtMs / GAP_TAU_MS))
@@ -147,13 +147,13 @@ export interface HUDHandle {
   clearBulletHoles(): void
   tick(dtMs: number): void
   setSpread(spreadDeg: number, dtMs: number, coneDeg?: number, dotOnly?: boolean): void
-  setCrosshairFade(adsT: number): void   // ngắm: vạch → chấm
+  setCrosshairFade(adsT: number): void   // ADS: lines → dot
   setCrosshairDynamic(on: boolean): void
   setCrosshairVisible(v: boolean): void
   setCrosshairFov(deg: number): void
   setHealth(v: number): void
   setAmmo(name: string, cur: number, mag: number, reloading: boolean, melee?: boolean, consumable?: boolean, infinite?: boolean): void
-  readonly bottom: BottomHud   // tiền, 4 ô vũ khí, nổi +$
+  readonly bottom: BottomHud   // money, 4 weapon slots, floating +$
 }
 
 export function initHUD(scene: THREE.Scene): HUDHandle {

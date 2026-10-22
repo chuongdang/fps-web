@@ -33,19 +33,19 @@ function mk(rm: RoomManager, name: string, team: TeamId | 'auto' = 'auto') {
 const cmd = (seq: number, buttons = 0, extra: Partial<InputCmd> = {}): InputCmd =>
   ({ seq, buttons, yaw: 0, pitch: 0, weapon: 3, ...extra })
 
-// Chạy room tới serverTime `to` (ms), mỗi 16ms một tick
+// Run the room up to serverTime `to` (ms), one tick every 16ms
 function run(room: Room, to: number) {
   for (let t = room.serverNow + 16; t <= to; t += 16) stepRoom(room, defaultMovement, t)
 }
 
-describe('chia đội (5.1)', () => {
-  it('3 người đều chọn A: A hơn B tối đa 2 (maxTeamDiff) nên người thứ 3 sang B', () => {
+describe('team assignment (5.1)', () => {
+  it('3 players all pick A: A may lead B by at most 2 (maxTeamDiff), so the 3rd goes to B', () => {
     const rm = new RoomManager(map, () => 0, rules)
     const teams = [mk(rm, '1', 'A'), mk(rm, '2', 'A'), mk(rm, '3', 'A')].map(x => x.p.team)
     expect(teams).toEqual(['A', 'A', 'B'])
   })
 
-  it('auto vào đội ít người hơn', () => {
+  it('auto joins the smaller team', () => {
     const rm = new RoomManager(map, () => 0, rules)
     mk(rm, '1', 'A'); mk(rm, '2', 'A')
     mk(rm, '3', 'auto')
@@ -53,23 +53,23 @@ describe('chia đội (5.1)', () => {
     expect(Math.abs(room.teamCount('A') - room.teamCount('B'))).toBeLessThanOrEqual(1)
   })
 
-  it('phòng đầy: tryJoin trả null', () => {
+  it('room full: tryJoin returns null', () => {
     const rm = new RoomManager(map, () => 0, { ...rules, maxPerTeam: 1 })
     mk(rm, '1'); mk(rm, '2')
     expect(mk(rm, '3').res).toBeNull()
   })
 
-  it('đội của mọi người được báo bằng TeamAssigned', () => {
+  it("everyone's team is announced with TeamAssigned", () => {
     const rm = new RoomManager(map, () => 0, rules)
     const a = mk(rm, '1', 'A'), b = mk(rm, '2', 'B')
     expect(a.msgs.filter(m => m.t === MsgType.TeamAssigned)).toContainEqual({ t: MsgType.TeamAssigned, id: b.p.id, team: 'B' })
     expect(b.msgs.filter(m => m.t === MsgType.TeamAssigned)).toContainEqual({ t: MsgType.TeamAssigned, id: a.p.id, team: 'A' })
   })
 
-  it('đạn xuyên qua đồng đội, trúng kẻ địch phía sau; đồng đội không mất máu, không hitmarker', () => {
+  it('bullets pass through teammates and hit the enemy behind; teammate takes no damage, no hitmarker', () => {
     const rm = new RoomManager(map, () => 0, { ...rules, minPlayersToStart: 99 })
     const a = mk(rm, 'a', 'A'), mate = mk(rm, 'm', 'B'), foe = mk(rm, 'f', 'B')
-    // chia lại: mate cùng đội với a
+    // re-split: mate is on a's team
     const room = rm.rooms.get('r')!
     mate.p.team = 'A'
     a.p.state.pos = [0, 0, 0]; mate.p.state.pos = [0, 0, -5]; foe.p.state.pos = [0, 0, -10]
@@ -85,24 +85,24 @@ describe('chia đội (5.1)', () => {
   })
 })
 
-describe('trận đấu (5.2)', () => {
+describe('match (5.2)', () => {
   function two() {
     const rm = new RoomManager(map, () => 0, rules)
     const a = mk(rm, 'a', 'A'), b = mk(rm, 'b', 'B')
     const room = rm.rooms.get('r')!
     return { rm, room, a: a.p, b: b.p, msgs: a.msgs }
   }
-  // a hạ b một lần (đặt thẳng hp rồi bắn)
+  // a kills b once (set hp directly, then shoot)
   function kill(room: Room, a: Player, b: Player, seq: number) {
     a.state.pos = [0, 0, 0]; b.state.pos = [0, 0, -10]
     b.hp = 1; b.invulnUntil = 0; a.invulnUntil = 0
-    a.weapon.nextFireMs = 0   // Cớm: M16 ở ô 3
+    a.weapon.nextFireMs = 0   // Cops: M16 in slot 3
     enqueueCmds(a, [cmd(seq, Btn.Fire, { weapon: 3 })], seq * 1000 / 60)
     stepPlayer(a, defaultMovement, room)
     room.finalizeDeaths()
   }
 
-  it('một người: WAITING; đủ 2 người: COUNTDOWN rồi PLAYING sau countdownMs', () => {
+  it('one player: WAITING; 2 players: COUNTDOWN then PLAYING after countdownMs', () => {
     const rm = new RoomManager(map, () => 0, rules)
     const a = mk(rm, 'a', 'A')
     const room = rm.rooms.get('r')!
@@ -117,7 +117,7 @@ describe('trận đấu (5.2)', () => {
     expect(a.msgs.some(m => m.t === MsgType.MatchState && m.phase === MatchPhase.Playing)).toBe(true)
   })
 
-  it('COUNTDOWN: không đi được nhưng xoay được; PLAYING đi được', () => {
+  it('COUNTDOWN: cannot move but can turn; PLAYING: can move', () => {
     const { room, a } = two()
     run(room, 100)
     expect(room.phase).toBe(MatchPhase.Countdown)
@@ -133,7 +133,7 @@ describe('trận đấu (5.2)', () => {
     expect(a.state.pos[0] !== x0 || a.state.pos[2] !== z0).toBe(true)
   })
 
-  it('kill cộng điểm đội người bắn, kill/death cá nhân; đủ killLimit → ENDED + bắn bị chặn', () => {
+  it('a kill scores for the shooter team plus personal kill/death; reaching killLimit -> ENDED + shooting is blocked', () => {
     const { room, a, b } = two()
     run(room, 1200)
     expect(room.phase).toBe(MatchPhase.Playing)
@@ -145,7 +145,7 @@ describe('trận đấu (5.2)', () => {
     expect(room.scoreA).toBe(2)
     stepRoom(room, defaultMovement, room.serverNow + 16)
     expect(room.phase).toBe(MatchPhase.Ended)
-    // ENDED: không bắn được
+    // ENDED: cannot shoot
     const shots = a.shotsFired
     room.respawn(b); a.weapon.nextFireMs = 0
     enqueueCmds(a, [cmd(400, Btn.Fire, { weapon: 3 })], 400 * 1000 / 60)
@@ -153,7 +153,7 @@ describe('trận đấu (5.2)', () => {
     expect(a.shotsFired).toBe(shots)
   })
 
-  it('hết giờ → ENDED; hoà khi bằng điểm', () => {
+  it('time up -> ENDED; draw on equal score', () => {
     const { room } = two()
     run(room, 1200)
     run(room, 1000 + 5000 + 100)
@@ -161,9 +161,9 @@ describe('trận đấu (5.2)', () => {
     expect(room.scoreA).toBe(room.scoreB)
   })
 
-  it('hết ENDED: reset điểm/kd/máu, đổi bên, COUNTDOWN; đội A spawn ở căn cứ B', () => {
+  it('after ENDED: reset score/kd/hp, swap sides, COUNTDOWN; team A spawns in base B', () => {
     const { room, a, b } = two()
-    expect(a.state.pos[0]).toBeLessThan(0)   // trận 1: A ở căn cứ A (x âm)
+    expect(a.state.pos[0]).toBeLessThan(0)   // match 1: A is in base A (negative x)
     run(room, 1200)
     kill(room, a, b, 100); room.respawn(b); b.invulnUntil = 0
     kill(room, a, b, 200)
@@ -175,14 +175,14 @@ describe('trận đấu (5.2)', () => {
     expect(room.sideSwapped).toBe(true)
     expect([room.scoreA, room.scoreB]).toEqual([0, 0])
     expect([a.kills, b.deaths]).toEqual([0, 0])
-    expect(a.state.pos[0]).toBeGreaterThan(0)   // trận 2: A ở căn cứ B (x dương)
+    expect(a.state.pos[0]).toBeGreaterThan(0)   // match 2: A is in base B (positive x)
     expect(b.state.pos[0]).toBeLessThan(0)
     expect(b.alive && b.hp === 100).toBe(true)
     run(room, room.phaseEndsAt + 50)
     expect(room.phase).toBe(MatchPhase.Playing)
   })
 
-  it('còn 1 người giữa trận → WAITING; điểm đội giữ khi một người rời nhưng vẫn đủ người', () => {
+  it('one player left mid-match -> WAITING; team score is kept when a player leaves but enough remain', () => {
     const rm = new RoomManager(map, () => 0, rules)
     const a = mk(rm, 'a', 'A'), b = mk(rm, 'b', 'B'), c = mk(rm, 'c', 'B')
     const room = rm.rooms.get('r')!
@@ -199,19 +199,19 @@ describe('trận đấu (5.2)', () => {
     expect(a.p.alive).toBe(true)
   })
 
-  it('người vào giữa trận: chia vào đội ít người, bất tử, đứng ở căn cứ đội', () => {
+  it('joining mid-match: goes to the smaller team, invulnerable, stands in the team base', () => {
     const rm = new RoomManager(map, () => 0, rules)
     mk(rm, 'a', 'A'); mk(rm, 'b', 'B'); mk(rm, 'c', 'B')
     const room = rm.rooms.get('r')!
     run(room, 1200)
     expect(room.phase).toBe(MatchPhase.Playing)
     const d = mk(rm, 'd', 'auto')
-    expect(d.p.team).toBe('A')   // A 1 người, B 2 người
+    expect(d.p.team).toBe('A')   // A has 1 player, B has 2
     expect(room.serverNow).toBeLessThan(d.p.invulnUntil)
     expect(d.p.state.pos[0]).toBeLessThan(0)
   })
 
-  it('Scoreboard + MatchState gửi mỗi 1s kèm ping', () => {
+  it('Scoreboard + MatchState are sent every 1s with ping', () => {
     const { room, a, msgs } = two()
     a.pingMs = 42
     run(room, 2500)

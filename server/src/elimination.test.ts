@@ -41,7 +41,7 @@ const phaseOf = (r: Room): MatchPhase => r.phase
 const mode = (room: Room) => room.mode as EliminationMode
 const kill = (room: Room, killer: Player, victim: Player) => { victim.killerId = killer.id; victim.hp = 0; run(room, 32) }
 
-// 1v1 ở đầu FREEZE ván 1 (freeze 1s, ván 60s để chạy nhanh)
+// 1v1 at the start of FREEZE in round 1 (freeze 1s, round 60s to run fast)
 function oneVsOne() {
   const s = setup()
   const a = s.join('a', 'A'), b = s.join('b', 'B')
@@ -51,8 +51,8 @@ function oneVsOne() {
   return { ...s, a, b, room }
 }
 
-describe('Sinh Tử – các pha', () => {
-  it('đủ mỗi đội 1 người: WARMUP → FREEZE → LIVE, mỗi người một điểm spawn ở căn cứ', () => {
+describe('Elimination - phases', () => {
+  it('one player per team: WARMUP -> FREEZE -> LIVE, each player on a spawn point in their base', () => {
     const { room, a, b } = oneVsOne()
     expect(room.phase).toBe(MatchPhase.Freeze)
     expect(a.state.pos[0]).toBeLessThan(0); expect(b.state.pos[0]).toBeGreaterThan(0)
@@ -60,7 +60,7 @@ describe('Sinh Tử – các pha', () => {
     expect(room.phase).toBe(MatchPhase.Playing)
   })
 
-  it('WARMUP: chết hồi sinh ngay', () => {
+  it('WARMUP: dead players respawn immediately', () => {
     const s = setup()
     const a = s.join('a', 'A')
     kill(s.room(), a, a)
@@ -68,7 +68,7 @@ describe('Sinh Tử – các pha', () => {
     expect(a.alive).toBe(true)
   })
 
-  it('hạ đối thủ → RoundEnd cho đội thắng (1–0), tiền thắng $3000; sau roundEndSec hồi sinh cả hai ván 2', () => {
+  it('kill the opponent -> RoundEnd for the winning team (1-0), win money $3000; after roundEndSec both respawn for round 2', () => {
     const { room, a, b } = oneVsOne()
     run(room, 1100)
     const m0 = a.money, m1 = b.money
@@ -83,7 +83,7 @@ describe('Sinh Tử – các pha', () => {
     expect(a.alive && b.alive).toBe(true)
   })
 
-  it('LIVE: người chết không hồi sinh', () => {
+  it('LIVE: dead players do not respawn', () => {
     const { room, a, b } = oneVsOne()
     run(room, 1100)
     kill(room, a, b)
@@ -91,7 +91,7 @@ describe('Sinh Tử – các pha', () => {
     expect(b.alive).toBe(false)
   })
 
-  it('hết giờ, cùng số người sống: đội máu cao hơn thắng', () => {
+  it('time up, same number alive: the team with more hp wins', () => {
     const { room, a, b, msgs } = oneVsOne()
     run(room, 1100)
     b.hp = 40; a.hp = 80
@@ -101,7 +101,7 @@ describe('Sinh Tử – các pha', () => {
     expect(msgs.get('a')!.find(m => m.t === MsgType.RoundEnd)).toMatchObject({ winner: 'A', reason: 'time_hp' })
   })
 
-  it('hết giờ, 2 sống vs 1 sống: đội đông hơn thắng (time_alive)', () => {
+  it('time up, 2 alive vs 1 alive: the larger team wins (time_alive)', () => {
     const s = setup()
     s.join('a', 'A'); s.join('c', 'A'); s.join('b', 'B')
     const room = s.room()
@@ -113,14 +113,14 @@ describe('Sinh Tử – các pha', () => {
     expect(s.msgs.get('b')!.find(m => m.t === MsgType.RoundEnd)).toMatchObject({ winner: 'A', reason: 'time_alive' })
   })
 
-  it('hết giờ đúng bằng nhau → hoà, tỉ số không đổi, chuỗi thua giữ nguyên', () => {
+  it('time up exactly even -> draw, score unchanged, loss streak kept', () => {
     const { room } = oneVsOne()
     run(room, 1100 + 60_100)
     expect(room.phase).toBe(MatchPhase.RoundEnd)
     expect(room.scoreA + room.scoreB).toBe(0)
   })
 
-  it('cả hai chết cùng tick → hoà', () => {
+  it('both die on the same tick -> draw', () => {
     const { room, a, b } = oneVsOne()
     run(room, 1100)
     a.hp = 0; b.hp = 0
@@ -129,7 +129,7 @@ describe('Sinh Tử – các pha', () => {
     expect(room.scoreA + room.scoreB).toBe(0)
   })
 
-  it('người sống sót giữ súng, người chết về bộ mặc định', () => {
+  it('survivor keeps their guns, the dead player goes back to the default loadout', () => {
     const { room, a, b } = oneVsOne()
     run(room, 1100)
     a.loadout.slots[3] = { key: 'sniper', paid: 4750 }
@@ -141,17 +141,17 @@ describe('Sinh Tử – các pha', () => {
     expect(b.loadout.slots[3]?.key).toBe('ak47')
   })
 
-  it('mua: chỉ trong buyTimeSec kể từ đầu FREEZE', () => {
+  it('buy: only within buyTimeSec from the start of FREEZE', () => {
     const { room, a } = oneVsOne()
     expect(room.mode.canBuy(room, a, room.serverNow)).toBe(true)
     run(room, 1100 + 20_000)
     expect(room.mode.canBuy(room, a, room.serverNow)).toBe(false)
   })
 
-  it('đội đạt roundsToWin → MATCH_END, 1s sau trận mới 0–0 ván 1', () => {
+  it('team reaches roundsToWin -> MATCH_END, 1s later a new match at 0-0 round 1', () => {
     const { room, a, b, msgs } = oneVsOne()
     for (let i = 0; i < 3; i++) {
-      run(room, 1100)           // hết freeze
+      run(room, 1100)           // freeze over
       if (phaseOf(room) !== MatchPhase.Playing) break
       kill(room, a, b)
       if (phaseOf(room) === MatchPhase.RoundEnd) run(room, 1100)
@@ -166,7 +166,7 @@ describe('Sinh Tử – các pha', () => {
     expect(room.phase).toBe(MatchPhase.Freeze)
   })
 
-  it('sau ván roundsToWin−1: nghỉ giữa hiệp, đổi bên, tiền về $800', () => {
+  it('after round roundsToWin-1: half-time break, swap sides, money back to $800', () => {
     const { room, a, b } = oneVsOne()
     for (let i = 0; i < 2; i++) { run(room, 1100); kill(room, a, b); if (i === 0) run(room, 1100) }
     run(room, 1100)
@@ -175,10 +175,10 @@ describe('Sinh Tử – các pha', () => {
     expect(a.money).toBe(ECONOMY_ELIM.startMoney)
     run(room, 1100)
     expect(room.phase).toBe(MatchPhase.Freeze)
-    expect(a.state.pos[0]).toBeGreaterThan(0)   // đội A giờ ở căn cứ phía B
+    expect(a.state.pos[0]).toBeGreaterThan(0)   // team A is now in the B-side base
   })
 
-  it('vào giữa ván: chỉ xem, ván sau được chơi và không nhận tiền ván này', () => {
+  it('joining mid-round: spectate only, play next round, no money for this round', () => {
     const { room, a, b, join } = oneVsOne()
     run(room, 1100)
     const c = join('c', 'A')
@@ -190,7 +190,7 @@ describe('Sinh Tử – các pha', () => {
     expect(c.alive).toBe(true)
   })
 
-  it('một đội không còn ai kết nối: đội kia thắng ván, về WARMUP giữ tỉ số', () => {
+  it('a team has nobody connected: the other team wins the round, back to WARMUP keeping the score', () => {
     const { room, b } = oneVsOne()
     run(room, 1100)
     room.leave(b.id)
@@ -199,7 +199,7 @@ describe('Sinh Tử – các pha', () => {
     expect(room.scoreA).toBe(1)
   })
 
-  it('ChooseTeam chỉ cho phép ở WARMUP / FREEZE', () => {
+  it('ChooseTeam is only allowed in WARMUP / FREEZE', () => {
     const { room, a } = oneVsOne()
     expect(room.mode.canSwitchTeam(room, a)).toBe(true)
     run(room, 1100)
@@ -207,8 +207,8 @@ describe('Sinh Tử – các pha', () => {
   })
 })
 
-describe('lệnh debug (M.8)', () => {
-  it('/endround A kết thúc ván cho A; /endround draw hoà; /time đặt lại giờ; /money; /hp; /kill', () => {
+describe('debug commands (M.8)', () => {
+  it('/endround A ends the round for A; /endround draw draws; /time resets the clock; /money; /hp; /kill', () => {
     const { room, a } = oneVsOne()
     run(room, 1100)
     expect(handleDebugCmd(room, a, '/time 10')).toBe(true)
@@ -223,7 +223,7 @@ describe('lệnh debug (M.8)', () => {
     expect(handleDebugCmd(room, a, '/endround xyz')).toBe(false)
     expect(handleDebugCmd(room, a, '/bogus')).toBe(false)
   })
-  it('/setround 9 nhảy tới ván 9; /kill tự sát', () => {
+  it('/setround 9 jumps to round 9; /kill suicides', () => {
     const { room, a } = oneVsOne()
     expect(handleDebugCmd(room, a, '/setround 3')).toBe(true)
     expect(mode(room).round).toBe(3)

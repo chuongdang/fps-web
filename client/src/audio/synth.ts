@@ -1,7 +1,7 @@
-// Bộ âm tổng hợp (A.4 mục 10): tone + noise burst, envelope exponential từ/đến 0.0001.
+// Synthesizer (A.4 section 10): tone + noise burst, exponential envelope from/to 0.0001.
 import { dbToGain } from './audioMath'
 
-const FLOOR = 0.0001   // exponentialRamp không nhận 0
+const FLOOR = 0.0001   // exponentialRamp does not accept 0
 
 export interface ToneOpts {
   type: OscillatorType
@@ -26,7 +26,7 @@ export interface NoiseOpts {
 
 const noiseBuffers = new WeakMap<BaseAudioContext, AudioBuffer>()
 
-/** Một buffer tiếng ồn trắng 1 giây, dùng lại cho mọi noise burst. */
+/** A 1-second white noise buffer, reused for every noise burst. */
 function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
   let b = noiseBuffers.get(ctx)
   if (!b) {
@@ -70,7 +70,7 @@ export function noise(ctx: BaseAudioContext, dest: AudioNode, o: NoiseOpts): voi
   const end = envelope(g, o.gainDb, o.attackMs ?? 1, o.decayMs, o.when)
   if (o.freqEnd !== undefined) f.frequency.exponentialRampToValueAtTime(o.freqEnd, end)
   src.connect(f).connect(g).connect(dest)
-  src.start(o.when, Math.random() * 0.9)   // offset ngẫu nhiên: mỗi cú nghe hơi khác
+  src.start(o.when, Math.random() * 0.9)   // random offset: each burst sounds slightly different
   src.stop(end + 0.02)
   src.onended = () => { src.disconnect(); f.disconnect(); g.disconnect() }
 }

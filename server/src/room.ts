@@ -1,8 +1,10 @@
-import { DEFAULT_CHARACTER_SET, DEFAULT_SLOT, DEFAULT_SETTINGS, GRENADE_ID, grenadeCount, MATCH, MatchPhase, MsgType, PLAYER_MAX_HP, WEAPONS, defaultLoadout, loadoutWeaponIds, otherTeam, SPAWN_INVULN_MS, makeWeaponState, magSizeOf, makeRecoilState, sanitizeRoomConfig, type Role, type ZombieStats, type EconomyConfig, type RoomConfig, type RoomOptions, type Loadout, type RecoilState, type WeaponState, type InputCmd, type LoadedMap, type PlayerState, type Transport, type MatchRules, type TeamId, type CharacterSetId, type RoomInfo, type MapInfo } from '@fps/shared'
+import { DEFAULT_CHARACTER_SET, DEFAULT_SLOT, DEFAULT_SETTINGS, GRENADE_IDS, grenadeCount, MATCH, MatchPhase, MsgType, PLAYER_MAX_HP, WEAPONS, defaultLoadout, loadoutWeaponIds, otherTeam, SPAWN_INVULN_MS, makeWeaponState, magSizeOf, makeRecoilState, sanitizeRoomConfig, type Role, type ZombieStats, type EconomyConfig, type RoomConfig, type RoomOptions, type Loadout, type RecoilState, type WeaponState, type InputCmd, type LoadedMap, type PlayerState, type Transport, type MatchRules, type TeamId, type CharacterSetId, type RoomInfo, type MapInfo } from '@fps/shared'
 import type { CollisionWorld } from '@fps/shared/physics/world'
 import { LagHistory } from './lagComp'
 import type { RoomGrenade } from './grenades'
+import type { RoomSmoke } from './smoke'
 import { dropOnDeath } from './grenades'
+import { clearWeaponDrops, dropWeaponOnDeath, sendDropsTo, type RoomWeaponDrop } from './weaponDrops'
 import { createMode, type MatchMode } from './modes'
 import type { BotController } from './bots/controller'
 import type { NavGrid } from './bots/nav'
@@ -19,63 +21,64 @@ export interface Player {
   inputQueue: InputCmd[]
   lastProcessedSeq: number
   lastCmd: InputCmd | null
-  world: CollisionWorld | null   // Rapier world riêng mỗi người (capsule kinematic); nạp bất đồng bộ sau khi join
-  idleCmd: InputCmd              // scratch tái sử dụng khi hàng đợi trống
-  starvedTicks: number           // số tick liên tiếp hàng đợi trống
-  weapon: WeaponState            // đạn/reload/fire rate do server giữ (4.1)
-  recoil: RecoilState            // recoil tích luỹ để tính hướng đạn (cùng công thức với client)
-  alive: boolean                 // người chết không có hitbox, không bắn, không nhận input di chuyển
-  hp: number                     // hp ≤ 0 mà còn alive = chờ chốt cuối tick (để hai người bắn chết nhau cùng tick đều chết)
-  respawnAt: number              // serverTime hồi sinh khi đã chết
-  invulnUntil: number            // serverTime hết bất tử; về 0 khi bắn phát hợp lệ đầu tiên
-  killerId: number               // ai bắn hạ (-1 = chưa); kèm vũ khí/headshot để gửi Kill
+  world: CollisionWorld | null   // separate Rapier world per player (kinematic capsule); loaded asynchronously after join
+  idleCmd: InputCmd              // reusable scratch for when the queue is empty
+  starvedTicks: number           // consecutive ticks with an empty queue
+  weapon: WeaponState            // ammo/reload/fire rate held by the server (4.1)
+  recoil: RecoilState            // accumulated recoil used to compute shot direction (same formula as the client)
+  alive: boolean                 // dead players have no hitbox, do not shoot and accept no movement input
+  hp: number                     // hp <= 0 while still alive = waiting for end-of-tick settlement (so two players killing each other in the same tick both die)
+  respawnAt: number              // serverTime of the respawn once dead
+  invulnUntil: number            // serverTime invulnerability ends; reset to 0 on the first valid shot
+  killerId: number               // who got the kill (-1 = none yet); sent in Kill together with weapon/headshot
   killWeapon: number
   killHeadshot: boolean
-  deadCmd: InputCmd              // scratch: cmd đã bỏ nút khi đang chết
-  debugShots: boolean            // F7: gửi DebugShot cho người này
-  rewindClamped: number          // số phát bị kẹp vì fireRenderTime cũ hơn MAX_REWIND_MS
-  shotsFired: number             // số phát bắn hợp lệ từ lúc vào phòng (log/test)
+  deadCmd: InputCmd              // scratch: cmd with buttons stripped while dead
+  debugShots: boolean            // F7: send DebugShot to this player
+  rewindClamped: number          // shots clamped because fireRenderTime was older than MAX_REWIND_MS
+  shotsFired: number             // valid shots fired since joining the room (log/test)
   team: TeamId
-  kills: number                  // trong trận hiện tại (chỉ tính ở PLAYING)
+  kills: number                  // in the current match (only counted while PLAYING)
   deaths: number
-  pingMs: number                 // RTT do client báo trong Ping, cho bảng điểm
-  seqOffset: number | null       // now − seq*1000/TICK_RATE của cmd đầu tiên; chặn seq chạy nhanh hơn thời gian thực
-  money: number                  // chỉ server quyết định (shared/economy)
-  loadout: Loadout               // súng đang mang theo ô; weapon.slots là bản id của nó
-  killStreak: number             // chuỗi hạ hiện tại; về 0 khi chết
-  buyTimes: number[]             // serverTime các lệnh Buy trong 1 giây gần nhất (giới hạn spam)
-  inRound: boolean               // Sinh Tử: có mặt trong ván hiện tại (người vào giữa ván chỉ xem → không nhận tiền cuối ván)
-  survived: boolean              // Sinh Tử: còn sống tới hết ván trước → giữ súng sang ván sau
-  bot: BotController | null      // plan 15: có = bot (transport rỗng, input do BotController sinh mỗi tick)
-  role: Role                     // plan 16: 'zombie' dùng movement/vuốt/hitbox riêng (xem shared/zombie.ts)
-  zstats: ZombieStats | null     // thông số zombie đang áp (null = người)
-  lastHurtAt: number             // serverTime lần cuối trúng đạn (zombie hồi máu sau regenDelayMs không bị bắn)
-  transformUntil: number         // serverTime hết biến hình: trước đó bất tử, không di chuyển/bắn được
-  pendingClaw: { at: number; cmd: InputCmd; defId: number } | null   // cào mạnh đang vung: trúng khi tới `at` (xác định lúc đó)
-  damageMult: number             // anh hùng (Lây Nhiễm) ×1.5
-  speedMult: number              // anh hùng ×1.1 tốc độ chạy
+  pingMs: number                 // RTT reported by the client in Ping, for the scoreboard
+  seqOffset: number | null       // now - seq*1000/TICK_RATE of the first cmd; stops seq from running faster than real time
+  money: number                  // decided by the server only (shared/economy)
+  loadout: Loadout               // weapons carried per slot; weapon.slots is the id version of it
+  killStreak: number             // current kill streak; reset to 0 on death
+  buyTimes: number[]             // serverTime of Buy commands in the last second (spam limit)
+  dropTimes: number[]            // serverTime of DropWeapon/PickupWeapon commands in the last second (spam limit)
+  inRound: boolean               // Elimination: present in the current round (players joining mid-round only spectate -> no end-of-round money)
+  survived: boolean              // Elimination: alive through the end of the previous round -> keeps weapons into the next round
+  bot: BotController | null      // plan 15: set = bot (empty transport, input generated by BotController every tick)
+  role: Role                     // plan 16: 'zombie' uses its own movement/claw/hitbox (see shared/zombie.ts)
+  zstats: ZombieStats | null     // zombie stats currently applied (null = human)
+  lastHurtAt: number             // serverTime of the last time hit by a bullet (zombies regen after regenDelayMs without being shot)
+  transformUntil: number         // serverTime the transformation ends: invulnerable and unable to move/shoot before then
+  pendingClaw: { at: number; cmd: InputCmd; defId: number } | null   // heavy claw in its windup: lands when `at` is reached (resolved at that moment)
+  damageMult: number             // hero (Infection) x1.5
+  speedMult: number              // hero x1.1 run speed
   hero: boolean
-  flashlight: boolean            // đèn pin đang bật (người, còn sống): từ Btn.Flashlight của cmd gần nhất
-  npc: NpcDriver | null          // plan 17: zombie của Thủ Thành — một Player không có kết nối, input do NpcDriver sinh mỗi tick
-  takenMult: number              // nhân sát thương nhận vào (boss choáng ×1.5)
-  downed: boolean                // Thủ Thành (T.6): gục chờ cứu — chưa chết hẳn
-  downUntil: number              // serverTime hết hạn gục → chết hẳn
-  reviveProgressMs: number       // đồng đội đang cứu mình: ms đã giữ
-  sniffUntil: number             // Lây Nhiễm: chiêu đánh hơi chạy tới serverTime này
-  sniffReadyAt: number           // hồi chiêu đánh hơi xong lúc này
+  flashlight: boolean            // flashlight on (human, alive): from Btn.Flashlight of the latest cmd
+  npc: NpcDriver | null          // plan 17: a Defense zombie - a Player without a connection, input generated by NpcDriver every tick
+  takenMult: number              // multiplier on damage taken (stunned boss x1.5)
+  downed: boolean                // Defense (T.6): downed awaiting rescue - not dead yet
+  downUntil: number              // serverTime the downed state expires -> dead for good
+  reviveProgressMs: number       // a teammate is rescuing this player: ms held so far
+  sniffUntil: number             // Infection: the sniff ability runs until this serverTime
+  sniffReadyAt: number           // sniff cooldown finishes at this time
 }
 
-/** Người điều khiển một Player không phải người thật (bot dùng BotController, zombie Thủ Thành dùng ZombieNpc) */
+/** Controller of a Player that is not a real person (bots use BotController, Defense zombies use ZombieNpc) */
 export interface NpcDriver {
   drive(room: Room, p: Player, nowMs: number): void
 }
 
-/** Hỗn Chiến theo luật của server (dùng khi phòng tạo không kèm cài đặt, và trong test) */
+/** Team Deathmatch under server rules (used when a room is created without settings, and in tests) */
 export function defaultRoomConfig(name: string, map: string, rules: MatchRules): RoomConfig {
   return { name, map, maxPlayers: rules.maxPerTeam * 2, settings: { ...DEFAULT_SETTINGS.tdm, killLimit: rules.killLimit, timeLimitMin: rules.durationMs / 60000 } }
 }
 
-/** Luật trận của một phòng: luật server + thông số từ cài đặt phòng */
+/** Match rules of a room: server rules + parameters from the room settings */
 export function roomRules(base: MatchRules, config: RoomConfig): MatchRules {
   const r = { ...base, maxPerTeam: config.maxPlayers / 2 }
   if (config.settings.mode === 'tdm') { r.killLimit = config.settings.killLimit; r.durationMs = config.settings.timeLimitMin * 60000 }
@@ -83,29 +86,32 @@ export function roomRules(base: MatchRules, config: RoomConfig): MatchRules {
 }
 
 export class Room {
-  mapId = ''   // id map trong RoomManager.maps (RoomManager đặt khi tạo)
+  mapId = ''   // map id in RoomManager.maps (set by RoomManager on creation)
   readonly players = new Map<number, Player>()
   emptySince: number | null
   readonly history = new LagHistory()
-  serverNow = 0   // serverTime của tick đang chạy (stepRoom đặt)
-  tick = 0        // số tick của phòng (TickLoop truyền vào stepRoom; thiếu thì tự tăng) — mốc thời gian của lựu đạn
+  serverNow = 0   // serverTime of the running tick (set by stepRoom)
+  tick = 0        // room tick counter (passed into stepRoom by TickLoop; auto-incremented if missing) - grenade time reference
   grenades: RoomGrenade[] = []
+  smokes: RoomSmoke[] = []   // smoke clouds currently active (block bot vision)
   nextGrenadeId = 1
+  drops: RoomWeaponDrop[] = []   // guns lying in the world (shared/weaponDrop.ts)
+  nextDropId = 1
   private nextId = 1
 
-  // Phòng offline (plan 15): chỉ một người thật + bot. Cho phép lệnh OfflineCmd, tắt cân bằng đội tự động.
+  // Offline room (plan 15): exactly one real player + bots. Allows the OfflineCmd message and disables automatic team balancing.
   offline = false
   infiniteMoney = false
-  nav: NavGrid | null = null   // lưới di chuyển cho bot (host đặt); null = bot không đi được
-  npcWorld: (() => CollisionWorld | Promise<CollisionWorld>) | null = null   // test: world giả cho zombie NPC (mặc định dựng Rapier thật)
+  nav: NavGrid | null = null   // movement grid for bots (set by the host); null = bots cannot navigate
+  npcWorld: (() => CollisionWorld | Promise<CollisionWorld>) | null = null   // test: fake world for NPC zombies (default builds a real Rapier world)
 
-  // Trận đấu (5.2): máy trạng thái chạy trong match.ts
+  // Match (5.2): the state machine runs in match.ts
   phase: MatchPhase = MatchPhase.Waiting
   phaseEndsAt = 0
   scoreA = 0
   scoreB = 0
   sideSwapped = false
-  lastBroadcast = -Infinity   // serverTime lần gửi MatchState/Scoreboard gần nhất (mỗi 1s)
+  lastBroadcast = -Infinity   // serverTime of the last MatchState/Scoreboard broadcast (every 1s)
 
   constructor(
     readonly id: string,
@@ -113,7 +119,7 @@ export class Room {
     private now: () => number,
     readonly random: () => number = Math.random,
     readonly rules: MatchRules = MATCH,
-    readonly characterSet: CharacterSetId = DEFAULT_CHARACTER_SET,   // chọn lúc tạo phòng, không đổi sau đó
+    readonly characterSet: CharacterSetId = DEFAULT_CHARACTER_SET,   // chosen when the room is created, unchanged afterwards
     readonly config: RoomConfig = defaultRoomConfig(id, '', rules),
   ) {
     this.emptySince = now()
@@ -123,14 +129,14 @@ export class Room {
   readonly mode: MatchMode
   get eco(): EconomyConfig { return this.mode.economy() }
 
-  /** Số người chơi thật (không tính zombie NPC) */
+  /** Number of real players (NPC zombies not counted) */
   humanCount(): number {
     let n = 0
     for (const p of this.players.values()) if (!p.npc) n++
     return n
   }
 
-  /** Thêm zombie NPC (không gửi PlayerJoined/TeamAssigned: client chỉ biết qua snapshot). Gọi bằng mode, không qua join(). */
+  /** Add an NPC zombie (sends no PlayerJoined/TeamAssigned: clients only learn of it through snapshots). Called by the mode, not through join(). */
   addNpc(name: string, npc: NpcDriver, sp: { pos: [number, number, number]; yaw: number }, team: TeamId = 'B'): Player {
     const sink: Transport = { send: () => {}, onMessage: () => {}, onClose: () => {} }
     const p = this.makePlayer(name, sink, team, sp)
@@ -140,7 +146,7 @@ export class Room {
     return p
   }
 
-  /** Xoá zombie NPC (không gửi PlayerLeft). */
+  /** Remove an NPC zombie (sends no PlayerLeft). */
   removeNpc(id: number): void {
     const p = this.players.get(id)
     if (!p?.npc) return
@@ -155,10 +161,10 @@ export class Room {
     return n
   }
 
-  // Luật chọn đội: tự động → đội ít người hơn (bằng nhau thì ngẫu nhiên); chọn đội làm chênh lệch quá rules.maxTeamDiff thì bị chuyển sang đội kia.
-  // Đội đầy (maxPerTeam) cũng chuyển; cả hai đầy → null (phòng đầy). `except` = người đang đổi đội (không tính vào đội cũ).
+  // Team choice rule: automatic -> the team with fewer players (random on ties); a choice that makes the gap exceed rules.maxTeamDiff is moved to the other team.
+  // A full team (maxPerTeam) is also moved; both full -> null (room full). `except` = the player changing teams (not counted in the old team).
   assignTeam(pref: TeamId | 'auto', except: Player | null = null): TeamId | null {
-    const jt = this.mode.joinTeam?.(this)   // thể thức zombie: mọi người vào phe người, chỉ giới hạn tổng số người
+    const jt = this.mode.joinTeam?.(this)   // zombie modes: everyone joins the human side, only the total player count is limited
     if (jt !== undefined) return this.humanCount() - (except ? 1 : 0) >= this.config.maxPlayers ? null : jt
     let a = this.teamCount('A'), b = this.teamCount('B')
     if (except) { if (except.team === 'A') a--; else b-- }
@@ -169,7 +175,7 @@ export class Room {
     return count(team) >= this.rules.maxPerTeam ? null : team
   }
 
-  // Căn cứ của đội: đổi bên thì đội A ở căn cứ B và ngược lại (5.4)
+  // Team base: after swapping sides, team A is at base B and vice versa (5.4)
   baseSpawns(team: TeamId): LoadedMap['spawns']['A'] {
     return (team === 'A') !== this.sideSwapped ? this.map.spawns.A : this.map.spawns.B
   }
@@ -179,7 +185,7 @@ export class Room {
     for (const o of this.players.values()) o.transport.send({ t: MsgType.TeamAssigned, id: p.id, team })
   }
 
-  // Dựng một Player mới (chưa vào danh sách, chưa gửi tin nào)
+  // Build a new Player (not in the list yet, nothing sent)
   private makePlayer(name: string, transport: Transport, team: TeamId, sp: { pos: [number, number, number]; yaw: number }): Player {
     const loadout = defaultLoadout(team, this.eco)
     const player: Player = {
@@ -192,7 +198,7 @@ export class Room {
         grounded: false, crouching: false, slideTimer: 0, slideCooldown: 0, adsT: 0,
       },
       inputQueue: [],
-      lastProcessedSeq: -1,   // client đếm seq từ 0
+      lastProcessedSeq: -1,   // the client counts seq from 0
       lastCmd: null,
       world: null,
       idleCmd: { seq: 0, buttons: 0, yaw: sp.yaw, pitch: 0, weapon: 0 },
@@ -219,6 +225,7 @@ export class Room {
       loadout,
       killStreak: 0,
       buyTimes: [],
+      dropTimes: [],
       inRound: true,
       survived: false,
       bot: null,
@@ -242,24 +249,25 @@ export class Room {
     return player
   }
 
-  // null = phòng đầy
+  // null = room full
   join(name: string, transport: Transport, tick: number, serverTime: number, pref: TeamId | 'auto' = 'auto'): Player | null {
     const team = this.assignTeam(pref)
     if (!team) return null
     const sp = this.pickSpawn(team, null, true)
     const player = this.makePlayer(name, transport, team, sp)
-    transport.send({ t: MsgType.Welcome, yourId: player.id, tick, serverTime, mapName: this.map.name, characterSet: this.characterSet,
+    transport.send({ t: MsgType.Welcome, yourId: player.id, tick, serverTime, mapId: this.mapId, mapName: this.map.name, characterSet: this.characterSet,
       config: this.config, players: [...this.players.values()].map(o => ({ id: o.id, name: o.name })) })
     for (const other of this.players.values()) {
       other.transport.send({ t: MsgType.PlayerJoined, id: player.id, name: player.name })
     }
     this.players.set(player.id, player)
     this.emptySince = null
-    // Đội của mọi người cho người mới; đội của người mới cho cả phòng
+    // Everyone's team to the newcomer; the newcomer's team to the whole room
     for (const o of this.players.values()) if (o !== player) transport.send({ t: MsgType.TeamAssigned, id: o.id, team: o.team })
     for (const o of this.players.values()) o.transport.send({ t: MsgType.TeamAssigned, id: player.id, team })
+    sendDropsTo(this, player)
     this.mode.onPlayerJoin(this, player)
-    if (this.offline) player.money = this.eco.maxMoney   // offline: tiền vô hạn hoặc nạp lại $16000 mỗi lần hồi sinh
+    if (this.offline) player.money = this.eco.maxMoney   // offline: infinite money or refilled to $16000 on every respawn
     transport.send({ t: MsgType.MoneyEvent, delta: player.money, reason: 'reset' })
     return player
   }
@@ -273,27 +281,27 @@ export class Room {
     for (const other of this.players.values()) other.transport.send({ t: MsgType.PlayerLeft, id })
     this.mode.onPlayerLeave(this, p)
     if (this.humanCount() === 0) {
-      for (const o of [...this.players.values()]) if (o.npc) this.removeNpc(o.id)   // hết người thật: bỏ zombie, phòng sẽ hết hạn
+      for (const o of [...this.players.values()]) if (o.npc) this.removeNpc(o.id)   // no real players left: remove zombies, the room will expire
       this.emptySince = this.now()
     }
   }
 
-  // Đặt súng theo p.loadout: cầm ô `slot` (không có thì ô có súng đầu tiên), đạn đầy, huỷ nạp
+  // Set the weapon from p.loadout: hold slot `slot` (or the first slot with a weapon if empty), full ammo, cancel reload
   equip(p: Player, slot = DEFAULT_SLOT): void {
     const ws = p.weapon
     ws.slots = loadoutWeaponIds(p.loadout)
     ws.slot = ws.slots[slot]! >= 0 ? slot : Math.max(0, ws.slots.findIndex(id => id >= 0))
     ws.current = ws.slots[ws.slot]!
     ws.ammo = WEAPONS.map(w => magSizeOf(w, ws.magMult))
-    ws.ammo[GRENADE_ID] = grenadeCount(p.loadout)
-    ws.nade.phase = 'idle'; ws.nade.quick = false; ws.quickHeld = false; ws.switchBackAtMs = 0
+    for (const id of GRENADE_IDS) ws.ammo[id] = grenadeCount(p.loadout, WEAPONS[id]!.key)
+    ws.nade.phase = 'idle'; ws.nade.quick = false; ws.quickHeld = false; ws.cycleHeld = false; ws.switchBackAtMs = 0
     ws.reloadEndMs = 0
     ws.nextFireMs = 0
     ws.triggerHeld = false
     p.recoil.pitch = 0; p.recoil.yaw = 0
   }
 
-  // Trận mới / đổi đội: tiền ban đầu, bộ mặc định của đội, chuỗi hạ 0
+  // New match / team change: starting money, the team's default set, kill streak 0
   resetEconomy(p: Player): void {
     p.money = this.offline ? this.eco.maxMoney : this.eco.startMoney
     p.killStreak = 0
@@ -302,14 +310,15 @@ export class Room {
     p.transport.send({ t: MsgType.MoneyEvent, delta: p.money, reason: 'reset' })
   }
 
-  // Chốt người chết cuối tick: hp ≤ 0 → chết, báo cả phòng. Gọi sau khi mọi người đã bước.
+  // Settle deaths at the end of the tick: hp <= 0 -> dead, notify the whole room. Call after everyone has stepped.
   finalizeDeaths(): void {
     let anyDeath = false
     for (const p of this.players.values()) {
       if (!p.alive || p.hp > 0) continue
-      if (this.mode.onLethal?.(this, p)) continue   // thể thức tự xử lý (Lây Nhiễm: người chết = bị lây nhiễm, không phải chết)
+      if (this.mode.onLethal?.(this, p)) continue   // the mode handles it itself (Infection: a dead human = infected, not a death)
       anyDeath = true
-      dropOnDeath(this, p)   // đang rút chốt: ready → lựu đạn rơi tại chỗ, pulling → huỷ
+      dropOnDeath(this, p)   // pulling the pin: ready -> grenade drops in place, pulling -> cancelled
+      dropWeaponOnDeath(this, p)   // the held gun falls where the player died (before the loadout is reset on respawn)
       p.alive = false
       p.hp = 0
       const delay = this.mode.respawnDelayMs(this, p)
@@ -319,14 +328,17 @@ export class Room {
       const reward = this.mode.onKill(this, this.players.get(p.killerId) ?? null, p)
       p.killStreak = 0
       for (const o of this.players.values()) {
-        if (p.npc && o.id !== p.killerId) continue   // zombie NPC chết: chỉ người hạ nó nhận (hiệu ứng trúng), cả phòng không bị killfeed rác
+        if (p.npc && o.id !== p.killerId) continue   // NPC zombie died: only its killer gets the hit effect, the room is spared junk killfeed entries
         o.transport.send({ t: MsgType.Kill, killerId: p.killerId, victimId: p.id, weapon: p.killWeapon, headshot: p.killHeadshot, reward, victimStreak })
       }
     }
     if (anyDeath) this.mode.afterDeaths(this)
   }
 
-  // Biến thành zombie (plan 16): sang phe B (không có friendly fire giữa zombie), cầm vuốt, máu theo loại. transformMs > 0: bất tử + đứng yên chừng đó
+  /** New round / new match: remove every gun lying on the floor */
+  clearDrops(): void { clearWeaponDrops(this) }
+
+  // Turn into a zombie (plan 16): move to side B (no friendly fire between zombies), hold the claw, health by type. transformMs > 0: invulnerable + stationary for that long
   makeZombie(p: Player, stats: ZombieStats, transformMs = 0): void {
     p.role = 'zombie'
     p.zstats = stats
@@ -340,7 +352,7 @@ export class Room {
     if (transformMs > 0) { p.transformUntil = this.serverNow + transformMs; p.invulnUntil = p.transformUntil }
   }
 
-  // Về làm người (hết ván, lệnh debug): bộ súng mặc định của đội
+  // Back to being human (round end, debug command): the team's default loadout
   makeHuman(p: Player, team: TeamId = 'A'): void {
     p.role = 'human'
     p.zstats = null
@@ -353,7 +365,7 @@ export class Room {
     this.equip(p)
   }
 
-  // Hồi sinh người đã chết đủ lâu
+  // Respawn players who have been dead long enough
   respawnDue(): void {
     for (const p of this.players.values()) {
       if (p.alive || this.serverNow < p.respawnAt) continue
@@ -361,8 +373,8 @@ export class Room {
     }
   }
 
-  // Spawn trong căn cứ của đội, xa kẻ địch còn sống nhất (điểm có khoảng cách tới kẻ địch gần nhất lớn nhất).
-  // `p` = null: người đang vào phòng (chưa có trong danh sách).
+  // Spawn inside the team's base, as far as possible from living enemies (the point whose distance to the nearest enemy is largest).
+  // `p` = null: the player is entering the room (not in the list yet).
   pickSpawn(team: TeamId, p: Player | null, spreadTeammates = false): LoadedMap['spawns']['A'][number] {
     const all = this.baseSpawns(team)
     let best = all[0] ?? { pos: [0, 2, 0] as [number, number, number], yaw: 0 }
@@ -371,7 +383,7 @@ export class Room {
       let nearest = Infinity
       for (const o of this.players.values()) {
         if (o === p || !o.alive) continue
-        // Đồng đội cũng tránh để không chồng lên nhau, nhưng kẻ địch mới là tiêu chí chính
+        // Teammates are avoided too so players do not stack, but enemies are the main criterion
         if (o.team === team && !spreadTeammates) continue
         nearest = Math.min(nearest, Math.hypot(o.state.pos[0] - sp.pos[0], o.state.pos[2] - sp.pos[2]))
       }
@@ -380,7 +392,7 @@ export class Room {
     return best
   }
 
-  // keepLoadout: giữ súng đang mang (người sống sót qua ván Sinh Tử); mặc định chết thì về bộ của đội
+  // keepLoadout: keep the weapons carried (a player who survived an Elimination round); by default a death returns to the team's loadout
   respawn(p: Player, spawn?: { pos: [number, number, number]; yaw: number }, keepLoadout = false): void {
     const best = spawn ?? this.mode.pickSpawn?.(this, p) ?? this.pickSpawn(p.team, p)
     p.state = {
@@ -392,13 +404,13 @@ export class Room {
     p.killerId = -1
     p.invulnUntil = this.serverNow + SPAWN_INVULN_MS
     p.lastHurtAt = -Infinity
-    if (p.downed || p.downUntil !== 0) { p.downed = false; p.downUntil = 0; p.reviveProgressMs = 0; if (!p.hero) p.speedMult = 1 }   // Thủ Thành: hồi sinh xoá trạng thái gục
-    // Chết thì mất súng đã mua (tiền giữ nguyên): hồi sinh với bộ mặc định của đội, cầm súng dài
+    if (p.downed || p.downUntil !== 0) { p.downed = false; p.downUntil = 0; p.reviveProgressMs = 0; if (!p.hero) p.speedMult = 1 }   // Defense: respawn clears the downed state
+    // Dying loses purchased weapons (money kept): respawn with the team's default loadout, holding the long gun
     const keep = keepLoadout || this.eco.keepLoadoutOnDeath || p.zstats !== null
     if (!keep) p.loadout = defaultLoadout(p.team, this.eco)
     this.equip(p, keep ? p.weapon.slot : DEFAULT_SLOT)
     if (p.zstats) p.pendingClaw = null
-    if (this.offline && p.money !== this.eco.maxMoney) {   // offline: mỗi lần hồi sinh nạp lại đủ tiền
+    if (this.offline && p.money !== this.eco.maxMoney) {   // offline: every respawn refills money
       p.money = this.eco.maxMoney
       p.transport.send({ t: MsgType.MoneyEvent, delta: p.money, reason: 'reset' })
     }
@@ -414,11 +426,11 @@ export class Room {
 
 export class RoomManager {
   readonly rooms = new Map<string, Room>()
-  /** Các map chọn được khi tạo phòng; map đầu tiên là mặc định */
+  /** Maps that can be chosen when creating a room; the first map is the default */
   readonly maps = new Map<string, { name: string; map: LoadedMap }>()
-  /** Lưới di chuyển theo map (zombie Thủ Thành và bot cần). Host dựng lúc khởi động; map chưa có lưới thì phòng không có zombie đi được. */
+  /** Navigation grid per map (needed by Defense zombies and bots). The host builds it at startup; a map without a grid has no navigating zombies. */
   readonly navs = new Map<string, NavGrid>()
-  /** Số phòng tối đa cùng lúc (standalone đặt từ config.json); phòng mới quá giới hạn bị từ chối như phòng đầy. */
+  /** Max simultaneous rooms (standalone sets it from config.json); a new room beyond the limit is rejected like a full room. */
   maxRooms = Infinity
 
   constructor(private map: LoadedMap, private now: () => number = () => performance.now(), private rules: MatchRules = MATCH, private defaultMapId = 'default') {
@@ -427,10 +439,10 @@ export class RoomManager {
 
   registerMap(id: string, name: string, map: LoadedMap): void { this.maps.set(id, { name, map }) }
 
-  // Vào phòng chưa có thì tạo mới. tryJoin trả null khi phòng đầy
+  // Join an existing room or create a new one. tryJoin returns null when the room is full
   join(roomId: string, name: string, transport: Transport, tick = 0, team: TeamId | 'auto' = 'auto', characterSet: CharacterSetId = DEFAULT_CHARACTER_SET, mapId?: string): { room: Room; player: Player } {
     const res = this.tryJoin(roomId, name, transport, tick, team, characterSet, mapId)
-    if (!res) throw new Error('phòng đầy')
+    if (!res) throw new Error('room full')
     return res
   }
 
@@ -443,7 +455,7 @@ export class RoomManager {
 
   createRoom(roomId: string, characterSet: CharacterSetId = DEFAULT_CHARACTER_SET, mapId?: string, options?: RoomOptions): Room {
     const id = mapId !== undefined && this.maps.has(mapId) ? mapId : this.defaultMapId
-    // Cài đặt do client gửi luôn được kẹp theo SETTINGS_LIMITS; không gửi thì Hỗn Chiến theo luật mặc định của server
+    // Settings sent by the client are always clamped to SETTINGS_LIMITS; if none are sent, Team Deathmatch uses the server's default rules
     const config = options ? sanitizeRoomConfig(roomId, id, options) : defaultRoomConfig(roomId, id, this.rules)
     const rules = roomRules(this.rules, config)
     const room = new Room(roomId, this.maps.get(id)!.map, this.now, Math.random, rules, characterSet, config)
@@ -456,14 +468,14 @@ export class RoomManager {
   list(): RoomInfo[] {
     const out: RoomInfo[] = []
     for (const r of this.rooms.values()) {
-      out.push({ id: r.id, mapId: r.mapId, characterSet: r.characterSet, players: r.humanCount(), maxPlayers: r.config.maxPlayers, teamA: r.teamCount('A'), teamB: r.teamCount('B'), mode: r.config.settings.mode, status: r.mode.statusText(r) })
+      out.push({ id: r.id, mapId: r.mapId, characterSet: r.characterSet, players: r.humanCount(), maxPlayers: r.config.maxPlayers, teamA: r.teamCount('A'), teamB: r.teamCount('B'), mode: r.config.settings.mode, status: r.mode.roomStatus(r) })
     }
     return out
   }
 
   mapList(): MapInfo[] { return [...this.maps].map(([id, m]) => ({ id, name: m.name })) }
 
-  // Xoá phòng trống quá 60 giây; gọi định kỳ
+  // Remove rooms empty for over 60 seconds; call periodically
   sweep(): void {
     for (const [id, room] of this.rooms) if (room.isExpired()) this.rooms.delete(id)
   }

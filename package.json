@@ -15,18 +15,22 @@
     "test": "vitest run",
     "bot-bench": "npm run bot-bench -w server",
     "bundle-server": "node scripts/bundle-server.mjs",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "deploy": "bash deploy/deploy.sh"
   },
   "devDependencies": {
     "esbuild": "0.25.12",
     "postject": "1.0.0-alpha.6",
     "typescript": "5.6.3",
-    "vitest": "2.1.8"
+    "vitest": "^5.0.5"
   },
   "allowScripts": {
     "esbuild@0.21.5": true,
     "esbuild@0.23.1": true,
     "fsevents@2.3.3": true,
     "esbuild@0.25.12": true
+  },
+  "dependencies": {
+    "vite": "^8.3.5"
   }
 }

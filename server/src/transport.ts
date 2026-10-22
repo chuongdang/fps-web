@@ -16,7 +16,7 @@ export function wrapWebSocket(ws: WebSocket): Transport {
     onMessage(cb) {
       ws.on('message', (data, isBinary) => {
         if (!isBinary) return
-        try { cb(decode(toBytes(data))) } catch { /* gói hỏng: bỏ qua */ }
+        try { cb(decode(toBytes(data))) } catch { /* corrupt packet: ignore */ }
       })
     },
     onClose(cb) { ws.on('close', cb) },

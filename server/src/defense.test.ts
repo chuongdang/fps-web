@@ -46,7 +46,7 @@ const run = (room: Room, ms: number) => { const to = room.serverNow + ms; for (l
 const of = (msgs: Map<number, AnyMsg[]>, id: number, t: number) => msgs.get(id)!.filter(m => m.t === t)
 const npcs = (room: Room) => [...room.players.values()].filter(p => p.npc)
 const aliveNpcs = (room: Room) => npcs(room).filter(p => p.alive)
-/** Giết mọi zombie đang sống bằng người `killer` (máu về 0, tính công cho killer) */
+/** Kill every living zombie on behalf of `killer` (hp to 0, kill credited to killer) */
 const killAll = (room: Room, killer: Player) => { for (const z of aliveNpcs(room)) { z.hp = 0; z.killerId = killer.id }; run(room, 32) }
 
 function toWave1() {
@@ -58,8 +58,8 @@ function toWave1() {
   return s
 }
 
-describe('Thủ Thành – các pha (T.1)', () => {
-  it('có người → PREP → ĐỢT 1; người ở căn cứ A (đội A), tiền $1500, WaveStart gửi cho người chơi', () => {
+describe('Defense - phases (T.1)', () => {
+  it('player joins -> PREP -> WAVE 1; player in base A (team A), money $1500, WaveStart sent to the player', () => {
     const s = setup()
     run(s.room, 100)
     const p = s.players[0]!
@@ -68,10 +68,10 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(p.state.pos[0]).toBeLessThan(0)
     run(s.room, 1100)
     expect(s.m.wave).toBe(1)
-    expect(of(s.msgs, p.id, MsgType.WaveStart).pop()).toMatchObject({ wave: 1, title: 'ĐỢT 1', hint: 'Làm quen nào' })
+    expect(of(s.msgs, p.id, MsgType.WaveStart).pop()).toMatchObject({ wave: 1, title: WAVES.waves[0]!.title, hint: WAVES.waves[0]!.hint })
   })
 
-  it('đợt 1: sinh dần 10 walker (1,5s/con), mỗi con theo lịch; còn zombiesLeft đúng', () => {
+  it('wave 1: 10 walkers spawn gradually (1.5s each), each on schedule; zombiesLeft is correct', () => {
     const s = toWave1()
     run(s.room, 100)
     expect(aliveNpcs(s.room).length).toBe(1)
@@ -83,7 +83,7 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(aliveNpcs(s.room).length).toBe(10)
   })
 
-  it('hạ hết zombie: nhận tiền theo loại + thưởng hết đợt 800+100n, WaveClear, rồi nghỉ; tới giờ nghỉ → đợt 2', () => {
+  it('all zombies killed: money per type + wave-clear bonus 800+100n, WaveClear, then a break; break over -> wave 2', () => {
     const s = toWave1()
     const p = s.players[0]!
     run(s.room, 1500 * 10)
@@ -95,10 +95,10 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(s.room.phase).toBe(MatchPhase.Prep)
     run(s.room, 2200)
     expect(s.m.wave).toBe(2)
-    expect(of(s.msgs, p.id, MsgType.WaveStart).pop()).toMatchObject({ wave: 2, title: 'ĐỢT 2' })
+    expect(of(s.msgs, p.id, MsgType.WaveStart).pop()).toMatchObject({ wave: 2, title: WAVES.waves[1]!.title })
   })
 
-  it('đợt có nhiều nhóm: đợt 2 có runner trễ 8s; số lượng nhân theo số người (2 người ×1,6)', () => {
+  it('multi-group wave: wave 2 has runners delayed 8s; counts scale with player count (2 players x1.6)', () => {
     const s = setup(2)
     run(s.room, 100)
     run(s.room, 1100)
@@ -108,10 +108,10 @@ describe('Thủ Thành – các pha (T.1)', () => {
     run(s.room, 3000)
     expect(aliveNpcs(s.room).some(z => z.zstats!.type === 'runner')).toBe(true)
     expect(Math.round(10 * (1 + 0.6))).toBe(16)
-    expect(s.m.zombiesLeft(s.room)).toBeGreaterThan(16)   // walker 16 + runner 10 (một số đã sinh)
+    expect(s.m.zombiesLeft(s.room)).toBeGreaterThan(16)   // walker 16 + runner 10 (some already spawned)
   })
 
-  it('maxAlive: không quá 28 zombie sống cùng lúc, hết chỗ thì chờ', () => {
+  it('maxAlive: no more than 28 zombies alive at once, wait when full', () => {
     const s = setup(4)
     run(s.room, 100); run(s.room, 1100)
     s.m.devSetWave(s.room, 8)
@@ -119,7 +119,7 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(aliveNpcs(s.room).length).toBeLessThanOrEqual(WAVES.maxAlive)
   })
 
-  it('chơi một mình: chết là DEFEAT ngay (không có gục); DefenseEnd kèm thống kê; 20s sau về WARMUP rồi vào lại', () => {
+  it('solo: death is an immediate DEFEAT (no downed state); DefenseEnd carries stats; 20s later back to WARMUP, then re-enter', () => {
     const s = toWave1()
     const p = s.players[0]!
     run(s.room, 3000)
@@ -133,19 +133,19 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(['waiting', 'prep']).toContain(s.m.kind)
   })
 
-  it('chết giữa đợt (nhiều người): không hồi sinh tới giờ nghỉ, rồi hồi sinh đầy máu với súng đã có', () => {
+  it('death mid-wave (multiplayer): no respawn until the break, then respawn at full hp with the guns already owned', () => {
     const s = setup(2)
     run(s.room, 100); run(s.room, 1100)
     const [a, b] = s.players as [Player, Player]
-    // a gục rồi chết hẳn (hết giờ gục)
+    // a is downed, then dies for good (downed timer expires)
     a.hp = 0; run(s.room, 32)
     expect(a.downed).toBe(true)
     a.downUntil = s.room.serverNow + 10
     run(s.room, 100)
     expect(a.alive).toBe(false)
     run(s.room, 3000)
-    expect(a.alive).toBe(false)   // vẫn chưa hồi sinh giữa đợt
-    killAll(s.room, b); run(s.room, 1500 * 20)   // 2 người: 16 walker
+    expect(a.alive).toBe(false)   // still no respawn mid-wave
+    killAll(s.room, b); run(s.room, 1500 * 20)   // 2 players: 16 walkers
     killAll(s.room, b)
     run(s.room, 100)
     expect(s.m.kind).toBe('intermission')
@@ -153,7 +153,7 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(a.hp).toBe(DEFENSE.prepReviveHp)
   })
 
-  it('đợt 10 hạ hết (có boss) → VICTORY', () => {
+  it('wave 10 cleared (with boss) -> VICTORY', () => {
     const s = setup()
     run(s.room, 100); run(s.room, 1100)
     const p = s.players[0]!
@@ -162,14 +162,14 @@ describe('Thủ Thành – các pha (T.1)', () => {
     expect(aliveNpcs(s.room).some(z => z.zstats!.type === 'boss')).toBe(true)
     run(s.room, 12_000)
     killAll(s.room, p)
-    run(s.room, 50_000)   // 16 walker, 2,5s/con, trễ 10s
+    run(s.room, 50_000)   // 16 walkers, 2.5s each, delayed 10s
     killAll(s.room, p)
     run(s.room, 100)
     expect(s.m.kind).toBe('victory')
     expect(of(s.msgs, p.id, MsgType.DefenseEnd).pop()).toMatchObject({ result: 'victory' })
   })
 
-  it('/wave 9 nhảy tới đợt 9; /clearwave xoá zombie đợt hiện tại → hết đợt', () => {
+  it('/wave 9 jumps to wave 9; /clearwave removes the current wave zombies -> wave over', () => {
     const s = setup()
     run(s.room, 100); run(s.room, 1100)
     const p = s.players[0]!
@@ -183,14 +183,14 @@ describe('Thủ Thành – các pha (T.1)', () => {
   })
 })
 
-describe('Thủ Thành – gục và cứu (T.6)', () => {
+describe('Defense - downed and revive (T.6)', () => {
   function twoPlayers() {
     const s = setup(2)
     run(s.room, 100); run(s.room, 1100)
     run(s.room, 200)
     return s
   }
-  it('nhiều người: hết máu → gục (hp 40, bò chậm), chưa chết; chỉ cầm súng ngắn', () => {
+  it('multiplayer: out of hp -> downed (hp 40, slow crawl), not dead; sidearm only', () => {
     const s = twoPlayers()
     const [a] = s.players as [Player, Player]
     a.hp = 0; a.killerId = aliveNpcs(s.room)[0]?.id ?? -1
@@ -200,7 +200,7 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     expect(a.hp).toBe(DEFENSE.down.reviveHp)
     expect(a.speedMult).toBeCloseTo(DEFENSE.down.crawlSpeed / defaultMovement.runSpeed, 6)
   })
-  it('đồng đội ≤ 1,5m giữ E 3s → cứu dậy với 40 máu; bị đánh trúng thì làm lại từ đầu', () => {
+  it('teammate within 1.5m holds E for 3s -> revived with 40 hp; getting hit restarts it', () => {
     const s = twoPlayers()
     const [a, b] = s.players as [Player, Player]
     a.hp = 0; run(s.room, 32)
@@ -210,7 +210,7 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     hold(60); run(s.room, 1000)
     expect(a.downed).toBe(true)
     expect(a.reviveProgressMs).toBeGreaterThan(500)
-    b.lastHurtAt = s.room.serverNow   // bị đánh trúng
+    b.lastHurtAt = s.room.serverNow   // got hit
     run(s.room, 32)
     expect(a.reviveProgressMs).toBe(0)
     b.lastHurtAt = -Infinity
@@ -219,11 +219,11 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     expect(a.hp).toBe(DEFENSE.down.reviveHp)
     expect(a.speedMult).toBe(1)
   })
-  it('người cuối cùng còn đứng bị hạ khi đồng đội đã chết hẳn → không gục, DEFEAT ngay', () => {
+  it('last player standing is killed while teammates are already dead -> not downed, immediate DEFEAT', () => {
     const s = twoPlayers()
     const [a, b] = s.players as [Player, Player]
     a.hp = 0; run(s.room, 32)
-    a.downUntil = s.room.serverNow - 1   // a chảy máu tới chết
+    a.downUntil = s.room.serverNow - 1   // a bleeds out
     run(s.room, 32)
     expect(a.downed).toBe(false)
     b.hp = 0
@@ -231,7 +231,7 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     expect(b.downed).toBe(false)
     expect(s.m.kind).toBe('defeat')
   })
-  it('zombie cào trúng người đang gục không làm họ chết (chỉ chết khi hết giờ chảy máu); người đứng thì vẫn mất máu', () => {
+  it('a zombie claw hit on a downed player does not kill them (only the bleed-out timer does); standing players still lose hp', () => {
     const s = twoPlayers()
     const [a, b] = s.players as [Player, Player]
     a.hp = 0; run(s.room, 32)
@@ -240,7 +240,7 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     const claw = (target: Player) => {
       z.state.pos = [target.state.pos[0], target.state.pos[1], target.state.pos[2] + 1.0]
       z.invulnUntil = 0
-      resolveShot(z, s.room, { seq: 1, buttons: Btn.Fire, yaw: 0, pitch: 0, weapon: CLAW_ID }, defaultMovement, WEAPONS[CLAW_ID])   // yaw 0 nhìn −Z: về phía target
+      resolveShot(z, s.room, { seq: 1, buttons: Btn.Fire, yaw: 0, pitch: 0, weapon: CLAW_ID }, defaultMovement, WEAPONS[CLAW_ID])   // yaw 0 looks toward -Z: at the target
     }
     claw(a)
     expect(a.hp).toBe(DEFENSE.down.reviveHp)
@@ -249,19 +249,19 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     claw(b)
     expect(b.hp).toBeLessThan(before)
   })
-  it('zombie tản ra khỏi người gục: không đứng chồng lên, để đồng đội vào cứu', async () => {
+  it('zombies spread away from a downed player: no stacking, so teammates can get in to revive', async () => {
     const s = twoPlayers()
     const [a, b] = s.players as [Player, Player]
     a.hp = 0; run(s.room, 32)
     expect(a.downed).toBe(true)
-    b.state.pos = [a.state.pos[0] + 12, a.state.pos[1], a.state.pos[2]]   // mục tiêu nằm bên kia người gục: đường đi xuyên qua người gục
+    b.state.pos = [a.state.pos[0] + 12, a.state.pos[1], a.state.pos[2]]   // target is on the far side of the downed player: the path goes through them
     const spawn = (s.m as unknown as { spawnZombie(r: Room, t: string, p: [number, number, number], f: boolean): Player | null }).spawnZombie
     const zs = [0, 1, 2].map(i => spawn.call(s.m, s.room, 'walker', [a.state.pos[0] - 1 - i * 0.4, a.state.pos[1], a.state.pos[2]], true)!)
-    await new Promise(r => setTimeout(r, 0))   // world của zombie NPC gắn bất đồng bộ
+    await new Promise(r => setTimeout(r, 0))   // the NPC zombie worlds attach asynchronously
     run(s.room, 6000)
     for (const z of zs) expect(Math.hypot(z.state.pos[0] - a.state.pos[0], z.state.pos[2] - a.state.pos[2])).toBeGreaterThan(DEFENSE.down.clearRadiusM * 0.6)
   })
-  it('zombie bò luôn ngồi (bò sát đất)', async () => {
+  it('crawler zombies always crouch (crawl low)', async () => {
     const s = twoPlayers()
     const [a, b] = s.players as [Player, Player]
     b.state.pos = [a.state.pos[0] + 25, a.state.pos[1], a.state.pos[2]]
@@ -271,7 +271,7 @@ describe('Thủ Thành – gục và cứu (T.6)', () => {
     run(s.room, 3000)
     expect(z.state.crouching).toBe(true)
   })
-  it('cả hai gục/chết cùng lúc → DEFEAT', () => {
+  it('both downed/dead at once -> DEFEAT', () => {
     const s = twoPlayers()
     const [a, b] = s.players as [Player, Player]
     a.hp = 0; b.hp = 0

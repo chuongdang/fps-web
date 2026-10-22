@@ -1,13 +1,13 @@
-# Phase 5 – Luật Team Deathmatch "Cớm vs Cướp"
+# Phase 5 – "Cops vs Terrorists" Team Deathmatch rules
 
-Mục tiêu: một trận đấu hoàn chỉnh có đầu có cuối.
+Goal: a complete match with a beginning and an end.
 
 ## Config (`shared/src/teams.ts`, `shared/src/constants.ts`)
 
 ```ts
 export const TEAMS = {
-  A: { name: 'Cớm',  color: 0x2f6fd6, uiColor: '#2f6fd6' },
-  B: { name: 'Cướp', color: 0x2b2b2b, uiColor: '#e0a030' },
+  A: { name: 'Cops',    color: 0x2f6fd6, uiColor: '#2f6fd6' },
+  B: { name: 'Terrorists', color: 0x2b2b2b, uiColor: '#e0a030' },
 } as const;
 export type TeamId = 'A' | 'B';
 
@@ -22,79 +22,79 @@ export const MATCH = {
 };
 ```
 
-## Message thêm
+## Added messages
 
 ```ts
-  | { t: 111; phase: MatchPhase; phaseEndsAt: number; scoreA: number; scoreB: number; sideSwapped: boolean } // MatchState (gửi khi đổi, và mỗi 1s)
+  | { t: 111; phase: MatchPhase; phaseEndsAt: number; scoreA: number; scoreB: number; sideSwapped: boolean } // MatchState (sent on change, and every 1s)
   | { t: 112; id: number; team: TeamId }                                    // TeamAssigned
-  | { t: 113; rows: { id: number; name: string; team: TeamId; kills: number; deaths: number; ping: number }[] } // Scoreboard (mỗi 1s)
+  | { t: 113; rows: { id: number; name: string; team: TeamId; kills: number; deaths: number; ping: number }[] } // Scoreboard (every 1s)
 
 // C2S
   | { t: 4; team: TeamId | 'auto' }                                          // ChooseTeam
 ```
 
-`NetPlayer` thêm `team`.
+`NetPlayer` adds `team`.
 
 ---
 
-## Task 5.1 – Đội + chia đội
+## Task 5.1 – Teams + team assignment
 
-Làm:
-- Vào phòng: client chọn Cớm / Cướp / Tự động. Server từ chối nếu đội đó đông hơn đội kia ≥ 1 người (trả về đội được gán thay thế).
-- Nhân vật người khác tô màu đội. Đồng đội có tên hiện trên đầu (màu đội); kẻ địch **không** hiện tên.
-- Server phase 4: bỏ qua hitbox của đồng đội (đạn **xuyên qua** đồng đội, không chặn).
-- Spawn và hồi sinh theo căn cứ của đội (có tính đổi bên, task 5.4).
+Do:
+- On joining a room: the client chooses Cops / Terrorists / Auto. The server refuses if that team already has ≥ 1 more player than the other (and returns the team assigned instead).
+- Other players' characters are tinted in their team color. Teammates have their name shown overhead (in the team color); enemies **do not** show names.
+- Server phase 4: ignore teammates' hitboxes (bullets **pass through** teammates, not blocked).
+- Spawn and respawn at the team's base (accounting for side swapping, task 5.4).
 
-Nghiệm thu:
-- [ ] 3 người: không thể cho 3 người vào cùng một đội khi đội kia có 0.
-- [ ] Bắn đồng đội: không hitmarker, không mất máu; đạn đi xuyên trúng kẻ địch phía sau.
-- [ ] Hồi sinh luôn ở căn cứ đội mình.
+Acceptance:
+- [ ] 3 players: it is not possible to put all 3 in the same team when the other team has 0.
+- [ ] Shooting a teammate: no hitmarker, no health loss; the bullet passes through and hits the enemy behind.
+- [ ] Respawn is always at your own team's base.
 
 ---
 
-## Task 5.2 – State machine trận đấu
+## Task 5.2 – Match state machine
 
 ```
-WAITING ──(đủ minPlayersToStart)──► COUNTDOWN ──(5s)──► PLAYING
+WAITING ──(minPlayersToStart reached)──► COUNTDOWN ──(5s)──► PLAYING
    ▲                                    │                   │
-   │                       (không đủ người)      (hết giờ / đủ killLimit)
+   │                       (not enough players)   (time up / killLimit reached)
    └────────────────────────────────────┘                   ▼
                                     COUNTDOWN ◄──(10s)── ENDED
 ```
 
-- WAITING: chơi tự do, không tính điểm, hồi sinh ngay.
-- COUNTDOWN: mọi người đứng yên ở spawn (server bỏ qua input di chuyển), HUD đếm ngược to giữa màn hình.
-- PLAYING: tính điểm. Mỗi kill cộng 1 cho đội người bắn. Bản đầu **không có sát thương do rơi**.
-- ENDED: hiện "CỚM THẮNG" / "CƯỚP THẮNG" / "HOÀ", bảng điểm tự mở, không bắn được.
-- Hết ENDED → reset điểm, kill/death, máu, đạn, **đổi bên**, vào COUNTDOWN.
+- WAITING: free play, no scoring, instant respawn.
+- COUNTDOWN: everyone stands still at spawn (the server ignores movement input), and the HUD shows a large countdown in the center of the screen.
+- PLAYING: scoring. Each kill adds 1 to the shooter's team. The first version has **no fall damage**.
+- ENDED: shows "COPS WIN" / "TERRORISTS WIN" / "DRAW", the scoreboard opens automatically, and shooting is disabled.
+- When ENDED finishes → reset score, kills/deaths, health, ammo, **swap sides**, go to COUNTDOWN.
 
-Nghiệm thu:
-- [ ] Đặt tạm `durationMs = 60000`, `killLimit = 5` để test: cả 2 điều kiện kết thúc đều hoạt động.
-- [ ] Trong COUNTDOWN không đi được, nhưng vẫn xoay chuột được.
-- [ ] Còn 1 người trong phòng giữa trận: quay về WAITING.
-
----
-
-## Task 5.3 – Bảng điểm + HUD điểm đội
-
-Làm:
-- HUD trên giữa: `Cớm 12 — 9 Cướp` + đồng hồ đếm ngược trận (tính từ `phaseEndsAt` và `serverNow()`).
-- Giữ Tab: bảng 2 cột theo đội, sắp xếp theo kill giảm dần, cột: tên, K, D, ping. Dòng của mình tô nổi.
-- Ping lấy từ server (server đo RTT bằng ping riêng của nó hoặc client tự báo RTT trong Ping message).
-
-Nghiệm thu:
-- [ ] Bảng điểm cập nhật trong 1 giây sau mỗi kill.
-- [ ] Đồng hồ trận ở 3 tab lệch nhau < 1 giây.
+Acceptance:
+- [ ] Temporarily set `durationMs = 60000`, `killLimit = 5` to test: both end conditions work.
+- [ ] During COUNTDOWN you cannot move, but you can still turn the mouse.
+- [ ] Only 1 player left in the room mid-match: go back to WAITING.
 
 ---
 
-## Task 5.4 – Đổi bên + người vào giữa trận
+## Task 5.3 – Scoreboard + team score HUD
 
-Làm:
-- `sideSwapped = true`: đội A spawn ở căn cứ B và ngược lại. Mỗi trận mới đảo cờ này.
-- Người vào giữa trận PLAYING: auto vào đội ít người hơn (vẫn cho chọn nếu cân bằng), spawn ngay có bất tử.
-- Người rời giữa trận: điểm đội giữ nguyên.
+Do:
+- Top-center HUD: `Cops 12 — 9 Terrorists` + the match countdown clock (computed from `phaseEndsAt` and `serverNow()`).
+- Hold Tab: a 2-column board by team, sorted by kills descending, with columns: name, K, D, ping. Your own row is highlighted.
+- Ping comes from the server (the server measures RTT with its own ping, or the client reports its RTT in the Ping message).
 
-Nghiệm thu (bài kiểm tra cuối phase = định nghĩa "xong" bản đầu tiên):
-- [ ] 4–6 người chơi hết 2 trận liên tiếp: trận 2 đã đổi bên, điểm reset, không lỗi.
-- [ ] Người vào giữa trận được chia đội đúng, chơi bình thường.
+Acceptance:
+- [ ] The scoreboard updates within 1 second after each kill.
+- [ ] The match clock differs by < 1 second across 3 tabs.
+
+---
+
+## Task 5.4 – Side swap + players joining mid-match
+
+Do:
+- `sideSwapped = true`: team A spawns at base B and vice versa. Each new match flips this flag.
+- A player joining mid-match during PLAYING: automatically joins the team with fewer players (still allowed to choose if balanced), spawns immediately with invulnerability.
+- A player leaving mid-match: the team score stays unchanged.
+
+Acceptance (end-of-phase test = the definition of "done" for the first version):
+- [ ] 4–6 players play 2 consecutive matches: in match 2 sides have swapped, scores reset, no errors.
+- [ ] A player joining mid-match is assigned to a team correctly and plays normally.

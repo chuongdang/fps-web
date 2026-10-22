@@ -4,8 +4,8 @@ import type { HitBox } from '@fps/shared'
 const LIFE_MS = 2000
 const RAY_LEN = 60
 
-// F7: wireframe hitbox (đã tua) + tia của phát bắn gần nhất, từ DebugShot của server. Dùng để kiểm tra
-// hitbox tua về có trùng hình capsule đã thấy lúc bắn không. Chỉ debug nên cho phép cấp phát mỗi phát.
+// F7: wireframe hitboxes (rewound) + the ray of the most recent shot, from the server's DebugShot. Used to check
+// whether the rewound hitbox matches the capsule seen when firing. Debug only, so allocating per shot is allowed.
 export function createDebugShots(scene: THREE.Scene) {
   const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1))
   const boxMat = new THREE.LineBasicMaterial({ color: 0xff3333, depthTest: false })

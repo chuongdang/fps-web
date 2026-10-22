@@ -1,27 +1,27 @@
-// Vật liệu của map (chỉ tên + số liệu, không import Three). Map JSON khai báo mỗi box bằng:
-//   "texture": tên class ("brick" | "stone" | "concrete" | "plain"), hoặc loại ("wall" | "floor" | "crate"), hoặc tên file ảnh ("concrete_2")
-//   "variant": (tuỳ chọn) chọn ảnh thứ n (từ 1) trong class; bỏ trống = chọn theo vị trí box (hai bên đối xứng giống nhau)
-//   "color":   (tuỳ chọn) "#rrggbb" — nhân vào ảnh (ảnh xám như concrete đổi màu rất rõ) hoặc sơn phẳng nếu class là plain
-// Ảnh nằm ở client/public/textures/<tên>.jpg (nguồn gốc: assets/source/texture).
+// Map materials (names + numbers only, no Three import). Map JSON declares each box with:
+//   "texture": a class name ("brick" | "stone" | "concrete" | "plain"), or a type ("wall" | "floor" | "crate"), or an image file name ("concrete_2")
+//   "variant": (optional) pick the nth image (from 1) in the class; omitted = chosen by box position (symmetric sides look the same)
+//   "color":   (optional) "#rrggbb" — multiplied into the image (grey images like concrete change colour very visibly) or flat paint if the class is plain
+// Images live in client/public/textures/<name>.jpg (source: assets/source/texture).
 import type { MapBox } from './types'
 
 export interface TextureClass {
-  files: string[]   // tên file (không đuôi) trong client/public/textures
-  tileM: number     // một lần lặp ảnh phủ bao nhiêu mét
+  files: string[]   // file names (no extension) in client/public/textures
+  tileM: number     // how many metres one repeat of the image covers
 }
 
 export const TEXTURE_CLASSES: Record<string, TextureClass> = {
-  brick:    { files: ['brick_1'], tileM: 3 },                  // gạch đỏ
-  stone:    { files: ['stone_1'], tileM: 2.5 },                // đá tảng be
-  concrete: { files: ['concrete_1', 'concrete_2'], tileM: 2 }, // bê tông xám
-  plain:    { files: [], tileM: 1 },                           // không ảnh, chỉ ô kẻ + màu
-  greenfloor:    { files: ['greenfloor'], tileM: 1 },          // sàn xanh rêu
+  brick:    { files: ['brick_1'], tileM: 3 },                  // red brick
+  stone:    { files: ['stone_1'], tileM: 2.5 },                // beige boulder stone
+  concrete: { files: ['concrete_1', 'concrete_2'], tileM: 2 }, // grey concrete
+  plain:    { files: [], tileM: 1 },                           // no image, just grid cells + colour
+  greenfloor:    { files: ['greenfloor'], tileM: 1 },          // moss-green floor
 }
 
-export const FLOOR_COLOR = '#3d5a2a'   // xanh rêu
-export const CRATE_TYPE = 'crate'      // box loại này vẽ bằng model thùng gỗ (va chạm/đạn vẫn theo hộp của box)
+export const FLOOR_COLOR = '#3d5a2a'   // moss green
+export const CRATE_TYPE = 'crate'      // boxes of this type are drawn with the wooden crate model (collision/bullets still use the box)
 
-// Loại cũ → class + màu mặc định
+// Legacy types → class + default colour
 const TYPE_DEFAULTS: Record<string, { cls: string; color?: string }> = {
   wall:  { cls: 'concrete' },
   floor: { cls: 'plain', color: FLOOR_COLOR },
@@ -29,19 +29,19 @@ const TYPE_DEFAULTS: Record<string, { cls: string; color?: string }> = {
 
 export interface BoxLook {
   crate: boolean
-  file: string | null    // ảnh dùng (không đuôi) hoặc null = ô kẻ
+  file: string | null    // image used (no extension) or null = grid cells
   tileM: number
   color: string | null
 }
 
 function pickIndex(box: MapBox, n: number): number {
   if (box.variant !== undefined) return Math.max(0, Math.min(n - 1, Math.floor(box.variant) - 1))
-  // |x| để box và bản đối xứng chọn cùng một ảnh
+  // |x| so a box and its mirror image pick the same image
   const h = Math.abs(Math.round(box.pos[0] * 7 + box.pos[1] * 13 * 7 + box.pos[2] * 31 * 7))
   return h % n
 }
 
-/** Đổi khai báo vật liệu của box thành thứ cần vẽ. Tên lạ → ô kẻ trơn (không lỗi). */
+/** Convert a box's material declaration into what needs drawing. Unknown name → plain grid (no error). */
 export function resolveBoxLook(box: MapBox): BoxLook {
   if (box.texture === CRATE_TYPE) return { crate: true, file: null, tileM: 1, color: box.color ?? null }
   const def = TYPE_DEFAULTS[box.texture]

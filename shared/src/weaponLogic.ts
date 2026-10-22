@@ -1,4 +1,4 @@
-import { WEAPONS, SWITCH_MS, MAX_PELLETS, GRENADE_ID, magSizeOf, GRENADE_SLOT, CLAW_ID, CLAW_HEAVY_ID } from './weapons'
+import { WEAPONS, SWITCH_MS, MAX_PELLETS, GRENADE_IDS, isGrenadeId, magSizeOf, GRENADE_SLOT, CLAW_ID, CLAW_HEAVY_ID } from './weapons'
 import { onShotBloom } from './spread'
 import { GRENADE } from './grenade'
 import type { WeaponDef, WeaponState } from './weapons'
@@ -10,7 +10,7 @@ import { TICK_RATE } from './constants'
 
 const DEG = Math.PI / 180
 
-// Recoil tích luỹ (rad), tách khỏi yaw/pitch của chuột
+// Accumulated recoil (rad), separate from the mouse yaw/pitch
 export interface RecoilState {
   pitch: number
   yaw: number
@@ -22,7 +22,7 @@ export function makeRecoilState(): RecoilState {
 
 export type WeaponEvent = 'none' | 'fired' | 'dry' | 'reloadStart' | 'reloadEnd' | 'switched' | 'pull' | 'cancel' | 'threw'
 
-/** Bắt đầu nạp đạn nếu cần. Trả true nếu thực sự bắt đầu. */
+/** Start reloading if needed. Returns true if it actually started. */
 export function startReload(ws: WeaponState, def: WeaponDef, nowMs: number): boolean {
   if (ws.reloadEndMs > 0) return false
   if (ws.ammo[def.id]! >= magSizeOf(def, ws.magMult)) return false
@@ -30,47 +30,58 @@ export function startReload(ws: WeaponState, def: WeaponDef, nowMs: number): boo
   return true
 }
 
-/** Đổi súng, huỷ reload đang chạy. Khoá bắn SWITCH_MS. */
+/** Switch weapon, cancelling any reload in progress. Locks firing for SWITCH_MS. */
 export function switchWeapon(ws: WeaponState, id: number, nowMs: number): boolean {
   if (id === ws.current || id < 0 || id >= WEAPONS.length) return false
   ws.current = id
   ws.reloadEndMs = 0
   ws.switchEndMs = nowMs + SWITCH_MS
-  if (id !== GRENADE_ID) ws.nextFireMs = Math.max(ws.nextFireMs, nowMs + SWITCH_MS)   // lựu đạn không khoá: rút chốt (0,35s) chạy song song với tay đưa lên
-  ws.nade.phase = 'idle'   // đổi súng khi đang rút chốt: huỷ (chưa ném thì còn nguyên lựu đạn)
+  if (!isGrenadeId(id)) ws.nextFireMs = Math.max(ws.nextFireMs, nowMs + SWITCH_MS)   // grenades do not lock: the pin pull (0.35s) runs in parallel with the raise animation
+  ws.nade.phase = 'idle'   // switching weapon mid pin-pull: cancel (if not thrown yet the grenade is kept)
   ws.switchBackAtMs = 0
   return true
 }
 
-/** Chuyển sang ô `slot` nếu có súng. Ô trống / đang cầm rồi → false. */
+/** The other grenade type than `id` that still has some left (HE ↔ smoke), or -1 */
+export function otherNade(ws: WeaponState, id: number): number {
+  for (const g of GRENADE_IDS) if (g !== id && (ws.ammo[g] ?? 0) > 0) return g
+  return -1
+}
+
+/** Switch to slot `slot` if it has a weapon. Empty slot / already held → false. */
 export function selectSlot(ws: WeaponState, slot: number, nowMs: number): boolean {
   if (!Number.isInteger(slot) || slot < 0 || slot >= ws.slots.length) return false
-  const id = ws.slots[slot]!
+  let id = ws.slots[slot]!
   if (id < 0) return false
-  if (slot === GRENADE_SLOT && ws.slot !== GRENADE_SLOT) ws.prevSlot = ws.slot   // nhớ ô súng để tự đổi về sau khi ném
+  if (slot === GRENADE_SLOT && (ws.ammo[id] ?? 0) <= 0) {   // the selected type is out but the other remains: select the other
+    id = otherNade(ws, id)
+    if (id < 0) return false
+    ws.slots[slot] = id
+  }
+  if (slot === GRENADE_SLOT && ws.slot !== GRENADE_SLOT) ws.prevSlot = ws.slot   // remember the weapon slot to switch back to after the throw
   ws.slot = slot
   return switchWeapon(ws, id, nowMs)
 }
 
-/** Hệ số tốc độ chạy theo súng đang cầm (phần ngắm đi riêng qua adsMoveFor + adsT). */
+/** Run-speed multiplier by held weapon (the ADS part goes separately via adsMoveFor + adsT). */
 export function moveSpeedMul(ws: WeaponState): number {
   return WEAPONS[ws.current]?.moveSpeedMul ?? 1
 }
 
-/** Tham số ngắm của súng đang cầm cho stepMovement (null = súng không ngắm được). Trả đối tượng dùng chung theo súng, không cấp phát. */
+/** ADS parameters of the held weapon for stepMovement (null = weapon cannot ADS). Returns a shared per-weapon object, no allocation. */
 const ADS_MOVE: (AdsMove | null)[] = WEAPONS.map(w => (w.ads ? { inMs: w.ads.inMs, outMs: w.ads.outMs, moveMult: w.ads.moveMult } : null))
 export function adsMoveFor(ws: WeaponState): AdsMove | null {
   return ADS_MOVE[ws.current] ?? null
 }
-/** Muốn ngắm ở cmd này: giữ Aim, không đang nạp, không đang khoá đổi súng. (Đứng đất/không trượt do stepMovement kiểm.) */
+/** Wants to ADS in this cmd: Aim held, not reloading, not in the weapon-switch lock. (On ground / not sliding is checked by stepMovement.) */
 export function adsWanted(ws: WeaponState, buttons: number, nowMs: number): boolean {
   return (buttons & Btn.Aim) !== 0 && ws.reloadEndMs === 0 && nowMs >= ws.switchEndMs
 }
 
 /**
- * Bắn nếu được. Không bắn khi: đang reload, chưa tới nextFireMs, hết đạn,
- * hoặc súng bán tự động mà cò đã giữ từ tick trước.
- * Luôn cập nhật triggerHeld theo triggerDown.
+ * Fire if possible. Does not fire when: reloading, before nextFireMs, out of ammo,
+ * or a semi-auto weapon whose trigger has been held since the previous tick.
+ * Always updates triggerHeld from triggerDown.
  */
 export function tryFire(ws: WeaponState, def: WeaponDef, nowMs: number, triggerDown: boolean): boolean {
   const wasHeld = ws.triggerHeld
@@ -84,13 +95,13 @@ export function tryFire(ws: WeaponState, def: WeaponDef, nowMs: number, triggerD
   if (!def.melee) ws.ammo[def.id]!--
   ws.nextFireMs = nowMs + def.fireIntervalMs
   ws.shotSeq++
-  if (!def.melee) onShotBloom(ws, def, nowMs)   // lưu bloom đã dùng cho phát này (ws.shotBloomDeg) rồi cộng bloom mới
+  if (!def.melee) onShotBloom(ws, def, nowMs)   // store the bloom used for this shot (ws.shotBloomDeg), then add the new bloom
   return true
 }
 
 /**
- * Một tick logic súng. Thứ tự: hoàn tất reload → reload bằng R → bắn / bóp cò khi hết đạn.
- * Hết đạn mà bóp cò (cú bấm mới hoặc súng auto) → 'dry' + tự reload, đúng một lần.
+ * One weapon logic tick. Order: finish reload → reload via R → fire / pull the trigger when empty.
+ * Out of ammo and the trigger is pulled (a fresh press or an auto weapon) → 'dry' + auto reload, exactly once.
  */
 export function stepWeapon(
   ws: WeaponState,
@@ -103,7 +114,7 @@ export function stepWeapon(
   if (ws.reloadEndMs > 0 && nowMs >= ws.reloadEndMs) {
     ws.reloadEndMs = 0
     ws.ammo[def.id] = magSizeOf(def, ws.magMult)
-    ws.triggerHeld = triggerDown   // giữ chuột qua lúc reload xong: súng bán tự động không tự bắn
+    ws.triggerHeld = triggerDown   // mouse held through reload completion: a semi-auto weapon does not fire by itself
     return 'reloadEnd'
   }
 
@@ -119,9 +130,9 @@ export function stepWeapon(
 }
 
 /**
- * Hướng bắn = góc nhìn + recoil hiện tại + spread (random có seed theo playerId, shotSeq),
- * rồi cộng kick của phát này vào recoil. `shotSeq` là seq của phát vừa bắn (ws.shotSeq - 1).
- * Ghi kết quả vào `out`.
+ * Fire direction = look angle + current recoil + spread (random seeded by playerId, shotSeq),
+ * then add this shot's kick to the recoil. `shotSeq` is the seq of the shot just fired (ws.shotSeq - 1).
+ * Writes the result into `out`.
  */
 export function computeShot(
   out: [number, number, number],
@@ -134,7 +145,7 @@ export function computeShot(
   spreadDeg: number,
 ): void {
   const rng = mulberry32(hashSeed(playerId, shotSeq))
-  // Điểm đều trong đĩa tròn bán kính spread (hình nón)
+  // Uniform point in a disc of radius spread (cone)
   const r   = spreadDeg * DEG * Math.sqrt(rng())
   const phi = rng() * 2 * Math.PI
   const kickYaw = (rng() * 2 - 1) * def.recoilYawDeg * DEG
@@ -147,8 +158,8 @@ export function computeShot(
 }
 
 /**
- * Hướng bắn cho mọi tia của một phát (súng thường: 1 tia). Spread random có seed (playerId, shotSeq[, chỉ số tia]);
- * recoil chỉ cộng một lần, sau khi đã tính xong mọi tia. Trả số tia, ghi vào outs[0..n).
+ * Fire directions for every ray of one shot (normal weapons: 1 ray). Random spread seeded by (playerId, shotSeq[, ray index]);
+ * recoil is added only once, after all rays are computed. Returns the ray count, writes into outs[0..n).
  */
 export function computeShotDirs(
   outs: [number, number, number][],
@@ -162,8 +173,8 @@ export function computeShotDirs(
 ): number {
   const n = def.pellets ?? 1
   if (n === 1) { computeShot(outs[0]!, rec, def, playerId, shotSeq, yaw, pitch, spreadDeg); return 1 }
-  // Nhiều tia: spread di chuyển/trên không DỊCH TÂM chùm (một điểm ngẫu nhiên, seed riêng ở chỉ số tia cuối),
-  // còn các viên chì rải trong nón cố định pelletConeDeg quanh tâm đó
+  // Multiple rays: moving/airborne spread SHIFTS the pattern centre (one random point, own seed at the last ray index),
+  // while the pellets scatter inside a fixed cone pelletConeDeg around that centre
   const cone = def.spread.pelletConeDeg ?? spreadDeg
   let cYaw = yaw, cPitch = pitch
   if (def.spread.pelletConeDeg !== undefined && spreadDeg > 0) {
@@ -173,14 +184,14 @@ export function computeShotDirs(
   }
   const recPitch = rec.pitch, recYaw = rec.yaw
   for (let i = 0; i < n; i++) {
-    rec.pitch = recPitch; rec.yaw = recYaw   // mọi tia dùng recoil trước phát bắn
+    rec.pitch = recPitch; rec.yaw = recYaw   // every ray uses the recoil from before the shot
     computeShot(outs[i]!, rec, def, playerId, shotSeq * MAX_PELLETS + i, cYaw, cPitch, cone)
   }
-  // rec đã được đặt lại trước tia cuối rồi mới cộng kick, nên kick chỉ cộng đúng một lần cho cả phát
+  // rec was reset before the last ray and only then gets the kick, so the kick is added exactly once for the whole shot
   return n
 }
 
-/** Hệ số sát thương theo khoảng cách (1 nếu súng không có falloff). */
+/** Damage multiplier by distance (1 if the weapon has no falloff). */
 export function damageFalloff(def: WeaponDef, dist: number): number {
   const f = def.falloff
   if (!f || dist <= f.fullM) return 1
@@ -188,7 +199,7 @@ export function damageFalloff(def: WeaponDef, dist: number): number {
   return 1 + (f.minMult - 1) * (dist - f.fullM) / (f.endM - f.fullM)
 }
 
-/** Recoil hồi về 0 khi không bắn (nowMs >= nextFireMs, hoặc sớm hơn nếu súng có recoilRecoverDelayMs). */
+/** Recoil recovers to 0 when not firing (nowMs >= nextFireMs, or earlier if the weapon has recoilRecoverDelayMs). */
 export function recoverRecoil(rec: RecoilState, def: WeaponDef, ws: WeaponState, nowMs: number, dt: number): void {
   const resumeMs = def.recoilRecoverDelayMs === undefined ? ws.nextFireMs : ws.nextFireMs - def.fireIntervalMs + def.recoilRecoverDelayMs
   if (nowMs < resumeMs) return
@@ -198,33 +209,33 @@ export function recoverRecoil(rec: RecoilState, def: WeaponDef, ws: WeaponState,
 }
 
 /**
- * Một tick logic súng theo cmd: đổi súng (cmd.weapon) rồi stepWeapon. Thời gian = seq * 1000 / TICK_RATE
- * (không dùng tick server) nên client và server tính fire rate/reload giống hệt nhau.
+ * One weapon logic tick per cmd: switch weapon (cmd.weapon) then stepWeapon. Time = seq * 1000 / TICK_RATE
+ * (not the server tick) so client and server compute fire rate/reload identically.
  */
 export function stepWeaponCmd(ws: WeaponState, cmd: InputCmd): WeaponEvent {
   const nowMs = cmd.seq * 1000 / TICK_RATE
-  // cmd.weapon = ô 0–4. Chỉ đổi khi giá trị ĐỔI so với cmd trước: mua súng làm server đổi ô trước, cmd cũ còn bay trên đường
-  // vẫn mang ô cũ nhưng không được kéo ngược lại.
+  // cmd.weapon = slot 0–4. Only switch when the value CHANGES versus the previous cmd: buying a weapon makes the server change the slot first, an old cmd still in flight
+  // carries the old slot but must not drag it back.
   if (cmd.weapon !== ws.wantSlot) {
     ws.wantSlot = cmd.weapon
     selectSlot(ws, cmd.weapon, nowMs)
   }
-  // Sau khi ném (G hoặc quả cuối): tự đổi về súng trước đó
+  // After a throw (G or last grenade): auto-switch back to the previous weapon
   let autoSwitched = false
   if (ws.switchBackAtMs > 0 && nowMs >= ws.switchBackAtMs) {
     ws.switchBackAtMs = 0
-    if (ws.current === GRENADE_ID && ws.nade.phase === 'idle') {
+    if (isGrenadeId(ws.current) && ws.nade.phase === 'idle') {
       const back = (ws.slots[ws.prevSlot] ?? -1) >= 0 ? ws.prevSlot : ws.slots.findIndex((id, i) => id >= 0 && i !== GRENADE_SLOT)
-      // KHÔNG đặt wantSlot: đây là đổi súng do logic (giống mua súng), cmd còn bay mang ô cũ không được kéo ngược; client tự nhận ws.slot khi thấy 'switched'
+      // do NOT set wantSlot: this is a logic-driven switch (like buying a weapon), an old in-flight cmd carrying the old slot must not drag it back; the client picks up ws.slot when it sees 'switched'
       if (back >= 0) { selectSlot(ws, back, nowMs); autoSwitched = true }
     }
   }
   const quickDown = !!(cmd.buttons & Btn.QuickNade)
   const ev = stepGrenade(ws, cmd, nowMs, quickDown)
-  if (ev !== null) return ev === 'none' && autoSwitched ? 'switched' : ev   // đang cầm lựu đạn (hoặc vừa bấm G): không chạy logic súng
+  if (ev !== null) return ev === 'none' && autoSwitched ? 'switched' : ev   // holding a grenade (or just pressed G): do not run weapon logic
   let trigger = !!(cmd.buttons & Btn.Fire)
   if (WEAPONS[ws.current]!.category === 'claw') {
-    // Zombie: chuột trái = cào thường, chuột phải (Aim) = cào mạnh; hai kiểu dùng chung nhịp bắn (nextFireMs)
+    // Zombie: left mouse = normal claw, right mouse (Aim) = heavy claw; both share the fire cadence (nextFireMs)
     const heavy = !!(cmd.buttons & Btn.Aim)
     ws.current = heavy ? CLAW_HEAVY_ID : CLAW_ID
     trigger = trigger || heavy
@@ -234,29 +245,44 @@ export function stepWeaponCmd(ws: WeaponState, cmd: InputCmd): WeaponEvent {
 }
 
 /**
- * Lựu đạn (plan 12): G = cầm + rút chốt luôn (ném mạnh), cầm ô 5 thì Fire = ném mạnh, Aim = ném thấp.
- * Giữ ≥ pinPullMs mới "ready"; thả khi ready = ném; thả trước đó = huỷ. Không "nướng": ngòi chỉ cháy khi rời tay.
- * Trả null nếu tick này không có việc gì của lựu đạn (để chạy logic súng bình thường).
+ * Grenade (plan 12): G = take out + pull the pin immediately (strong throw), holding slot 5 then Fire = strong throw, Aim = low throw.
+ * Hold ≥ pinPullMs to become "ready"; release when ready = throw; release before that = cancel. No "cooking": the fuse only burns after leaving the hand.
+ * Returns null if this tick has no grenade work (so normal weapon logic runs).
  */
 function stepGrenade(ws: WeaponState, cmd: InputCmd, nowMs: number, quickDown: boolean): WeaponEvent | null {
   const n = ws.nade
   const fireD = !!(cmd.buttons & Btn.Fire), aimD = !!(cmd.buttons & Btn.Aim)
+  const cycleEdge = !!(cmd.buttons & Btn.CycleNade) && !ws.cycleHeld
+  ws.cycleHeld = !!(cmd.buttons & Btn.CycleNade)
   let ev: WeaponEvent | null = null
 
-  // G khi đang cầm thứ khác: sang ô lựu đạn + rút chốt ngay
-  if (quickDown && ws.current !== GRENADE_ID && !ws.quickHeld && (ws.slots[GRENADE_SLOT] ?? -1) >= 0 && (ws.ammo[GRENADE_ID] ?? 0) > 0) {
-    selectSlot(ws, GRENADE_SLOT, nowMs)   // đổi do logic (không đụng wantSlot): client không gửi ô 5 khi bấm G
+  // G while holding something else: go to the grenade slot (selected type) + pull the pin immediately
+  const sel = ws.slots[GRENADE_SLOT] ?? -1
+  if (quickDown && !isGrenadeId(ws.current) && !ws.quickHeld && sel >= 0 && (ws.ammo[sel] ?? 0) > 0) {
+    selectSlot(ws, GRENADE_SLOT, nowMs)   // switch driven by logic (does not touch wantSlot): the client does not send the grenade slot when G is pressed
     n.phase = 'pulling'; n.mode = 'strong'; n.pressSeq = cmd.seq; n.quick = true
     ev = 'pull'
   }
   ws.quickHeld = quickDown
-  if (ws.current !== GRENADE_ID) return null
+  if (!isGrenadeId(ws.current)) return null
+
+  // Press the grenade key again while holding one (pin not pulled yet): switch to another type that still has some, like CS 1.6
+  if (cycleEdge && ev === null && n.phase === 'idle') {
+    const other = otherNade(ws, ws.current)
+    if (other >= 0) {
+      ws.slots[GRENADE_SLOT] = other
+      switchWeapon(ws, other, nowMs)
+      ws.triggerHeld = !!(cmd.buttons & (Btn.Fire | Btn.Aim | Btn.QuickNade))
+      return 'switched'
+    }
+  }
 
   const anyDown = fireD || aimD || quickDown
   const wasDown = ws.triggerHeld
+  const cur = ws.current
   if (ev === null) {
     if (n.phase === 'idle') {
-      if (anyDown && !wasDown && nowMs >= ws.nextFireMs && (ws.ammo[GRENADE_ID] ?? 0) > 0) {
+      if (anyDown && !wasDown && nowMs >= ws.nextFireMs && (ws.ammo[cur] ?? 0) > 0) {
         n.phase = 'pulling'; n.mode = aimD && !fireD && !quickDown ? 'lob' : 'strong'; n.pressSeq = cmd.seq; n.quick = quickDown
         ev = 'pull'
       }
@@ -266,16 +292,16 @@ function stepGrenade(ws: WeaponState, cmd: InputCmd, nowMs: number, quickDown: b
         if (!held) {
           n.phase = 'idle'
           ev = 'cancel'
-          if (n.quick) ws.switchBackAtMs = nowMs   // G thả sớm: về súng cũ ngay
+          if (n.quick) ws.switchBackAtMs = nowMs   // G released early: back to the old weapon immediately
           n.quick = false
         } else if ((cmd.seq - n.pressSeq) * 1000 / TICK_RATE >= GRENADE.pinPullMs) n.phase = 'ready'
-      } else if (!held) {   // ready + thả = ném
+      } else if (!held) {   // ready + release = throw
         n.phase = 'idle'
-        ws.ammo[GRENADE_ID]!--
+        ws.ammo[cur]!--
         ws.throwSeq++
         ws.nextFireMs = nowMs + GRENADE.throwCooldownMs
-        if (ws.ammo[GRENADE_ID]! <= 0) ws.slots[GRENADE_SLOT] = -1   // hết quả: ô trống
-        if (ws.ammo[GRENADE_ID]! <= 0 || n.quick) ws.switchBackAtMs = nowMs + GRENADE.autoSwitchBackMs
+        if (ws.ammo[cur]! <= 0) ws.slots[GRENADE_SLOT] = otherNade(ws, cur)   // this type ran out: pick the other if any, else empty slot (-1)
+        if (ws.ammo[cur]! <= 0 || n.quick) ws.switchBackAtMs = nowMs + GRENADE.autoSwitchBackMs
         n.quick = false
         ev = 'threw'
       }
@@ -296,6 +322,7 @@ export function copyWeaponState(dst: WeaponState, src: WeaponState): void {
   dst.prevSlot = src.prevSlot
   dst.switchBackAtMs = src.switchBackAtMs
   dst.quickHeld = src.quickHeld
+  dst.cycleHeld = src.cycleHeld
   dst.reloadEndMs = src.reloadEndMs
   dst.nextFireMs = src.nextFireMs
   dst.shotSeq = src.shotSeq
@@ -309,7 +336,7 @@ export function copyWeaponState(dst: WeaponState, src: WeaponState): void {
 export function weaponStatesEqual(a: WeaponState, b: WeaponState): boolean {
   for (let i = 0; i < a.slots.length; i++) if (a.slots[i] !== b.slots[i]) return false
   if (a.nade.phase !== b.nade.phase || a.nade.mode !== b.nade.mode || a.nade.pressSeq !== b.nade.pressSeq || a.nade.quick !== b.nade.quick ||
-      a.throwSeq !== b.throwSeq || a.prevSlot !== b.prevSlot || a.switchBackAtMs !== b.switchBackAtMs || a.quickHeld !== b.quickHeld) return false
+      a.throwSeq !== b.throwSeq || a.prevSlot !== b.prevSlot || a.switchBackAtMs !== b.switchBackAtMs || a.quickHeld !== b.quickHeld || a.cycleHeld !== b.cycleHeld) return false
   if (a.current !== b.current || a.slot !== b.slot || a.wantSlot !== b.wantSlot || a.reloadEndMs !== b.reloadEndMs || a.nextFireMs !== b.nextFireMs ||
       a.shotSeq !== b.shotSeq || a.triggerHeld !== b.triggerHeld || a.shotBloomDeg !== b.shotBloomDeg || a.switchEndMs !== b.switchEndMs) return false
   for (let i = 0; i < a.bloomDeg.length; i++) if (a.bloomDeg[i] !== b.bloomDeg[i] || a.lastShotMs[i] !== b.lastShotMs[i]) return false

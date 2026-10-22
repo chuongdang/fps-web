@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { defaultMovement, NetFlag, type NetPlayer } from '@fps/shared'
 
-// F5: "bóng ma" wireframe ở vị trí server thật (snapshot mới nhất, không nội suy) của mọi người,
-// kể cả mình. Của mình đi sau nhân vật đúng khoảng trễ ping.
+// F5: wireframe "ghosts" at the real server position (latest snapshot, no interpolation) of everyone,
+// including yourself. Your own ghost trails your character by the ping delay.
 export function createGhosts(scene: THREE.Scene) {
   const { radius, standHeight, crouchHeight } = defaultMovement
   const geo = new THREE.CapsuleGeometry(radius, standHeight - 2 * radius, 4, 8)

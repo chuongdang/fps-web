@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tên tag để tạo Release (ví dụ v1.3.0). Để trống = chỉ build, lấy zip ở Artifacts'
+        description: 'Tag name to create a Release (e.g. v1.3.0). Leave empty = build only, get the zip from Artifacts'
         required: false
         default: ''
 
@@ -24,16 +24,16 @@ jobs:
           - target: windows-x64
             runner: windows-latest
           - target: macos-arm64
-            runner: macos-latest        # chip M
+            runner: macos-latest        # Apple Silicon (M-series)
           - target: macos-x64
-            runner: macos-15-intel      # runner Intel; kiểm tra lại trang "GitHub-hosted runners" trước mỗi lần phát hành
+            runner: macos-15-intel      # Intel runner; re-check the "GitHub-hosted runners" page before each release
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
       - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc   # cùng phiên bản Node dùng làm vỏ file chạy
+          node-version-file: .nvmrc   # same Node version used as the executable shell
       - run: npm ci
       - run: npm run package
       - uses: actions/upload-artifact@v4
@@ -57,13 +57,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Lấy ghi chú từ CHANGELOG.md
+      - name: Get release notes from CHANGELOG.md
         run: node scripts/release-notes.mjs "$TAG" > notes.md
-      - name: Tạo Release
+      - name: Create Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           flags=""
           case "$TAG" in *-*) flags="--prerelease" ;; esac
-          # Tag chưa có thì gh tự tạo trên commit đang build (--target)
+          # If the tag does not exist yet, gh creates it on the commit being built (--target)
           gh release create "$TAG" dist/*.zip --target "$GITHUB_SHA" --title "FPS Web $TAG" --notes-file notes.md $flags

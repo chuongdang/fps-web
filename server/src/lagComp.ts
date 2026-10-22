@@ -1,13 +1,13 @@
 import { HITBOX_HISTORY_MS, TICK_RATE } from '@fps/shared'
 
-const MAX_SLOTS = 48   // người chơi tối đa lưu trong mỗi mục lịch sử
+const MAX_SLOTS = 48   // max players stored in each history entry
 const CAPACITY = Math.ceil(HITBOX_HISTORY_MS * TICK_RATE / 1000) + 2
 
 interface Entry {
   time: number
   count: number
   ids: Int32Array
-  pos: Float64Array        // 3 số mỗi người
+  pos: Float64Array        // 3 numbers per player
   crouching: Uint8Array
   alive: Uint8Array
 }
@@ -18,13 +18,13 @@ export interface PastPlayer {
   alive: boolean
 }
 
-// Lịch sử vị trí để tua đối thủ về quá khứ (lag compensation). Ring buffer cấp phát sẵn;
-// mỗi mục lưu theo serverTime của tick (không phải thời điểm gửi snapshot).
+// Position history used to rewind opponents into the past (lag compensation). Preallocated ring buffer;
+// each entry is stored by the tick's serverTime (not by the time the snapshot was sent).
 export class LagHistory {
   private entries: Entry[] = []
-  private head = -1        // mục mới nhất
+  private head = -1        // newest entry
   private size = 0
-  // Kết quả của locate()
+  // Result of locate()
   private a: Entry | null = null
   private b: Entry | null = null
   private alpha = 0
@@ -41,7 +41,7 @@ export class LagHistory {
   get newestTime(): number { return this.size > 0 ? this.entries[this.head]!.time : -Infinity }
   get oldestTime(): number { return this.size > 0 ? this.entries[(this.head - this.size + 1 + CAPACITY) % CAPACITY]!.time : Infinity }
 
-  // Gọi một lần mỗi tick, sau khi mô phỏng
+  // Call once per tick, after simulation
   record(time: number, players: Iterable<{ id: number; state: { pos: readonly number[]; crouching: boolean }; alive: boolean }>): void {
     this.head = (this.head + 1) % CAPACITY
     if (this.size < CAPACITY) this.size++
@@ -59,8 +59,8 @@ export class LagHistory {
     e.count = n
   }
 
-  // Tìm hai mục kẹp thời điểm t. Trả false nếu chưa có lịch sử.
-  // t sớm hơn mục cũ nhất thì dùng mục cũ nhất; muộn hơn mục mới nhất thì dùng mục mới nhất.
+  // Find the two entries bracketing time t. Returns false if there is no history yet.
+  // If t is earlier than the oldest entry use the oldest; if later than the newest use the newest.
   locate(t: number): boolean {
     if (this.size === 0) return false
     const newest = this.entries[this.head]!
@@ -79,8 +79,8 @@ export class LagHistory {
     return true
   }
 
-  // Vị trí `id` tại thời điểm đã locate(). Nội suy tuyến tính pos như client; crouching/alive theo mục trước.
-  // Không có người đó trong lịch sử (mới vào) → false.
+  // Position of `id` at the time located by locate(). Linearly interpolates pos like the client; crouching/alive follow the earlier entry.
+  // That player is not in the history (just joined) -> false.
   get(id: number, out: PastPlayer): boolean {
     const a = this.a, b = this.b
     if (!a || !b) return false

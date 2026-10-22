@@ -1,102 +1,102 @@
-# 18 – Đóng gói "nhấp đúp là chạy" cho Windows và Mac (Node Single Executable)
+# 18 – "Double-click to run" packaging for Windows and Mac (Node Single Executable)
 
-Mục tiêu: người nhận **không cần cài Node**, chỉ tải file zip, giải nén, **nhấp đúp một file** là:
-1. Server game chạy (phục vụ cả trang game lẫn WebSocket trên **một cổng**).
-2. Trình duyệt tự mở vào game.
-3. Cửa sổ console hiện địa chỉ cho bạn bè trong mạng LAN vào cùng.
+Goal: the recipient **does not need to install Node**; they just download a zip file, extract it, and **double-click one file** to:
+1. Run the game server (serving both the game page and the WebSocket on **one port**).
+2. Have the browser open into the game automatically.
+3. Show a console window with the address for friends on the LAN to join.
 
-Kết quả phát hành: 3 file zip
+Release output: 3 zip files
 - `FPSWeb-windows-x64.zip`
-- `FPSWeb-macos-arm64.zip` (Mac chip M1/M2/M3/M4)
-- `FPSWeb-macos-x64.zip` (Mac Intel)
+- `FPSWeb-macos-arm64.zip` (Macs with M1/M2/M3/M4 chips)
+- `FPSWeb-macos-x64.zip` (Intel Macs)
 
-Mỗi zip chứa:
+Each zip contains:
 ```
 FPSWeb/
   FPSWeb.exe        (Windows)  |  FPSWeb  (Mac)
-  game/             trang game đã build (index.html, assets/, models/, sounds/, icons/, maps/)
-  config.json       cổng, tự mở trình duyệt... (người nhận sửa được)
+  game/             the built game page (index.html, assets/, models/, sounds/, icons/, maps/)
+  config.json       port, auto-open browser... (the recipient can edit it)
   HUONG-DAN.txt
   CREDITS.txt
 ```
 
-Công nghệ: **Node Single Executable Applications (SEA)**, có sẵn trong Node, gói một file JS + chính Node thành một file chạy.
+Technology: **Node Single Executable Applications (SEA)**, built into Node, bundling a JS file + Node itself into one runnable file.
 
-Thứ tự: K.1 → K.2 → K.3 → K.4 → K.5 → K.6 → K.7. Task ⚠️ nên dùng model mạnh.
+Order: K.1 → K.2 → K.3 → K.4 → K.5 → K.6 → K.7. Tasks marked ⚠️ should use a strong model.
 
 ---
 
-## Task K.1 – Server chế độ standalone (một cổng cho tất cả) ⚠️
+## Task K.1 – Standalone server mode (one port for everything) ⚠️
 
-Tạo entry mới `server/src/standalone.ts` (giữ nguyên `main.ts` cho lúc dev):
+Create a new entry `server/src/standalone.ts` (keep `main.ts` as is for dev):
 
-- **HTTP server** (`node:http`, không thêm thư viện) phục vụ file tĩnh từ thư mục `game/`:
-  - Thư mục gốc: `path.join(path.dirname(process.execPath), 'game')` khi chạy dạng SEA; khi chạy thử bằng `tsx` thì dùng `client/dist`. Phát hiện chế độ SEA bằng `require('node:sea').isSea()`.
-  - MIME đúng cho: `.html .js .mjs .css .json .wasm (application/wasm) .glb (model/gltf-binary) .gltf .png .jpg .webp .svg .ogg (audio/ogg) .mp3 .ico .woff2`.
+- **HTTP server** (`node:http`, no extra libraries) serving static files from the `game/` folder:
+  - Root folder: `path.join(path.dirname(process.execPath), 'game')` when running as SEA; when test-running with `tsx` use `client/dist`. Detect SEA mode with `require('node:sea').isSea()`.
+  - Correct MIME for: `.html .js .mjs .css .json .wasm (application/wasm) .glb (model/gltf-binary) .gltf .png .jpg .webp .svg .ogg (audio/ogg) .mp3 .ico .woff2`.
   - Cache: `/assets/` → `public, max-age=31536000, immutable`; `/models/ /sounds/ /icons/ /maps/` → `public, max-age=604800`; `index.html` → `no-cache`.
-  - Đường dẫn không tồn tại và không có đuôi file → trả `index.html` (SPA).
-  - **Chặn đi ngược thư mục**: chuẩn hoá đường dẫn, từ chối mọi đường dẫn nằm ngoài thư mục `game/` (`..`, đường dẫn tuyệt đối, ký tự lạ).
-  - Hỗ trợ `Range` cho file lớn không bắt buộc; có `ETag` hoặc `Last-Modified` + trả `304` là đủ.
-- **WebSocket** dùng chung HTTP server: `new WebSocketServer({ noServer: true })`, xử lý sự kiện `upgrade` khi `url` bắt đầu bằng `/ws`. Logic phòng/game dùng lại nguyên code hiện có.
-- **Cổng**: đọc `config.json` (mặc định `8080`). Bị chiếm (`EADDRINUSE`) → thử lần lượt tới `+10`. Lắng nghe `0.0.0.0` (để máy khác trong LAN vào được).
-- **In ra console** (tiếng Việt, rõ ràng):
+  - A path that does not exist and has no file extension → return `index.html` (SPA).
+  - **Block directory traversal**: normalize the path, reject any path outside the `game/` folder (`..`, absolute paths, odd characters).
+  - `Range` support for large files is not required; `ETag` or `Last-Modified` + returning `304` is enough.
+- **WebSocket** shares the HTTP server: `new WebSocketServer({ noServer: true })`, handle the `upgrade` event when `url` starts with `/ws`. The room/game logic reuses the existing code as is.
+- **Port**: read `config.json` (default `8080`). If occupied (`EADDRINUSE`), try successively up to `+10`. Listen on `0.0.0.0` (so other machines on the LAN can join).
+- **Print to the console** (in English, clear):
   ```
   ==============================================
-   FPS Web v1.3.0 đang chạy
-   Bạn chơi:        http://localhost:8080
-   Bạn bè cùng mạng: http://192.168.1.23:8080
-                     http://10.35.112.150:8080
-   Đóng cửa sổ này để tắt server.
+   FPS Web v1.3.0 is running
+   You play at:       http://localhost:8080
+   Friends on the same network: http://192.168.1.23:8080
+                                http://10.35.112.150:8080
+   Close this window to stop the server.
   ==============================================
   ```
-  Liệt kê mọi địa chỉ IPv4 không phải `internal`, bỏ `169.254.x.x`. Ghi kèm tên card mạng nếu có nhiều địa chỉ.
-- **Tự mở trình duyệt** (`config.openBrowser`, mặc định `true`): Windows `cmd /c start "" <url>`, Mac `open <url>`. Lỗi thì bỏ qua, không crash.
-- **Tham số dòng lệnh** (ghi đè config): `--port 9000`, `--no-open`.
-- **Lỗi nghiêm trọng** (không mở được cổng nào, thiếu thư mục `game/`): in thông báo tiếng Việt dễ hiểu, rồi **chờ người dùng nhấn Enter mới thoát**, để cửa sổ console không biến mất trước khi kịp đọc.
-- `Ctrl+C` / đóng cửa sổ: đóng mọi kết nối, thoát sạch.
-- `config.json` mặc định:
+  List every non-`internal` IPv4 address, skipping `169.254.x.x`. Include the network adapter name if there are multiple addresses.
+- **Auto-open the browser** (`config.openBrowser`, default `true`): Windows `cmd /c start "" <url>`, Mac `open <url>`. On error, ignore it, do not crash.
+- **Command-line arguments** (override config): `--port 9000`, `--no-open`.
+- **Fatal errors** (cannot open any port, missing `game/` folder): print an easy-to-understand English message, then **wait for the user to press Enter before exiting**, so the console window does not disappear before they can read it.
+- `Ctrl+C` / closing the window: close all connections and exit cleanly.
+- Default `config.json`:
   ```json
   { "port": 8080, "openBrowser": true, "maxRooms": 20 }
   ```
 
-Nghiệm thu:
-- [ ] `npm run build -w client` rồi `tsx server/src/standalone.ts`: mở `http://localhost:8080` chơi được, kể cả offline/bot, mua đồ, lựu đạn.
-- [ ] Máy khác trong LAN vào `http://<IP>:8080` chơi chung được.
-- [ ] Chạy 2 bản cùng lúc: bản thứ hai tự dùng cổng 8081 và in đúng cổng.
-- [ ] `curl http://localhost:8080/../../etc/passwd` và các biến thể mã hoá (`%2e%2e`) đều bị từ chối.
-- [ ] `curl -I` file `.glb` trả đúng `Content-Type` và `Cache-Control`.
+Acceptance:
+- [ ] `npm run build -w client` then `tsx server/src/standalone.ts`: opening `http://localhost:8080` is playable, including offline/bots, buying, and grenades.
+- [ ] Another machine on the LAN can join at `http://<IP>:8080` and play together.
+- [ ] Running 2 copies at once: the second copy automatically uses port 8081 and prints the correct port.
+- [ ] `curl http://localhost:8080/../../etc/passwd` and encoded variants (`%2e%2e`) are all rejected.
+- [ ] `curl -I` on a `.glb` file returns the correct `Content-Type` and `Cache-Control`.
 
 ---
 
-## Task K.2 – Gom server thành một file JS (esbuild)
+## Task K.2 – Bundle the server into one JS file (esbuild)
 
-- Thêm `esbuild` (devDependency, ghi version cứng).
+- Add `esbuild` (devDependency, pinned version).
 - Script `scripts/bundle-server.mjs`:
   ```
   entry:    server/src/standalone.ts
   bundle:   true
   platform: node
-  format:   cjs              // SEA cần một file CommonJS
-  target:   node24           // khớp version Node dùng để đóng gói
+  format:   cjs              // SEA needs a single CommonJS file
+  target:   node24           // matches the Node version used for packaging
   outfile:  build/server.cjs
-  external: ['bufferutil', 'utf-8-validate']   // gói tuỳ chọn của ws, ws tự bỏ qua nếu thiếu
-  define:   { 'process.env.APP_VERSION': JSON.stringify(version trong package.json) }
+  external: ['bufferutil', 'utf-8-validate']   // optional packages of ws; ws skips them on its own if missing
+  define:   { 'process.env.APP_VERSION': JSON.stringify(version in package.json) }
   ```
-- Không còn `require` nào tới gói ngoài trong `build/server.cjs` (trừ 2 gói external ở trên): trong SEA, `require` chỉ nạp được module có sẵn của Node.
-- Rapier bản `-compat` (WASM nhúng sẵn dạng base64) chạy được trong file gộp; kiểm tra lại.
+- `build/server.cjs` has no remaining `require` of any outside package (except the 2 external packages above): in SEA, `require` can only load Node's built-in modules.
+- The `-compat` build of Rapier (WASM embedded as base64) works inside the bundled file; re-check this.
 
-Nghiệm thu:
-- [ ] `node build/server.cjs` (không có `node_modules` bên cạnh: copy file sang thư mục trống để thử) chạy được game y như K.1.
+Acceptance:
+- [ ] `node build/server.cjs` (with no `node_modules` next to it: copy the file to an empty folder to test) runs the game just like K.1.
 
 ---
 
-## Task K.3 – Đóng gói SEA cho nền tảng hiện tại ⚠️
+## Task K.3 – SEA packaging for the current platform ⚠️
 
-Script `scripts/package.mjs` (chạy bằng `npm run package`), làm cho **nền tảng đang chạy script**:
+Script `scripts/package.mjs` (run with `npm run package`), operating on the **platform running the script**:
 
 1. `npm run build -w client` → `client/dist`.
 2. `node scripts/bundle-server.mjs` → `build/server.cjs`.
-3. Ghi `build/sea-config.json`:
+3. Write `build/sea-config.json`:
    ```json
    {
      "main": "build/server.cjs",
@@ -106,114 +106,114 @@ Script `scripts/package.mjs` (chạy bằng `npm run package`), làm cho **nền
      "useCodeCache": false
    }
    ```
-4. `node --experimental-sea-config build/sea-config.json` → tạo blob.
-5. Copy chính file `node` đang chạy (`process.execPath`) thành `release/FPSWeb/FPSWeb` (Mac) hoặc `FPSWeb.exe` (Windows).
+4. `node --experimental-sea-config build/sea-config.json` → creates the blob.
+5. Copy the running `node` file itself (`process.execPath`) to `release/FPSWeb/FPSWeb` (Mac) or `FPSWeb.exe` (Windows).
 6. **Mac**: `codesign --remove-signature release/FPSWeb/FPSWeb`.
-7. Tiêm blob bằng `postject` (devDependency):
+7. Inject the blob with `postject` (devDependency):
    - Windows: `npx postject FPSWeb.exe NODE_SEA_BLOB build/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2`
-   - Mac: như trên, thêm `--macho-segment-name NODE_SEA`
-8. **Mac**: ký ad-hoc `codesign --sign - release/FPSWeb/FPSWeb` (bắt buộc trên Mac chip M, không có chữ ký là hệ điều hành không cho chạy).
-9. Copy `client/dist` → `release/FPSWeb/game/`, ghi `config.json` mặc định, `HUONG-DAN.txt` (K.5), `CREDITS.txt` (K.6).
-10. Nén thành `release/FPSWeb-<os>-<arch>.zip`:
-    - Mac: dùng `ditto -c -k --keepParent` hoặc `zip -r -y` để **giữ quyền chạy** của file `FPSWeb`.
-    - Windows: `Compress-Archive` hoặc thư viện nén trong Node.
+   - Mac: same as above, adding `--macho-segment-name NODE_SEA`
+8. **Mac**: ad-hoc sign with `codesign --sign - release/FPSWeb/FPSWeb` (mandatory on M-chip Macs; without a signature the operating system will not let it run).
+9. Copy `client/dist` → `release/FPSWeb/game/`, write the default `config.json`, `HUONG-DAN.txt` (K.5), `CREDITS.txt` (K.6).
+10. Compress into `release/FPSWeb-<os>-<arch>.zip`:
+    - Mac: use `ditto -c -k --keepParent` or `zip -r -y` to **preserve the executable permission** of the `FPSWeb` file.
+    - Windows: `Compress-Archive` or a compression library in Node.
 
-Lưu ý quan trọng:
-- **Phiên bản Node** dùng để đóng gói phải giống nhau ở bước 4 và bước 5 (cùng một file `node`). Ghi phiên bản Node cố định trong `.nvmrc` và trong workflow K.4.
-- Đối chiếu các bước với **tài liệu "Single executable applications" của đúng phiên bản Node đang dùng**; nếu tài liệu có cách mới gọn hơn (ví dụ tạo file chạy trực tiếp không cần `postject`), được dùng cách đó nhưng phải ghi chú vào báo cáo.
-- Windows: file `node.exe` gốc có chữ ký số của Node; tiêm blob làm chữ ký đó không còn hợp lệ. Không sao, chỉ khiến SmartScreen cảnh báo (người nhận bấm "Run anyway", xem K.5).
+Important notes:
+- The **Node version** used for packaging must be the same at step 4 and step 5 (the same `node` file). Record the fixed Node version in `.nvmrc` and in the K.4 workflow.
+- Cross-check the steps against the **"Single executable applications" documentation of the exact Node version in use**; if the documentation has a newer, cleaner way (for example creating the executable directly without `postject`), you may use it but must note it in the report.
+- Windows: the original `node.exe` has a Node digital signature; injecting the blob makes that signature invalid. That is fine, it only makes SmartScreen show a warning (the recipient clicks "Run anyway", see K.5).
 
-Nghiệm thu:
-- [ ] Trên Mac: `npm run package` tạo `release/FPSWeb-macos-arm64.zip`. Giải nén ở thư mục khác, nhấp đúp `FPSWeb`: Terminal mở, server chạy, trình duyệt tự mở game.
-- [ ] Thử trên một máy **chưa cài Node** (hoặc gỡ Node khỏi PATH để giả lập): vẫn chạy.
+Acceptance:
+- [ ] On Mac: `npm run package` creates `release/FPSWeb-macos-arm64.zip`. Extract it in another folder and double-click `FPSWeb`: Terminal opens, the server runs, and the browser opens the game automatically.
+- [ ] Try it on a machine **without Node installed** (or remove Node from PATH to simulate): it still runs.
 
 ---
 
-## Task K.4 – Build cả 3 bản bằng GitHub Actions
+## Task K.4 – Build all 3 versions with GitHub Actions
 
 `.github/workflows/release.yml`:
-- Kích hoạt: đẩy tag `v*` (ví dụ `v1.3.0`) hoặc bấm chạy tay (`workflow_dispatch`).
-- Ma trận 3 job:
+- Trigger: pushing a `v*` tag (for example `v1.3.0`) or a manual run (`workflow_dispatch`).
+- A matrix of 3 jobs:
 
-  | Bản | Runner |
+  | Build | Runner |
   |---|---|
   | windows-x64 | `windows-latest` |
-  | macos-arm64 | `macos-latest` (máy chip M) |
-  | macos-x64 | runner **Intel** còn được GitHub hỗ trợ tại thời điểm làm (kiểm tra trang "GitHub-hosted runners", label Intel mới nhất). Nếu không còn runner Intel: build trên runner chip M nhưng **tải file `node` bản darwin-x64** cùng phiên bản từ nodejs.org để làm bước 5 (blob không dùng snapshot/code cache nên dùng chung được), rồi thử chạy trên một máy Mac Intel thật trước khi phát hành. |
+  | macos-arm64 | `macos-latest` (M-chip machine) |
+  | macos-x64 | an **Intel** runner still supported by GitHub at the time of the work (check the "GitHub-hosted runners" page for the latest Intel label). If no Intel runner remains: build on the M-chip runner but **download the darwin-x64 build of the `node` file** of the same version from nodejs.org for step 5 (the blob uses no snapshot/code cache so it can be shared), then try running on a real Intel Mac before release. |
 
-- Mỗi job: `actions/setup-node` với **đúng phiên bản trong `.nvmrc`** → `npm ci` → `npm run package` → upload file zip làm artifact.
-- Job cuối (khi chạy theo tag): tạo **GitHub Release**, đính kèm 3 file zip, nội dung release lấy từ `CHANGELOG.md` (mục của phiên bản đó).
-- Repo có thể để private; Release trên repo private chỉ người có quyền xem tải được → gửi file zip trực tiếp cho người nhận.
+- Each job: `actions/setup-node` with the **exact version in `.nvmrc`** → `npm ci` → `npm run package` → upload the zip file as an artifact.
+- The final job (when run by tag): create a **GitHub Release**, attach the 3 zip files, with the release notes taken from `CHANGELOG.md` (the entry for that version).
+- The repo may stay private; a Release on a private repo can only be downloaded by people with access → send the zip files directly to recipients.
 
-Nghiệm thu:
-- [ ] Đẩy tag thử `v0.0.1-test`: sau khi chạy xong có đủ 3 file zip trong Release/artifact.
-- [ ] Tải bản Windows về một máy Windows chưa cài Node: chạy được.
+Acceptance:
+- [ ] Push a test tag `v0.0.1-test`: once finished, all 3 zip files are in the Release/artifacts.
+- [ ] Download the Windows build to a Windows machine without Node installed: it runs.
 
-Pitfall:
-- Asset lớn (model, âm thanh) làm repo nặng: nếu tổng > 1GB cân nhắc Git LFS; nhớ bật LFS trong bước checkout (`lfs: true`).
-- Đừng commit thư mục `release/` và `build/` (thêm vào `.gitignore`).
+Pitfalls:
+- Large assets (models, sounds) make the repo heavy: if the total exceeds 1GB consider Git LFS; remember to enable LFS in the checkout step (`lfs: true`).
+- Do not commit the `release/` and `build/` folders (add them to `.gitignore`).
 
 ---
 
-## Task K.5 – Hướng dẫn cho người nhận (`HUONG-DAN.txt`)
+## Task K.5 – Instructions for the recipient (`HUONG-DAN.txt`)
 
-Nội dung (viết đúng như dưới, thay `{version}` lúc đóng gói):
+Content (write exactly as below, replacing `{version}` at packaging time):
 
 ```
-FPS WEB {version} – HƯỚNG DẪN TỰ CHẠY SERVER
+FPS WEB {version} – GUIDE TO RUNNING YOUR OWN SERVER
 
-1) Giải nén file zip ra một thư mục (ví dụ Desktop). Đừng chạy trực tiếp trong file zip.
+1) Extract the zip file into a folder (for example the Desktop). Do not run it directly from inside the zip file.
 
 2) WINDOWS
-   - Nhấp đúp FPSWeb.exe.
-   - Nếu hiện màn hình "Windows protected your PC": bấm "More info" → "Run anyway".
-   - Nếu Tường lửa hỏi quyền: tick "Private networks" → bấm "Allow access".
-     (Không cho phép thì bạn bè trong mạng sẽ không vào được.)
+   - Double-click FPSWeb.exe.
+   - If a "Windows protected your PC" screen appears: click "More info" → "Run anyway".
+   - If the Firewall asks for permission: tick "Private networks" → click "Allow access".
+     (If you do not allow it, friends on your network will not be able to join.)
 
 3) MAC
-   - Nhấp đúp file FPSWeb.
-   - Nếu báo không thể mở vì không xác minh được nhà phát triển:
-     mở System Settings → Privacy & Security → kéo xuống, bấm "Open Anyway" cạnh dòng FPSWeb,
-     rồi nhấp đúp FPSWeb lần nữa và chọn "Open".
-   - Nếu Mac hỏi cho phép nhận kết nối mạng: chọn "Allow".
+   - Double-click the FPSWeb file.
+   - If it says it cannot be opened because the developer cannot be verified:
+     open System Settings → Privacy & Security → scroll down, click "Open Anyway" next to the FPSWeb line,
+     then double-click FPSWeb again and choose "Open".
+   - If the Mac asks to allow incoming network connections: choose "Allow".
 
-4) Cửa sổ đen (Terminal/Console) hiện ra và trình duyệt tự mở game.
-   - Bạn bè cùng mạng wifi/LAN: mở trình duyệt, gõ địa chỉ "Bạn bè cùng mạng" hiện trong cửa sổ đen.
-   - Nên dùng Chrome, Edge hoặc Firefox bản mới.
+4) A black window (Terminal/Console) appears and the browser opens the game automatically.
+   - Friends on the same wifi/LAN: open a browser and type the "Friends on the same network" address shown in the black window.
+   - Use a recent version of Chrome, Edge, or Firefox.
 
-5) Tắt server: đóng cửa sổ đen.
+5) To stop the server: close the black window.
 
-6) Đổi cổng: mở config.json bằng Notepad/TextEdit, sửa "port", lưu lại, chạy lại.
+6) To change the port: open config.json with Notepad/TextEdit, edit "port", save, and run again.
 
-Gặp lỗi: chụp màn hình cửa sổ đen gửi cho người đã gửi game cho bạn.
+If you hit an error: take a screenshot of the black window and send it to the person who sent you the game.
 ```
 
-- Kèm thêm 2 ảnh chụp minh hoạ (SmartScreen, Privacy & Security) trong thư mục `docs/` nếu có; không có thì chỉ cần file text.
+- Also include 2 illustrative screenshots (SmartScreen, Privacy & Security) in the `docs/` folder if available; if not, the text file alone is enough.
 
 ---
 
-## Task K.6 – Ghi công tác giả (`CREDITS.txt`) và kiểm tra license
+## Task K.6 – Credits (`CREDITS.txt`) and license check
 
-- Tạo `assets/CREDITS.json` liệt kê **mọi** asset bên thứ ba: `{ file, author, source, license, url }`.
-- Script đóng gói sinh `CREDITS.txt` từ file này, và **dừng đóng gói** nếu có asset trong `client/public` mà không có trong `CREDITS.json` (tránh quên ghi nguồn).
-- Trong game: menu chính có mục **"Ghi công"** hiển thị cùng nội dung.
-- **Người dùng tự kiểm tra** (Claude Code không tự quyết): license của từng model/âm thanh có cho **phân phối lại** không. Đặc biệt các model nhân vật lấy từ thư viện cộng đồng. File CC-BY phải ghi tên tác giả; file chỉ cho dùng cá nhân thì **không được** đưa vào bản phát hành.
+- Create `assets/CREDITS.json` listing **every** third-party asset: `{ file, author, source, license, url }`.
+- The packaging script generates `CREDITS.txt` from this file, and **stops packaging** if there is an asset in `client/public` that is not in `CREDITS.json` (to avoid forgetting to credit a source).
+- In the game: the main menu has a **"Credits"** entry that shows the same content.
+- **The user checks this themselves** (Claude Code does not decide): whether the license of each model/sound allows **redistribution**. Especially character models taken from community libraries. CC-BY files must credit the author; files that only allow personal use **must not** go into the release.
 
-Nghiệm thu:
-- [ ] Thêm thử một file âm thanh mới không khai báo: `npm run package` báo lỗi, chỉ rõ tên file.
-
----
-
-## Task K.7 – Phiên bản và thông tin trong game
-
-- Phiên bản lấy từ `package.json` gốc, hiện ở góc dưới menu chính và trong console server.
-- Client và server khác phiên bản (người dùng mở nhầm tab cũ): server từ chối kết nối, client báo "Phiên bản game không khớp, tải lại trang (Ctrl+F5)".
-- `CHANGELOG.md`: mỗi lần phát hành thêm một mục ngắn bằng tiếng Việt.
+Acceptance:
+- [ ] Add a new sound file without declaring it: `npm run package` reports an error naming the file.
 
 ---
 
-## Ghi chú cho người dùng
+## Task K.7 – Version and in-game info
 
-- Dung lượng mỗi bản khoảng 40–60MB khi nén (riêng Node đã chiếm phần lớn), cộng dung lượng asset của game.
-- Một số phần mềm diệt virus đôi khi báo nhầm file chạy tự đóng gói chưa ký số. Nếu người nhận gặp, họ có thể thêm vào danh sách tin cậy; muốn hết hẳn cảnh báo thì phải mua chứng chỉ ký số (Windows) và tài khoản Apple Developer (Mac) để ký/notarize — làm sau nếu thật sự cần.
-- Muốn có bản Linux: thêm một job `ubuntu-latest` vào K.4, các bước giống Windows (không cần ký).
+- The version comes from the root `package.json`, shown at the bottom corner of the main menu and in the server console.
+- Client and server on different versions (the user opened a stale old tab): the server refuses the connection, and the client shows "Game version mismatch, reload the page (Ctrl+F5)".
+- `CHANGELOG.md`: add a short entry in English with each release.
+
+---
+
+## Notes for the user
+
+- Each build is about 40–60MB compressed (Node alone takes most of that), plus the game's asset size.
+- Some antivirus software occasionally flags a self-packaged unsigned executable by mistake. If a recipient runs into this, they can add it to the trusted list; to remove the warning entirely you must buy a code-signing certificate (Windows) and an Apple Developer account (Mac) to sign/notarize — do it later only if truly needed.
+- For a Linux build: add an `ubuntu-latest` job to K.4, with steps like Windows (no signing needed).

@@ -10,40 +10,40 @@ let _tick     = 0
 let _prev: PlayerState
 let _curr: PlayerState
 
-// Súng đang chọn: gửi theo mỗi cmd, logic súng đổi súng khi xử lý cmd (client và server như nhau)
-let _weapon = DEFAULT_SLOT   // ô 0–3 (cmd.weapon)
+// Selected weapon: sent with every cmd; the weapon logic switches weapons when it processes the cmd (same on client and server)
+let _weapon = DEFAULT_SLOT   // slot 0–3 (cmd.weapon)
 export function setWantedWeapon(slot: number): void { _weapon = slot }
 export function wantedWeapon(): number { return _weapon }
 
-// Hệ số tốc độ theo súng đang cầm (offline); online do hook step của main truyền vào Prediction
+// Speed factor of the weapon being held (offline); online, main's step hook passes it into Prediction
 export interface WeaponMove {
-  mul(): number                      // moveSpeedMul của súng đang cầm
-  ads(): AdsMove | null              // tham số ngắm của súng đang cầm
-  want(cmd: InputCmd): boolean       // adsWanted: giữ Aim, không nạp/đổi súng
+  mul(): number                      // moveSpeedMul of the weapon being held
+  ads(): AdsMove | null              // ADS parameters of the weapon being held
+  want(cmd: InputCmd): boolean       // adsWanted: Aim held, not reloading/switching
 }
 let _weaponMove: WeaponMove = { mul: () => 1, ads: () => null, want: () => false }
 export function setWeaponMove(h: WeaponMove): void { _weaponMove = h }
 
 let _dead = false
-let _phase: MatchPhase = MatchPhase.Playing   // offline = đang chơi
+let _phase: MatchPhase = MatchPhase.Playing   // offline = playing
 export function setDead(v: boolean): void { _dead = v }
-let _transforming = false   // đang biến hình (zombie): server bỏ mọi nút
+let _transforming = false   // transforming (zombie): the server ignores every button
 export function setTransforming(v: boolean): void { _transforming = v }
-let _downed = false         // gục (Thủ Thành): không nhảy/ngồi/ném, chỉ súng ngắn — server áp cùng luật
+let _downed = false         // downed (Defense): no jump/crouch/throw, pistol only — the server applies the same rule
 export function setDowned(v: boolean): void { _downed = v }
 export function setMatchPhase(v: MatchPhase): void { _phase = v }
 
 function _buildCmd(): InputCmd {
-  let buttons = _transforming ? 0 : sampleButtons() & phaseButtonMask(_phase, !_dead) & (_downed ? DOWNED_BUTTON_MASK : ~0)   // chết / đếm ngược / hết trận / biến hình: server cũng bỏ nút này
-  if (!isLocked()) buttons &= ~(Btn.Fire | Btn.Reload | Btn.Aim)   // chưa khoá chuột thì không bắn/nạp/ngắm
+  let buttons = _transforming ? 0 : sampleButtons() & phaseButtonMask(_phase, !_dead) & (_downed ? DOWNED_BUTTON_MASK : ~0)   // dead / countdown / match end / transforming: the server drops these buttons too
+  if (!isLocked()) buttons &= ~(Btn.Fire | Btn.Reload | Btn.Aim)   // mouse not locked yet: no firing/reloading/ADS
   return { seq: _seq++, buttons, yaw, pitch, weapon: _downed ? DOWNED_WEAPON_SLOT : _weapon }
 }
 
-// Chế độ online (3.6): state do Prediction giữ; loop chỉ tạo cmd, gọi step và vẽ.
+// Online mode (3.6): Prediction holds the state; the loop only builds the cmd, calls step and renders.
 export interface NetHooks {
-  current(): PlayerState                                   // state dự đoán (đã reconcile) trước tick này
-  step(cmd: InputCmd): PlayerState                         // gửi cmd + chạy dự đoán, trả state mới
-  visualOffset(): readonly [number, number, number]        // gọi mỗi frame hiển thị (tự giảm dần)
+  current(): PlayerState                                   // predicted state (already reconciled) before this tick
+  step(cmd: InputCmd): PlayerState                         // send the cmd + run the prediction, return the new state
+  visualOffset(): readonly [number, number, number]        // call every render frame (decays on its own)
 }
 let _net: NetHooks | null = null
 export function setNetHooks(h: NetHooks | null): void { _net = h }
@@ -65,13 +65,13 @@ export function startLoop(
     while (acc >= DT) {
       const cmd = _buildCmd()
       if (_net) {
-        _prev = _net.current()   // sau reconcile: nội suy từ state đã sửa, không phải state cũ
+        _prev = _net.current()   // after reconcile: interpolate from the corrected state, not the old one
         _curr = _net.step(cmd)
       } else {
         _prev = _curr
         _curr = stepMovement(_curr, cmd, world, cfg, DT, _weaponMove.mul(), _weaponMove.ads(), _weaponMove.want(cmd))
       }
-      // Thời gian mô phỏng (ms) — client và server tính giống nhau, không dùng performance.now()
+      // Simulation time (ms) — computed identically on client and server, not performance.now()
       onTick?.(_curr, cmd, (_tick++) * 1000 / TICK_RATE)
       acc   -= DT
     }

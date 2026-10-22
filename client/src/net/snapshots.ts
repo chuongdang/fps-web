@@ -1,21 +1,21 @@
 import { MsgType, netToState, type NetPlayer, type OwnedWeapon, type PlayerState, type Transport, type WeaponState } from '@fps/shared'
 
-// Snapshot mới nhất từ server (task 3.4: "client câm" chỉ vẽ đúng cái này)
+// Latest snapshot from the server (task 3.4: the "dumb client" draws only this)
 export interface SnapshotStore {
   yourId: number
   tick: number
-  serverTime: number          // 0 = chưa nhận snapshot nào
+  serverTime: number          // 0 = no snapshot received yet
   ack: number
   players: NetPlayer[]
-  self: PlayerState | null    // state của chính mình trong snapshot mới nhất
-  wpn: WeaponState | null     // súng của mình (sau cmd ack)
-  money: number               // tiền của mình (server quyết định)
-  loadout: (OwnedWeapon | null)[] | null   // súng đã mua ở 4 ô
-  hp: number                  // máu của mình
-  flags: number               // cờ NetFlag của mình (Dead/Invuln)
-  me: NetPlayer | null        // bản NetPlayer đầy đủ của mình (zombie: hpMax, runSpeed, leapCd...)
+  self: PlayerState | null    // our own state in the latest snapshot
+  wpn: WeaponState | null     // our weapon (after the acked cmd)
+  money: number               // our money (decided by the server)
+  loadout: (OwnedWeapon | null)[] | null   // purchased weapons in the 4 slots
+  hp: number                  // our HP
+  flags: number               // our NetFlag flags (Dead/Invuln)
+  me: NetPlayer | null        // our full NetPlayer (zombie: hpMax, runSpeed, leapCd...)
   count: number
-  perSec: number              // số snapshot nhận mỗi giây (cập nhật mỗi ~1s)
+  perSec: number              // snapshots received per second (updated every ~1s)
 }
 
 export function attachSnapshots(
@@ -28,7 +28,7 @@ export function attachSnapshots(
   let windowCount = 0
   transport.onMessage(msg => {
     if (msg.t !== MsgType.Snapshot) return
-    if (msg.tick <= store.tick) return   // cũ hoặc trùng
+    if (msg.tick <= store.tick) return   // old or duplicate
     store.tick = msg.tick
     store.serverTime = msg.serverTime
     store.ack = msg.ack

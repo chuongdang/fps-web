@@ -1,14 +1,15 @@
 import * as THREE from 'three'
 import raw from './poses.json'
+import { GRENADE_ID, isGrenadeId } from '@fps/shared'
 
-// Tư thế tay/súng (plan 10). Mọi số nằm trong poses.json; file này chỉ định kiểu, kiểm tra và đọc.
+// Hand/gun poses (plan 10). All numbers live in poses.json; this file only defines the types, validates and reads them.
 export type Vec3 = [number, number, number]
 export type Hold = 'twoHand' | 'oneHand' | 'pistolSupport' | 'grenade'
 export type AnchorName = 'hand_r' | 'hand_l' | 'mag' | 'pin_pull'
 
 export interface ArmStyleCfg { upperLen: number; foreLen: number; thickness: number; handSize: number; sleeveToElbow?: boolean }
-// Lựu đạn góc 1 (plan 12, G.5). Toạ độ trong không gian camera của viewmodel (như first.gunPos); 'to' của đường tay trái:
-// 'rest' = leftRest, 'pin_pull' = anchor vòng chốt (hệ lựu đạn), offset cộng thêm trong không gian camera.
+// First-person grenade (plan 12, G.5). Coordinates in the viewmodel camera space (like first.gunPos); 'to' of the left-hand path:
+// 'rest' = leftRest, 'pin_pull' = the pin ring anchor (grenade space), plus an offset in camera space.
 export interface GrenadePullKey { t: number; to: 'rest' | 'pin_pull'; offset?: Vec3 }
 export interface GrenadeFirst {
   idlePos: Vec3; idleRotDeg: Vec3
@@ -17,13 +18,13 @@ export interface GrenadeFirst {
   readyPos: { strong: Vec3; lob: Vec3 }; readyRotDeg: { strong: Vec3; lob: Vec3 }
   throwPos: { strong: Vec3; lob: Vec3 }
   windupMs: number; throwMs: number; recoverMs: number
-  pinAttachT?: number          // mốc t của đường rút chốt khi chốt đổi sang tay trái (mặc định 0,75)
-  handRotDegR?: Vec3; handRotDegL?: Vec3   // xoay thêm bàn tay (độ) so với hướng lựu đạn
+  pinAttachT?: number          // t of the pin-pull path when the pin switches to the left hand (default 0.75)
+  handRotDegR?: Vec3; handRotDegL?: Vec3   // extra hand rotation (degrees) relative to the grenade orientation
 }
 export interface WeaponPose {
   anchors: Partial<Record<AnchorName, Vec3>>
-  third: { hold: Hold; gunPos: Vec3; gunRotDeg: Vec3; adsGunPos?: Vec3; adsGunRotDeg?: Vec3; throwStartS?: number; releaseS?: number; throwRate?: number }   // 3 trường cuối: clip ném (giây vào clip lúc bắt đầu / lúc tay thả, tốc độ phát)
-  first: { hold: Hold; gunPos?: Vec3; gunRotDeg: Vec3; scale: number; adsEyeDist?: number; adsRotDeg?: Vec3; grenade?: GrenadeFirst }   // adsEyeDist: đầu ruồi cách mắt bấy nhiêu m khi ngắm; adsRotDeg: xoay thêm khi ngắm hẳn
+  third: { hold: Hold; gunPos: Vec3; gunRotDeg: Vec3; adsGunPos?: Vec3; adsGunRotDeg?: Vec3; throwStartS?: number; releaseS?: number; throwRate?: number }   // last 3 fields: throw clip (seconds into the clip at start / at release, playback rate)
+  first: { hold: Hold; gunPos?: Vec3; gunRotDeg: Vec3; scale: number; adsEyeDist?: number; adsRotDeg?: Vec3; grenade?: GrenadeFirst }   // adsEyeDist: the front sight is this many metres from the eye when aiming; adsRotDeg: extra rotation at full aim
 }
 export interface ReloadKey { t: number; to: 'hand_l' | 'mag'; offset?: Vec3 }
 export type FingerName = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky'
@@ -31,8 +32,8 @@ export interface CharacterCfg {
   crouchDrop: number; crouchWalkDrop: number; aimPivotBone: string; spinePitchBones: string[]; spinePitchLimitDeg: number; headPitchShare: number
   aimPivotOffset: Vec3; poleR: Vec3; poleL: Vec3
   handRotOffsetDegR: Vec3; handRotOffsetDegL: Vec3
-  palmCenterFrac: number          // tâm lòng bàn tay = tỉ lệ này của đoạn cổ tay → khớp ngón giữa
-  oneHandGunPos: Vec3; oneHandGunRotDeg: Vec3   // súng 1 tay trong hệ "bàn tay chuẩn" (ngón chĩa −Z, ngón cái +Y)
+  palmCenterFrac: number          // palm centre = this fraction of the wrist-to-middle-knuckle span
+  oneHandGunPos: Vec3; oneHandGunRotDeg: Vec3   // one-handed gun in the "standard hand" space (fingers point -Z, thumb +Y)
   anim: {
     blendTime: number; idleSpeed: number; walkRefSpeed: number; runStartSpeed: number; runBlendLen: number
     runRefSpeed: number; crouchRefSpeed: number; maxRate: number; jumpHoldS: number
@@ -53,7 +54,7 @@ export interface Poses {
   }
 }
 
-// Thứ tự = id súng trong shared (WEAPONS)
+// Order = weapon ids in shared (WEAPONS)
 export const WEAPON_KEYS = ['ak47', 'm16', 'colt', 'rulo', 'sniper', 'shotgun', 'knife', 'smg', 'm67'] as const
 
 const DEFAULTS = {
@@ -76,7 +77,7 @@ const DEFAULTS = {
     L: { thumb: [15, 25, 20], index: [45, 55, 35], middle: [55, 65, 40], ring: [60, 70, 45], pinky: [65, 70, 45] },
     axis: 'x',
   },
-  grenade: { trajectory: true, trajectoryMaxS: 2, dotEveryS: 0.06 },   // đường bay dự kiến khi giữ ready
+  grenade: { trajectory: true, trajectoryMaxS: 2, dotEveryS: 0.06 },   // predicted flight path while holding ready
   reloadLeftHand: { keys: [], magDetachT: 0.12, magAttachT: 0.55, gunTiltDeg: { roll: 0, pitch: 0, inT: 0.1, outT: 0.85 } },
 }
 const WEAPON_DEFAULT: WeaponPose = {
@@ -92,24 +93,24 @@ function warnOnce(msg: string): void {
   console.warn(`poses.json: ${msg}`)
 }
 
-// Trộn `src` lên bản sao của `def`: thiếu trường → mặc định (+ cảnh báo một lần); `_doc` bỏ qua; mảng lấy nguyên khối
+// Merge `src` onto a copy of `def`: missing field -> default (+ one-time warning); `_doc` is ignored; arrays are taken whole
 function merge(def: unknown, src: unknown, path: string): unknown {
   if (Array.isArray(def)) {
     if (Array.isArray(src) && (def.length === 0 || src.length === def.length)) return src.slice()
-    if (src !== undefined) warnOnce(`${path} sai dạng, dùng mặc định`)
-    else warnOnce(`thiếu ${path}, dùng mặc định`)
+    if (src !== undefined) warnOnce(`${path} has the wrong shape, using default`)
+    else warnOnce(`missing ${path}, using default`)
     return def.slice()
   }
   if (def && typeof def === 'object') {
     const out: Record<string, unknown> = {}
     const s = (src && typeof src === 'object' ? src : {}) as Record<string, unknown>
-    if (src === undefined) warnOnce(`thiếu ${path}, dùng mặc định`)
+    if (src === undefined) warnOnce(`missing ${path}, using default`)
     for (const k of Object.keys(def)) out[k] = merge((def as Record<string, unknown>)[k], s[k], `${path}.${k}`)
-    // Khoá thêm ngoài mặc định (ví dụ sleeveToElbow, offset) giữ nguyên
+    // Extra keys beyond the defaults (e.g. sleeveToElbow, offset) are kept as they are
     for (const k of Object.keys(s)) if (k !== '_doc' && !(k in out)) out[k] = s[k]
     return out
   }
-  if (src === undefined) { warnOnce(`thiếu ${path}, dùng mặc định`); return def }
+  if (src === undefined) { warnOnce(`missing ${path}, using default`); return def }
   return typeof src === typeof def ? src : def
 }
 
@@ -120,8 +121,8 @@ export function loadPoses(json: unknown): Poses {
   const weapons: Record<string, WeaponPose> = {}
   for (const key of WEAPON_KEYS) {
     const src = w[key]
-    if (src === undefined) warnOnce(`thiếu weapons.${key}, cầm một tay`)
-    // Súng 1 tay không dùng gunPos/gunRotDeg của góc 3: khỏi cảnh báo thiếu
+    if (src === undefined) warnOnce(`missing weapons.${key}, holding one-handed`)
+    // One-handed guns do not use the 3rd-person gunPos/gunRotDeg: no missing-field warning
     const one = (src as { third?: { hold?: string } } | undefined)?.third?.hold === 'oneHand'
     const srcFilled = one ? { ...(src as object), third: { gunPos: WEAPON_DEFAULT.third.gunPos, gunRotDeg: WEAPON_DEFAULT.third.gunRotDeg, ...(src as { third: object }).third } } : src
     const wp = merge(WEAPON_DEFAULT, srcFilled, `weapons.${key}`) as WeaponPose
@@ -134,11 +135,11 @@ export function loadPoses(json: unknown): Poses {
   return p
 }
 
-// Bản đang dùng: sửa tại chỗ (F9 chỉnh trực tiếp, hot-reload ghi đè) rồi báo cho người nghe
+// The live copy: edited in place (F9 edits it directly, hot-reload overwrites it) then listeners are notified
 let fileJson: unknown = raw
 export const poses: Poses = loadPoses(raw)
 const listeners = new Set<() => void>()
-// Debug (vite dev): script kiểm tra từ trình duyệt chỉnh đúng bản `poses` đang chạy (import động có thể ra bản module khác)
+// Debug (vite dev): scripts run from the browser edit the running `poses` copy (a dynamic import may yield a different module instance)
 if (import.meta.env?.DEV) Object.assign(globalThis, { __poses: poses, __notifyPoses: () => notifyPosesChanged() })
 export function onPosesChange(fn: () => void): () => void { listeners.add(fn); return () => { listeners.delete(fn) } }
 export function notifyPosesChanged(): void { for (const fn of listeners) fn() }
@@ -148,18 +149,20 @@ export function replacePoses(json: unknown): void {
   for (const k of Object.keys(next) as (keyof Poses)[]) (poses as any)[k] = next[k]
   notifyPosesChanged()
 }
-export function weaponPose(id: number): WeaponPose { return poses.weapons[WEAPON_KEYS[id] ?? 'ak47']! }
+/** Every grenade type (HE, smoke) shares the M67 model + pose */
+export function canonWeaponId(id: number): number { return isGrenadeId(id) ? GRENADE_ID : id }
+export function weaponPose(id: number): WeaponPose { return poses.weapons[WEAPON_KEYS[canonWeaponId(id)] ?? 'ak47']! }
 
 if (import.meta.hot) {
   import.meta.hot.accept('./poses.json', mod => { if (mod) replacePoses((mod as unknown as { default: unknown }).default) })
 }
 
-// ── Điểm neo ───────────────────────────────────────────────────────────────────
-// Ưu tiên anchor trong poses.json; không có thì lấy Empty cùng tên trong glb (nếu có); cuối cùng gốc (0,0,0).
+// ── Anchors ───────────────────────────────────────────────────────────────────
+// Prefer the anchor in poses.json; otherwise the Empty with the same name in the glb (if any); finally the origin (0,0,0).
 const glbAnchors = new Map<number, Map<AnchorName, THREE.Vector3>>()
 const ANCHOR_NAMES: AnchorName[] = ['hand_r', 'hand_l', 'mag', 'pin_pull']
 
-/** Gọi một lần khi model súng load xong (sau adjustModel). Toạ độ trong hệ cha của model. */
+/** Call once when the gun model has loaded (after adjustModel). Coordinates are in the model's parent space. */
 export function scanModelAnchors(id: number, model: THREE.Object3D): void {
   model.updateMatrixWorld(true)
   const m = new Map<AnchorName, THREE.Vector3>()
@@ -173,18 +176,18 @@ export function scanModelAnchors(id: number, model: THREE.Object3D): void {
 export function getAnchor(id: number, name: AnchorName, out: THREE.Vector3): THREE.Vector3 {
   const j = weaponPose(id).anchors[name]
   if (j) return out.set(j[0], j[1], j[2])
-  const g = glbAnchors.get(id)?.get(name)
+  const g = glbAnchors.get(canonWeaponId(id))?.get(name)
   if (g) return out.copy(g)
   return out.set(0, 0, 0)
 }
 
 export function hasAnchor(id: number, name: AnchorName): boolean {
-  return !!weaponPose(id).anchors[name] || !!glbAnchors.get(id)?.has(name)
+  return !!weaponPose(id).anchors[name] || !!glbAnchors.get(canonWeaponId(id))?.has(name)
 }
 
 export function colorOf(hex: string): number { return parseInt(hex.replace('#', ''), 16) }
 
-/** Toàn bộ tư thế hiện tại ở dạng JSON y như file (để dán lại vào poses.json) */
+/** All current poses as JSON exactly like the file (to paste back into poses.json) */
 export function exportPoses(): unknown {
   const doc = (fileJson as { _doc?: string } | null)?._doc
   return { ...(doc ? { _doc: doc } : {}), ...poses }

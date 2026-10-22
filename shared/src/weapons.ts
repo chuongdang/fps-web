@@ -1,26 +1,26 @@
-import { GRENADE, makeThrowState, type ThrowState } from './grenade'
+import { GRENADE, SMOKE, makeThrowState, type ThrowState } from './grenade'
 
 export type WeaponCategory = 'claw' | 'knife' | 'pistol' | 'mid' | 'long' | 'grenade'
-/** Ô vũ khí (phím 1–5) của từng dòng. Ô 5 = lựu đạn (hàng tiêu hao, không tính vào 4 dòng súng) */
+/** Weapon slot (keys 1–5) of each category. Slot 5 = grenade (consumable, not counted among the 4 gun categories) */
 export const CATEGORY_SLOT: Record<WeaponCategory, 0 | 1 | 2 | 3 | 4> = { claw: 0, knife: 0, pistol: 1, mid: 2, long: 3, grenade: 4 }
 export const CATEGORY_LABEL: Record<WeaponCategory, string> = {
-  claw: 'Vuốt', knife: 'Dao', pistol: 'Súng ngắn', mid: 'Súng vừa', long: 'Súng dài', grenade: 'Lựu đạn',
+  claw: 'Claws', knife: 'Knife', pistol: 'Pistol', mid: 'Mid-range', long: 'Rifle', grenade: 'Grenade',
 }
 export const SLOT_COUNT = 5
-/** Ô lựu đạn */
+/** Grenade slot */
 export const GRENADE_SLOT = CATEGORY_SLOT.grenade
-/** Ô mặc định khi hồi sinh / vào trận: súng dài (ô 4 của 0–4 là lựu đạn, không bao giờ là mặc định) */
+/** Default slot on respawn / entering a match: long gun (slot 4 of 0–4 is the grenade, never the default) */
 export const DEFAULT_SLOT = 3
 
 export interface WeaponDef {
   id: number
-  key: string             // tên file icon/model: 'knife' | 'colt' | 'rulo' | 'shotgun' | 'smg' | 'ak47' | 'm16' | 'sniper'
+  key: string             // icon/model file name: 'knife' | 'colt' | 'rulo' | 'shotgun' | 'smg' | 'ak47' | 'm16' | 'sniper'
   name: string
   category: WeaponCategory
   price: number           // USD; dao = 0
   buyable: boolean        // dao = false
-  moveSpeedMul: number    // hệ số tốc độ chạy khi cầm súng này
-  melee?: boolean         // dao: không đạn, không reload, tầm ngắn
+  moveSpeedMul: number    // run-speed multiplier while holding this weapon
+  melee?: boolean         // knife: no ammo, no reload, short range
   auto: boolean
   damage: number
   headMult: number
@@ -33,83 +33,84 @@ export interface WeaponDef {
   recoilPitchDeg: number
   recoilYawDeg: number
   recoilRecoverDegPerSec: number
-  ads?: AdsDef            // có = giữ chuột phải để ngắm
-  recoilRecoverDelayMs?: number   // hồi recoil sau phát bắn bấy nhiêu ms (mặc định: sau fireIntervalMs). Súng chậm như sniper cần hồi sớm
-  pellets?: number                // số tia mỗi phát (mặc định 1). Mỗi tia có spread riêng, seed theo shotSeq + chỉ số tia
-  falloff?: DamageFalloff         // sát thương giảm theo khoảng cách (mặc định: không giảm)
-  consumable?: boolean    // lựu đạn: hàng tiêu hao (mua thêm tới maxCarry, không bán lại, không đạn/bắn)
+  ads?: AdsDef            // present = hold right mouse to ADS
+  recoilRecoverDelayMs?: number   // recoil recovers this many ms after a shot (default: after fireIntervalMs). Slow guns like the sniper need to recover early
+  pellets?: number                // rays per shot (default 1). Each ray has its own spread, seeded by shotSeq + ray index
+  falloff?: DamageFalloff         // damage drops with distance (default: no drop)
+  consumable?: boolean    // grenade: consumable (buy more up to maxCarry, no resale, no ammo/firing)
 }
 
-// Độ toé (nửa góc nón, độ). Công thức: shared/src/spread.ts
+// Spread (cone half-angle, degrees). Formula: shared/src/spread.ts
 export interface SpreadDef {
-  standDeg: number        // đứng yên, chưa bloom
-  crouchDeg: number       // ngồi hoặc đang trượt
-  moveDeg: number         // cộng thêm khi chạy hết tốc (cfg.runSpeed × moveSpeedMul)
-  accurateSpeed: number   // m/s: dưới mức này không bị phạt di chuyển
-  airDeg: number          // cộng thêm khi trên không (thay cho moveDeg)
+  standDeg: number        // standing still, no bloom
+  crouchDeg: number       // crouching or sliding
+  moveDeg: number         // added at full run speed (cfg.runSpeed × moveSpeedMul)
+  accurateSpeed: number   // m/s: below this there is no movement penalty
+  airDeg: number          // added while airborne (replaces moveDeg)
   bloomPerShotDeg: number
   bloomMaxDeg: number
   bloomRecoverDegPerSec: number
-  bloomRecoverDelayMs: number   // ngừng bắn bấy nhiêu ms thì bloom mới bắt đầu hồi (phải > khoảng cách 2 phát của súng auto)
-  pelletConeDeg?: number  // shotgun: nón cố định của các viên chì quanh tâm chùm; spread di chuyển dịch tâm chùm
-  unscopedDeg?: number    // sniper: spread cố định khi không ngắm (adsT = 0); ngắm hẳn thì dùng công thức thường
+  bloomRecoverDelayMs: number   // bloom only starts recovering after this many ms without firing (must be > the gap between 2 shots of an auto weapon)
+  pelletConeDeg?: number  // shotgun: fixed cone of the pellets around the pattern centre; movement spread shifts the pattern centre
+  unscopedDeg?: number    // sniper: fixed spread when not scoped (adsT = 0); fully scoped uses the normal formula
 }
 
-// Sát thương nhân hệ số 1 tới fullM, giảm tuyến tính còn minMult tại endM, giữ nguyên minMult sau đó
+// Damage multiplier 1 up to fullM, falling linearly to minMult at endM, then holding minMult
 export interface DamageFalloff {
   fullM: number
   endM: number
   minMult: number
 }
 
-// Chế độ ngắm (giữ chuột phải). adsT (0..1) là state của movement: tăng 1000/inMs mỗi giây khi ngắm, giảm 1000/outMs khi thả.
-// scope = che đen ngoài vòng tròn và ẩn súng khi ngắm gần hẳn
+// ADS mode (hold right mouse). adsT (0..1) is movement state: rises 1000/inMs per second while aiming, falls 1000/outMs on release.
+// scope = black out outside a circle and hide the gun when nearly fully aimed
 export interface AdsDef {
-  spreadMult: number   // nhân vào toàn bộ spread khi ngắm hẳn (sniper: bỏ qua, dùng unscopedDeg → công thức thường)
-  moveMult: number     // nhân tốc độ chạy khi ngắm hẳn
-  fovMult: number      // nhân FOV camera chính khi ngắm hẳn
+  spreadMult: number   // multiplies all spread when fully aimed (sniper: ignored, uses unscopedDeg → normal formula)
+  moveMult: number     // multiplies run speed when fully aimed
+  fovMult: number      // multiplies the main camera FOV when fully aimed
   inMs: number
   outMs: number
   scope: boolean
 }
 
 export interface WeaponState {
-  current: number         // id súng đang cầm (WEAPONS[current])
-  slots: number[]         // id súng ở 5 ô (theo CATEGORY_SLOT; ô 4 = lựu đạn), -1 = trống. Server giữ, snapshot gửi cho chính người đó
-  slot: number            // ô đang cầm
-  wantSlot: number        // cmd.weapon của cmd gần nhất: chỉ đổi súng khi cmd.weapon ĐỔI (cmd cũ còn bay trên đường không kéo ngược lại ô vừa mua)
-  ammo: number[]          // theo id súng; ammo[GRENADE_ID] = số lựu đạn đang mang
-  nade: ThrowState        // trạng thái rút chốt/ném lựu đạn
-  throwSeq: number        // số quả đã ném (gắn vào GrenadeSpawn để client nhận ra quả dự đoán của mình)
-  quickHeld: boolean      // phím G đang giữ (nhận cạnh lên)
-  prevSlot: number        // ô cầm trước khi chuyển sang lựu đạn (G / phím 5), để tự đổi về
-  switchBackAtMs: number  // > 0: tới thời điểm này (thang seq) tự đổi về prevSlot nếu vẫn đang cầm lựu đạn
+  current: number         // id of the held weapon (WEAPONS[current])
+  slots: number[]         // weapon id in 5 slots (by CATEGORY_SLOT; slot 4 = grenade), -1 = empty. Held by the server, snapshot sends it to that player only
+  slot: number            // held slot
+  wantSlot: number        // cmd.weapon of the latest cmd: only switch weapon when cmd.weapon CHANGES (an old in-flight cmd does not drag back the slot just bought)
+  ammo: number[]          // by weapon id; ammo[GRENADE_ID] / ammo[SMOKE_ID] = number of HE / smoke grenades carried. slots[GRENADE_SLOT] = selected type
+  nade: ThrowState        // pin-pull / throw state of the grenade
+  throwSeq: number        // number of grenades thrown (attached to GrenadeSpawn so the client recognises its own predicted grenade)
+  quickHeld: boolean      // G key is held (rising edge detection)
+  cycleHeld: boolean      // grenade-type switch button is held (rising edge detection)
+  prevSlot: number        // slot held before switching to the grenade (G / key 5), to switch back to
+  switchBackAtMs: number  // > 0: at this time (seq timescale) auto-switch back to prevSlot if still holding a grenade
   reloadEndMs: number
   nextFireMs: number
   shotSeq: number
   triggerHeld: boolean
-  bloomDeg: number[]      // theo id súng: bloom ngay sau phát gần nhất (mỗi súng giữ bloom riêng, tự hồi theo thời gian)
-  lastShotMs: number[]    // theo id súng: thời điểm (thang seq) phát gần nhất
-  shotBloomDeg: number    // bloom đã dùng cho phát vừa bắn (trước khi cộng bloom của chính nó): viên đầu không dính bloom của nó
-  switchEndMs: number     // hết khoá đổi súng lúc này (thang seq): chưa tới thì không ngắm được
-  magMult: number         // băng đạn to gấp ngần này (EconomyConfig.magMult của thể thức; cố định cả ván)
+  bloomDeg: number[]      // by weapon id: bloom right after the most recent shot (each weapon keeps its own bloom, recovering over time)
+  lastShotMs: number[]    // by weapon id: time (seq timescale) of the most recent shot
+  shotBloomDeg: number    // bloom applied to the shot just fired (before adding its own bloom): the first bullet does not carry its own bloom
+  switchEndMs: number     // weapon-switch lock ends at this time (seq timescale): cannot ADS before then
+  magMult: number         // magazines are this many times larger (the mode's EconomyConfig.magMult; fixed for the whole round)
 }
 
-// Thời gian khoá bắn sau khi đổi súng (khớp animation hạ/đưa súng 2×0.15s ở viewmodel)
+// Fire lock after switching weapon (matches the lower/raise animation 2×0.15s on the viewmodel)
 export const SWITCH_MS = 300
 
-// Thông số theo súng thật (sát thương trên thang máu 100):
-// - AK47: 7.62x39, ~600 phát/phút, 30 viên, giật mạnh, tản đạn lớn khi di chuyển.
-// - M16: 5.56x45, ~750 phát/phút, 30 viên, chính xác và giật nhẹ hơn AK, tầm xa hơn.
-// - COLT (M1911 .45): bán tự động, 7 viên, giật rõ.
-// - ROULEAU (súng lục ổ xoay): bán tự động, 6 viên, sát thương lớn, nạp đạn lâu.
+// Real-gun parameters (damage on a 100-health scale):
+// - AK47: 7.62x39, ~600 rounds/min, 30-round magazine, strong recoil, large spread when moving.
+// - M16: 5.56x45, ~750 rounds/min, 30-round magazine, more accurate and lower recoil than the AK, longer range.
+// - COLT (M1911 .45): semi-auto, 7 rounds, noticeable recoil.
+// - ROULEAU (revolver): semi-auto, 6 rounds, high damage, long reload.
 export const WEAPONS: WeaponDef[] = [
   {
     id: 0, key: 'ak47', name: 'AK47', category: 'long', price: 2700, buyable: true, moveSpeedMul: 0.92, auto: true, damage: 36, headMult: 3.5, legMult: 0.75,
     fireIntervalMs: 100, magSize: 30, reloadMs: 2500, range: 180,
     spread: { standDeg: 0.35, crouchDeg: 0.20, moveDeg: 1.0, accurateSpeed: 3, airDeg: 3.0, bloomPerShotDeg: 0.25, bloomMaxDeg: 2.0, bloomRecoverDegPerSec: 6, bloomRecoverDelayMs: 150 },
     recoilPitchDeg: 0.95, recoilYawDeg: 0.45, recoilRecoverDegPerSec: 8,
-    ads: { spreadMult: 0.25, moveMult: 0.55, fovMult: 0.8, inMs: 180, outMs: 120, scope: false },   // súng trường: ngắm qua đầu ruồi, zoom nhẹ, không che màn hình
+    ads: { spreadMult: 0.25, moveMult: 0.55, fovMult: 0.8, inMs: 180, outMs: 120, scope: false },   // rifle: aim over the front sight, slight zoom, no screen occlusion
   },
   {
     id: 1, key: 'm16', name: 'M16', category: 'long', price: 3100, buyable: true, moveSpeedMul: 0.93, auto: true, damage: 30, headMult: 4, legMult: 0.75,
@@ -133,33 +134,33 @@ export const WEAPONS: WeaponDef[] = [
     ads: { spreadMult: 0.4, moveMult: 0.7, fovMult: 0.88, inMs: 120, outMs: 90, scope: false },
   },
   {
-    // Sniper: 1 phát/1,2s, 90 sát thương (đầu ×2 = 180), tản đạn rất lớn khi không ngắm; scope 2 mức zoom
+    // Sniper: 1 shot/1.2s, 90 damage (head ×2 = 180), very large spread when not scoped; scope with 2 zoom levels
     id: 4, key: 'sniper', name: 'SNIPER', category: 'long', price: 4750, buyable: true, moveSpeedMul: 0.85, auto: false, damage: 90, headMult: 2, legMult: 0.75,
     fireIntervalMs: 1200, magSize: 5, reloadMs: 3200, range: 400,
-    // Không ngắm: unscopedDeg cố định. Ngắm hẳn: 0.05° đứng yên + moveDeg theo tốc độ + airDeg. Không bloom (mỗi phát lại kéo khoá nòng)
+    // Not scoped: fixed unscopedDeg. Fully scoped: 0.05° standing still + moveDeg by speed + airDeg. No bloom (each shot re-cycles the bolt)
     spread: { standDeg: 0.05, crouchDeg: 0.05, moveDeg: 3.0, accurateSpeed: 1, airDeg: 10, bloomPerShotDeg: 0, bloomMaxDeg: 0, bloomRecoverDegPerSec: 0, bloomRecoverDelayMs: 0, unscopedDeg: 8 },
     recoilPitchDeg: 3, recoilYawDeg: 0.5, recoilRecoverDegPerSec: 15, recoilRecoverDelayMs: 120,
     ads: { spreadMult: 1, moveMult: 0.5, fovMult: 0.4, inMs: 150, outMs: 100, scope: true },
   },
   {
-    // Shotgun: 8 tia/phát, mỗi tia 16 sát thương (gần: 8 tia thân = 128, đủ hạ 1 phát), giảm dần theo khoảng cách
+    // Shotgun: 8 rays/shot, 16 damage each (close range: 8 body rays = 128, enough to kill in 1 shot), falling off with distance
     id: 5, key: 'shotgun', name: 'SHOTGUN', category: 'mid', price: 1100, buyable: true, moveSpeedMul: 0.95, auto: false, damage: 16, headMult: 2, legMult: 0.75,
     fireIntervalMs: 900, magSize: 6, reloadMs: 3000, range: 60,
-    // pelletConeDeg: nón cố định của 8 viên chì; spread di chuyển/trên không chỉ dịch tâm chùm
+    // pelletConeDeg: fixed cone of the 8 pellets; movement/airborne spread only shifts the pattern centre
     spread: { standDeg: 0, crouchDeg: 0, moveDeg: 0.6, accurateSpeed: 3, airDeg: 2.0, bloomPerShotDeg: 0, bloomMaxDeg: 0, bloomRecoverDegPerSec: 0, bloomRecoverDelayMs: 0, pelletConeDeg: 4.5 },
     recoilPitchDeg: 4, recoilYawDeg: 0.6, recoilRecoverDegPerSec: 12, recoilRecoverDelayMs: 120,
     pellets: 8, falloff: { fullM: 6, endM: 30, minMult: 0.2 },
   },
   {
-    // Dao: chém hitscan 2,2m từ mắt, không spread/recoil, không đạn. 2 nhát hạ (55 × 2 ≥ 100 vào thân)
-    id: 6, key: 'knife', name: 'DAO', category: 'knife', price: 0, buyable: false, moveSpeedMul: 1.1, melee: true,
+    // Knife: 2.2m hitscan slash from the eye, no spread/recoil, no ammo. 2 slashes kill (55 × 2 ≥ 100 to the body)
+    id: 6, key: 'knife', name: 'KNIFE', category: 'knife', price: 0, buyable: false, moveSpeedMul: 1.1, melee: true,
     auto: true, damage: 55, headMult: 2, legMult: 1,
     fireIntervalMs: 450, magSize: 0, reloadMs: 0, range: 2.2,
     spread: { standDeg: 0, crouchDeg: 0, moveDeg: 0, accurateSpeed: 3, airDeg: 0, bloomPerShotDeg: 0, bloomMaxDeg: 0, bloomRecoverDegPerSec: 0, bloomRecoverDelayMs: 0 },
     recoilPitchDeg: 0, recoilYawDeg: 0, recoilRecoverDegPerSec: 0,
   },
   {
-    // SMG: nhanh, đạn yếu, tầm trung
+    // SMG: fast, weak bullets, mid range
     id: 7, key: 'smg', name: 'SMG', category: 'mid', price: 1250, buyable: true, moveSpeedMul: 1.0,
     auto: true, damage: 20, headMult: 3, legMult: 0.75,
     fireIntervalMs: 70, magSize: 30, reloadMs: 1800, range: 100,
@@ -168,7 +169,7 @@ export const WEAPONS: WeaponDef[] = [
     falloff: { fullM: 15, endM: 40, minMult: 0.6 },
   },
   {
-    // Lựu đạn M67: không dùng các trường bắn (xem grenade.ts / grenadePhysics.ts)
+    // M67 grenade: does not use the firing fields (see grenade.ts / grenadePhysics.ts)
     id: 8, key: GRENADE.key, name: 'M67', category: 'grenade', price: GRENADE.price, buyable: true, moveSpeedMul: 1.0, consumable: true,
     auto: false, damage: 0, headMult: 1, legMult: 1,
     fireIntervalMs: 0, magSize: 0, reloadMs: 0, range: 0,
@@ -176,39 +177,52 @@ export const WEAPONS: WeaponDef[] = [
     recoilPitchDeg: 0, recoilYawDeg: 0, recoilRecoverDegPerSec: 0,
   },
   {
-    // Vuốt zombie (plan 16, ZF.2): chuột trái. Sát thương thật lấy theo loại zombie (Player.zstats.clawDamage), `damage` chỉ là chỗ giữ
-    id: 9, key: 'claw', name: 'VUỐT', category: 'claw', price: 0, buyable: false, moveSpeedMul: 1, melee: true,
+    // Zombie claw (plan 16, ZF.2): left mouse. Real damage comes from the zombie type (Player.zstats.clawDamage), `damage` is only a placeholder
+    id: 9, key: 'claw', name: 'CLAW', category: 'claw', price: 0, buyable: false, moveSpeedMul: 1, melee: true,
     auto: true, damage: 1, headMult: 1, legMult: 1,
     fireIntervalMs: 550, magSize: 0, reloadMs: 0, range: 1.8,
     spread: { standDeg: 0, crouchDeg: 0, moveDeg: 0, accurateSpeed: 3, airDeg: 0, bloomPerShotDeg: 0, bloomMaxDeg: 0, bloomRecoverDegPerSec: 0, bloomRecoverDelayMs: 0 },
     recoilPitchDeg: 0, recoilYawDeg: 0, recoilRecoverDegPerSec: 0,
   },
   {
-    // Cào mạnh (chuột phải): vung 0,3s rồi mới trúng (xem ZOMBIE.heavyWindupMs), damage ×ZOMBIE.heavyDamageMult
-    id: 10, key: 'claw_heavy', name: 'VUỐT MẠNH', category: 'claw', price: 0, buyable: false, moveSpeedMul: 1, melee: true,
+    // Heavy claw (right mouse): 0.3s swing then lands (see ZOMBIE.heavyWindupMs), damage ×ZOMBIE.heavyDamageMult
+    id: 10, key: 'claw_heavy', name: 'HEAVY CLAW', category: 'claw', price: 0, buyable: false, moveSpeedMul: 1, melee: true,
     auto: true, damage: 1, headMult: 1, legMult: 1,
     fireIntervalMs: 1100, magSize: 0, reloadMs: 0, range: 2.0,
+    spread: { standDeg: 0, crouchDeg: 0, moveDeg: 0, accurateSpeed: 3, airDeg: 0, bloomPerShotDeg: 0, bloomMaxDeg: 0, bloomRecoverDegPerSec: 0, bloomRecoverDelayMs: 0 },
+    recoilPitchDeg: 0, recoilYawDeg: 0, recoilRecoverDegPerSec: 0,
+  },
+  {
+    // Smoke grenade: same slot and throw as the M67, no damage (see SMOKE in grenade.ts)
+    id: 11, key: SMOKE.key, name: 'SMOKE', category: 'grenade', price: SMOKE.price, buyable: true, moveSpeedMul: 1.0, consumable: true,
+    auto: false, damage: 0, headMult: 1, legMult: 1,
+    fireIntervalMs: 0, magSize: 0, reloadMs: 0, range: 0,
     spread: { standDeg: 0, crouchDeg: 0, moveDeg: 0, accurateSpeed: 3, airDeg: 0, bloomPerShotDeg: 0, bloomMaxDeg: 0, bloomRecoverDegPerSec: 0, bloomRecoverDelayMs: 0 },
     recoilPitchDeg: 0, recoilYawDeg: 0, recoilRecoverDegPerSec: 0,
   },
 ]
 
 export const WEAPON_BY_KEY: ReadonlyMap<string, WeaponDef> = new Map(WEAPONS.map(w => [w.key, w]))
-/** id của lựu đạn trong WEAPONS */
+/** Grenade id in WEAPONS */
 export const GRENADE_ID = WEAPON_BY_KEY.get(GRENADE.key)!.id
-/** Vuốt thường / vuốt mạnh của zombie */
+/** Smoke grenade id */
+export const SMOKE_ID = WEAPON_BY_KEY.get(SMOKE.key)!.id
+/** All grenade types (same GRENADE_SLOT slot); order = priority when choosing the default type */
+export const GRENADE_IDS: readonly number[] = [GRENADE_ID, SMOKE_ID]
+export function isGrenadeId(id: number): boolean { return id === GRENADE_ID || id === SMOKE_ID }
+/** Normal / heavy zombie claw */
 export const CLAW_ID = WEAPON_BY_KEY.get('claw')!.id
 export const CLAW_HEAVY_ID = WEAPON_BY_KEY.get('claw_heavy')!.id
 export function weaponByKey(key: string): WeaponDef | undefined { return WEAPON_BY_KEY.get(key) }
 
-/** Số tia tối đa mỗi phát (mảng hướng bắn cấp phát sẵn theo số này; seed dành 6 bit cho chỉ số tia) */
+/** Max rays per shot (the fire-direction array is preallocated to this size; the seed reserves 6 bits for the ray index) */
 export const MAX_PELLETS = 16
 
 
-/** Bộ mặc định lúc chưa biết đội (Cớm): Dao, Colt, —, M16, (không lựu đạn) */
+/** Default set when the team is unknown (Cops): Knife, Colt, —, M16, (no grenade) */
 export const FALLBACK_SLOTS: readonly number[] = [6, 2, -1, 1, -1]
 
-/** Cỡ băng đạn thực của súng `def` với hệ số `mult` */
+/** Actual magazine size of weapon `def` with multiplier `mult` */
 export function magSizeOf(def: WeaponDef, mult = 1): number { return Math.round(def.magSize * mult) }
 
 export function makeWeaponState(slots: readonly number[] = FALLBACK_SLOTS, magMult = 1): WeaponState {
@@ -222,6 +236,7 @@ export function makeWeaponState(slots: readonly number[] = FALLBACK_SLOTS, magMu
     nade:        makeThrowState(),
     throwSeq:    0,
     quickHeld:   false,
+    cycleHeld:   false,
     prevSlot:    DEFAULT_SLOT,
     switchBackAtMs: 0,
     reloadEndMs: 0,

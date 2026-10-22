@@ -1,26 +1,26 @@
 import type { AnyMsg } from './protocol'
 
-// Giao diện chung; client và server mỗi bên một bản cài đặt (WebSocket)
+// Common interface; client and server each have their own implementation (WebSocket)
 export interface Transport {
   send(msg: AnyMsg): void
-  onMessage(cb: (msg: AnyMsg) => void): void   // cộng dồn, gọi mọi listener theo thứ tự đăng ký
+  onMessage(cb: (msg: AnyMsg) => void): void   // accumulates, calls every listener in registration order
   onClose(cb: () => void): void
 }
 
 export interface NetsimOptions {
-  latencyMs: number            // trễ mỗi chiều
-  jitterMs: number             // dao động ± quanh latencyMs
-  now?: () => number           // inject để test
+  latencyMs: number            // delay per direction
+  jitterMs: number             // ± variation around latencyMs
+  now?: () => number           // injected for tests
   random?: () => number
 }
 
-// Bọc ngoài Transport, trễ cả hai chiều. Giữ đúng thứ tự gói (như TCP):
-// thời điểm giao của gói sau ≥ gói trước, theo từng chiều.
+// Wraps a Transport, delaying both directions. Keeps packet order (like TCP):
+// a later packet's delivery time ≥ the previous one's, per direction.
 export function withNetsim(inner: Transport, opts: NetsimOptions): Transport {
   const now = opts.now ?? (() => performance.now())
   const random = opts.random ?? Math.random
 
-  // Hàng đợi FIFO + một timer: setTimeout độ dài khác nhau không đảm bảo thứ tự khi nổ cùng ms
+  // FIFO queue + one timer: setTimeouts of different lengths do not guarantee order when they fire in the same ms
   function makeDelayer(deliver: (msg: AnyMsg) => void) {
     const queue: { due: number; msg: AnyMsg }[] = []
     let lastDue = 0

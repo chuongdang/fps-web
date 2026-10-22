@@ -1,7 +1,7 @@
 import type { CharacterCfg } from './poses'
 
-// Chọn animation thân dưới (plan 11, C.4). Thuần số học, không cấp phát: tính trọng số mục tiêu cho từng "ô"
-// (idle, đi 4 hướng, chạy, ngồi, nhảy, trượt) từ vận tốc nội suy trong hệ của nhân vật. Tổng trọng số luôn = 1.
+// Lower-body animation selection (plan 11, C.4). Pure maths, no allocation: computes the target weight for each "slot"
+// (idle, walk in 4 directions, run, crouch, jump, slide) from the interpolated velocity in the character's frame. Total weight is always 1.
 export type Slot = 'idle' | 'walkF' | 'walkB' | 'walkL' | 'walkR' | 'run' | 'crouchIdle' | 'crouchWalk' | 'jump' | 'slide'
 export const SLOTS: Slot[] = ['idle', 'walkF', 'walkB', 'walkL', 'walkR', 'run', 'crouchIdle', 'crouchWalk', 'jump', 'slide']
 export type SlotWeights = Record<Slot, number>
@@ -11,14 +11,14 @@ export function makeSlotWeights(): SlotWeights {
 }
 
 export interface LocoInput {
-  vx: number; vz: number      // vận tốc ngang thế giới (m/s)
+  vx: number; vz: number      // horizontal world velocity (m/s)
   yaw: number
   grounded: boolean; crouching: boolean; sliding: boolean
 }
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
-/** Ghi trọng số mục tiêu vào `out`; trả về tốc độ ngang (m/s). */
+/** Write the target weights into `out`; returns the horizontal speed (m/s). */
 export function locoTargets(inp: LocoInput, cfg: CharacterCfg['anim'], out: SlotWeights): number {
   for (const s of SLOTS) out[s] = 0
   const speed = Math.hypot(inp.vx, inp.vz)
@@ -26,7 +26,7 @@ export function locoTargets(inp: LocoInput, cfg: CharacterCfg['anim'], out: Slot
   if (!inp.grounded) { out.jump = 1; return speed }
   const moving = clamp01((speed - cfg.idleSpeed) / (cfg.idleSpeed * 2))
   if (inp.crouching) { out.crouchWalk = moving; out.crouchIdle = 1 - moving; return speed }
-  // vận tốc trong hệ nhân vật: forward = (−sin yaw, −cos yaw), right = (cos yaw, −sin yaw)
+  // velocity in the character frame: forward = (−sin yaw, −cos yaw), right = (cos yaw, −sin yaw)
   const sy = Math.sin(inp.yaw), cy = Math.cos(inp.yaw)
   const vf = speed > 1e-6 ? (-inp.vx * sy - inp.vz * cy) : 0
   const vr = speed > 1e-6 ? (inp.vx * cy - inp.vz * sy) : 0
@@ -41,7 +41,7 @@ export function locoTargets(inp: LocoInput, cfg: CharacterCfg['anim'], out: Slot
   return speed
 }
 
-/** Tên clip cho mỗi ô. Súng ngắn/dao: bộ pistol_*; pistol không có đi lùi/ngang nên mượn clip rifle. */
+/** Clip name for each slot. Pistol/knife: the pistol_* set; pistol has no backward/strafe walk, so rifle clips are borrowed. */
 export function slotClip(slot: Slot, pistol: boolean): string {
   switch (slot) {
     case 'idle': return pistol ? 'pistol_idle' : 'rifle_idle'
@@ -62,7 +62,7 @@ export const CLIP_NAMES = [
   'pistol_idle', 'pistol_walk_f', 'pistol_run_f', 'jump', 'slide', 'death_1', 'death_2',
 ] as const
 
-/** Tốc độ phát (timeScale) của clip theo tốc độ thực để chân không trượt. */
+/** Playback speed (timeScale) of the clip based on real speed so the feet do not slide. */
 export function clipRate(slot: Slot, speed: number, cfg: CharacterCfg['anim']): number {
   switch (slot) {
     case 'walkF': case 'walkB': case 'walkL': case 'walkR': return Math.min(cfg.maxRate, Math.max(0.3, speed / cfg.walkRefSpeed))

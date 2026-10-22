@@ -16,11 +16,11 @@ export function fireHitscan(
   cfg: MovementConfig,
   targets: Target[],
 ): HitResult | null {
-  // Khoảng cách đến tường gần nhất
+  // Distance to the nearest wall
   const wallHit  = world.castRay(eyePos, dir, maxDist)
   const wallDist = wallHit ? wallHit.dist : maxDist
 
-  // Kiểm tra hitbox bia (chỉ nếu gần hơn tường)
+  // Check the target hitboxes (only if closer than the wall)
   let bestDist  = wallDist
   let bestTarget: { idx: number; part: 'head' | 'body' | 'legs' } | null = null
 

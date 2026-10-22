@@ -2,7 +2,7 @@ import { WEAPONS, type MovementConfig, type SpreadDef } from '@fps/shared'
 
 type FieldRange = [min: number, max: number, step: number]
 
-// Chỉ các tham số số của người (leap/hopPenalty là của zombie, nằm trong shared/zombie.ts)
+// Only the human numeric parameters (leap/hopPenalty belong to the zombie and live in shared/zombie.ts)
 type TunableKey = Exclude<keyof MovementConfig, 'leap' | 'hopPenalty'>
 const RANGES: Record<TunableKey, FieldRange> = {
   runSpeed:      [1,    20,  0.5],
@@ -36,7 +36,7 @@ export function initTuningPanel(cfg: MovementConfig): void {
 
   const title = document.createElement('div')
   title.style.cssText = 'font-weight:bold;margin-bottom:6px;color:#ff0'
-  title.textContent = 'Chỉnh thông số  [F6 đóng]'
+  title.textContent = 'Tuning  [F6 to close]'
   panel.appendChild(title)
   const tabs = document.createElement('div')
   tabs.style.cssText = 'display:flex;gap:4px;margin-bottom:6px'
@@ -99,7 +99,7 @@ export function initTuningPanel(cfg: MovementConfig): void {
   copyBtn.addEventListener('click', () => {
     const json = JSON.stringify(cfg, null, 2)
     navigator.clipboard.writeText(json).then(() => {
-      copyBtn.textContent = 'Đã copy!'
+      copyBtn.textContent = 'Copied!'
       setTimeout(() => { copyBtn.textContent = 'Copy JSON' }, 1500)
     })
   })
@@ -110,7 +110,7 @@ export function initTuningPanel(cfg: MovementConfig): void {
     if (e.code === 'F6') {
       visible = !visible
       panel.style.display = visible ? 'block' : 'none'
-      // Đồng bộ slider nếu cfg bị thay đổi từ ngoài
+      // Sync the sliders if cfg is changed from outside
       if (visible) {
         for (const key of Object.keys(RANGES) as TunableKey[]) {
           const inputs = moveBox.querySelectorAll<HTMLInputElement>('input[type=range]')
@@ -126,7 +126,7 @@ export function initTuningPanel(cfg: MovementConfig): void {
   })
 }
 
-// ── Tab Spread (plan 14 S.4): chỉnh SpreadDef + recoilPitchDeg của từng súng ngay trong game (chỉ client; server giữ số gốc) ──
+// ── Spread tab (plan 14 S.4): tune each weapon's SpreadDef + recoilPitchDeg in-game (client only; the server keeps the original values) ──
 const SPREAD_RANGES: Record<keyof SpreadDef, FieldRange> = {
   standDeg:              [0, 6,   0.01],
   crouchDeg:             [0, 6,   0.01],
@@ -148,7 +148,7 @@ function buildSpreadTab(box: HTMLElement): void {
   for (const w of guns) sel.add(new Option(w.name, String(w.id)))
   const rows = document.createElement('div')
   const copyBtn = document.createElement('button')
-  copyBtn.textContent = 'Copy JSON súng này'
+  copyBtn.textContent = 'Copy this weapon JSON'
   copyBtn.style.cssText = 'margin-top:8px;width:100%;padding:4px;background:#333;color:#fff;border:1px solid #888;cursor:pointer;font:12px monospace'
   box.append(sel, rows, copyBtn)
 
@@ -184,8 +184,8 @@ function buildSpreadTab(box: HTMLElement): void {
     const w = cur()
     const json = JSON.stringify({ key: w.key, spread: w.spread, recoilPitchDeg: w.recoilPitchDeg, ...(w.ads ? { adsSpreadMult: w.ads.spreadMult } : {}) }, null, 2)
     navigator.clipboard.writeText(json).then(() => {
-      copyBtn.textContent = 'Đã copy!'
-      setTimeout(() => { copyBtn.textContent = 'Copy JSON súng này' }, 1500)
+      copyBtn.textContent = 'Copied!'
+      setTimeout(() => { copyBtn.textContent = 'Copy this weapon JSON' }, 1500)
     })
   })
   render()

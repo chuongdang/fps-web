@@ -13,7 +13,7 @@ describe('placeholder', () => {
 
 import { phaseButtonMask, MatchPhase, Btn, winnerOf } from './index'
 describe('teams', () => {
-  it('phaseButtonMask: chết/đếm ngược = 0; ENDED bỏ Fire+Reload nhưng còn di chuyển', () => {
+  it('phaseButtonMask: dead/countdown = 0; ENDED drops Fire+Reload but keeps movement', () => {
     expect(phaseButtonMask(MatchPhase.Playing, false)).toBe(0)
     expect(phaseButtonMask(MatchPhase.Countdown, true)).toBe(0)
     const ended = phaseButtonMask(MatchPhase.Ended, true)
@@ -27,7 +27,7 @@ describe('teams', () => {
 
 import { isCharacterSet, CHARACTER_SETS } from './index'
 describe('characters', () => {
-  it('isCharacterSet chỉ nhận id trong danh mục', () => {
+  it('isCharacterSet only accepts ids in the catalog', () => {
     for (const id of CHARACTER_SETS) expect(isCharacterSet(id)).toBe(true)
     expect(isCharacterSet('x')).toBe(false); expect(isCharacterSet(undefined)).toBe(false); expect(isCharacterSet(3)).toBe(false)
   })

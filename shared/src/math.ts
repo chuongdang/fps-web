@@ -1,4 +1,4 @@
-// yaw = 0 nhìn về -Z; yaw tăng = quay trái; pitch dương = ngước lên
+// yaw = 0 faces -Z; yaw increasing = turn left; positive pitch = look up
 // forward = (-sin(yaw), 0, -cos(yaw))
 // right   = ( cos(yaw), 0, -sin(yaw))
 
@@ -22,14 +22,14 @@ export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
-// Interpolate angle đi đường ngắn nhất qua ±π
+// Interpolate an angle along the shortest path across ±π
 export function lerpAngle(a: number, b: number, t: number): number {
   const tau = 2 * Math.PI
   const diff = (((b - a + Math.PI) % tau) + tau) % tau - Math.PI
   return a + diff * t
 }
 
-// Deterministic PRNG; trả về hàm random [0, 1)
+// Deterministic PRNG; returns a random function in [0, 1)
 export function mulberry32(seed: number): () => number {
   let s = seed >>> 0
   return (): number => {
@@ -41,7 +41,7 @@ export function mulberry32(seed: number): () => number {
   }
 }
 
-// Gộp nhiều số thành seed 32-bit
+// Combine several numbers into a 32-bit seed
 export function hashSeed(...nums: number[]): number {
   let h = 0x811c9dc5 // FNV-1a offset basis
   for (const n of nums) {

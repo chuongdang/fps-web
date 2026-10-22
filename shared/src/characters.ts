@@ -1,5 +1,5 @@
-// Bộ nhân vật (chỉ là danh mục id): mỗi phòng chọn một bộ lúc tạo, server báo cho mọi client qua Welcome.
-// Phần vẽ nằm ở client/src/render/characters/ (mỗi bộ một module); thêm bộ mới = thêm id ở đây + một module bên đó.
+// Character set catalogue (ids only): each room picks one set at creation and the server tells every client via Welcome.
+// Drawing lives in client/src/render/characters/ (one module per set); a new set = add an id here + one module there.
 export const CHARACTER_SETS = ['saberDesert', 'copRobber', 'robot'] as const
 export type CharacterSetId = (typeof CHARACTER_SETS)[number]
 export const DEFAULT_CHARACTER_SET: CharacterSetId = 'saberDesert'

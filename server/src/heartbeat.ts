@@ -1,8 +1,8 @@
 import type { WebSocket, WebSocketServer } from 'ws'
 
-// Kết nối chết mà không có close frame (đóng tab đột ngột, proxy/tunnel giữ socket, mạng rớt) thì
-// server không bao giờ nhận 'close' nên người chơi ma ở lại phòng. Ping định kỳ: ai không trả
-// Pong trước lần ping kế tiếp thì ngắt (→ 'close' → Room.leave).
+// A dead connection without a close frame (tab closed abruptly, proxy/tunnel holding the socket, network drop)
+// never produces a 'close' event on the server, so a ghost player stays in the room. Ping periodically: anyone who
+// does not answer with a Pong before the next ping is terminated (-> 'close' -> Room.leave).
 export function startHeartbeat(wss: WebSocketServer, intervalMs = 5000): () => void {
   const alive = new WeakMap<WebSocket, boolean>()
   wss.on('connection', ws => {

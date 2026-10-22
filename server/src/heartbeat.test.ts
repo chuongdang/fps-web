@@ -24,14 +24,14 @@ function setup() {
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 describe('startHeartbeat', () => {
-  it('ngắt kết nối không trả Pong (trong ≤ 2 chu kỳ)', async () => {
+  it('disconnects a client that does not answer Pong (within <= 2 cycles)', async () => {
     const { open, closed } = setup()
-    await open({ autoPong: false })     // client "chết": không trả Pong
+    await open({ autoPong: false })     // "dead" client: sends no Pong
     await wait(INTERVAL * 3.5)
     expect(closed).toEqual([0])
   })
 
-  it('giữ kết nối còn trả Pong', async () => {
+  it('keeps a connection that still answers Pong', async () => {
     const { open, closed } = setup()
     await open()
     await wait(INTERVAL * 5)
