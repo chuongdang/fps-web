@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { poses, WEAPON_KEYS, type FingerName, weaponPose, armsOf, armAdjustDefault, getAnchor, notifyPosesChanged, onPosesReplaced, exportPoses, exportWeapon, resetPosesToFile, type ArmView, type Vec3 } from './poses'
+import { poses, WEAPON_KEYS, type FingerName, weaponPose, armBodyOf, handsOf, armBodyDefault, handAdjustDefault, getAnchor, notifyPosesChanged, onPosesReplaced, exportPoses, exportWeapon, resetPosesToFile, type ArmView, type Vec3 } from './poses'
 import type { ViewmodelHandle } from './viewmodel'
 import { setOverlayHidden } from '../input'
 
@@ -162,37 +162,38 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
         }
       }
     } else if (tab === 'Arms') {
-      const arms = armsOf(id, armView), a = arms[armSide]
-      body.append(el('div', 'color:#999', 'Per gun, per view, per hand. Added on top of the shared settings (First / Character poles + hand rotation, Grip curls). All zero = unchanged. "Copy this gun" exports it.'))
-      selectRow(body, 'view', ['first', 'third'], () => armView, v => { armView = v as ArmView; render() })
+      const ab = armBodyOf(id, armView)[armSide], hands = handsOf(id), h = hands[armSide]
+      body.append(el('div', 'color:#999', 'Per gun and per hand. "Hand" and "Fingers" are the grip on this gun: one setting for first AND third person. "Arm and forearm" (elbow, twists) is per view. Added on top of the shared settings (First / Character poles + hand rotation, Grip curls). All zero = unchanged. "Copy this gun" exports it.'))
+      selectRow(body, 'view (arm and forearm only)', ['first', 'third'], () => armView, v => { armView = v as ArmView; render() })
       selectRow(body, 'hand', ['R', 'L'], () => armSide, v => { armSide = v as 'R' | 'L'; render() })
       if (armView === 'first' && armSide === 'L' && w.first.hold === 'oneHand') body.append(el('div', 'color:#fa6', 'This gun is held one-handed in first person: the left arm is hidden.'))
       if (armView === 'third') body.append(el('div', 'color:#999', 'Third person: look at it with the F10 orbit camera.'))
       const head2 = (s: string) => body.append(el('div', 'margin-top:8px;padding-top:4px;border-top:1px solid #445;color:#8af;font-weight:bold', s))
-      head2('Arm and forearm')
+      head2(`Arm and forearm (${armView} person only)`)
       body.append(el('div', 'color:#999', 'Elbow: metres added to the elbow pole (swings the elbow). Twists: the skin rolls, the elbow / hand stay.'))
-      vecRows(body, 'elbow', () => a.elbow, -1, 1, 0.01)
-      numRow(body, 'upperTwist°', () => a.upperTwistDeg, v => { a.upperTwistDeg = v }, -180, 180, 1)
-      numRow(body, 'foreTwist°', () => a.foreTwistDeg, v => { a.foreTwistDeg = v }, -180, 180, 1)
-      head2('Hand')
+      vecRows(body, 'elbow', () => ab.elbow, -1, 1, 0.01)
+      numRow(body, 'upperTwist°', () => ab.upperTwistDeg, v => { ab.upperTwistDeg = v }, -180, 180, 1)
+      numRow(body, 'foreTwist°', () => ab.foreTwistDeg, v => { ab.foreTwistDeg = v }, -180, 180, 1)
+      head2('Hand (shared by first and third person)')
       body.append(el('div', 'color:#999', 'Palm move (m, gun space: x right, y up, z towards the stock)'))
-      vecRows(body, '', () => a.palmPos, -0.2, 0.2, 0.002, ['right +', 'up +', 'back +'])
+      vecRows(body, '', () => h.palmPos, -0.2, 0.2, 0.002, ['right +', 'up +', 'back +'])
       body.append(el('div', 'color:#999', 'Palm rotate about the palm (degrees, gun space)'))
-      vecRows(body, '', () => a.palmRotDeg, -180, 180, 0.5, ['pitch', 'yaw', 'roll'])
+      vecRows(body, '', () => h.palmRotDeg, -180, 180, 0.5, ['pitch', 'yaw', 'roll'])
       body.append(el('div', 'color:#999', 'Wrist (degrees, hand-bone axes): the palm and fingers pivot at the wrist, the forearm stays'))
-      vecRows(body, '', () => a.wristDeg, -90, 90, 1, ['flex', 'twist', 'side'])
-      head2('Fingers')
+      vecRows(body, '', () => h.wristDeg, -90, 90, 1, ['flex', 'twist', 'side'])
+      head2('Fingers (shared by first and third person)')
       body.append(el('div', 'color:#999', 'Degrees per joint (knuckle out) added to the shared Grip curl. manual = ignore the shared curl, only these numbers. spread: + fans out (a finger away from the thumb side, the thumb away from the fingers).'))
       for (const f of FINGERS) {
-        checkRow(body, `${f} manual`, () => a.manual.includes(f), on => { const i = a.manual.indexOf(f); if (on && i < 0) a.manual.push(f); else if (!on && i >= 0) a.manual.splice(i, 1) })
-        for (let j = 0; j < 3; j++) numRow(body, `${f}${j + 1}`, () => a.fingers[f]?.[j] ?? 0, v => { (a.fingers[f] ??= [0, 0, 0])[j] = v }, -60, 120, 1)
-        numRow(body, `${f} spread`, () => a.spread[f] ?? 0, v => { a.spread[f] = v }, -45, 45, 1)
+        checkRow(body, `${f} manual`, () => h.manual.includes(f), on => { const i = h.manual.indexOf(f); if (on && i < 0) h.manual.push(f); else if (!on && i >= 0) h.manual.splice(i, 1) })
+        for (let j = 0; j < 3; j++) numRow(body, `${f}${j + 1}`, () => h.fingers[f]?.[j] ?? 0, v => { (h.fingers[f] ??= [0, 0, 0])[j] = v }, -60, 120, 1)
+        numRow(body, `${f} spread`, () => h.spread[f] ?? 0, v => { h.spread[f] = v }, -45, 45, 1)
       }
       head2('Tools')
       const other = armSide === 'R' ? 'L' : 'R'
-      btn(body, `Copy fingers ${armSide} → ${other}`, () => { const o = arms[other]; o.fingers = structuredClone(a.fingers); o.spread = structuredClone(a.spread); o.manual = [...a.manual]; dirty() })
-      btn(body, `Zero hand ${armSide}`, () => { Object.assign(a, armAdjustDefault()); dirty(); render() })
-      btn(body, 'Zero both hands', () => { Object.assign(arms.R, armAdjustDefault()); Object.assign(arms.L, armAdjustDefault()); dirty(); render() })
+      btn(body, `Copy fingers ${armSide} → ${other}`, () => { const o = hands[other]; o.fingers = structuredClone(h.fingers); o.spread = structuredClone(h.spread); o.manual = [...h.manual]; dirty() })
+      btn(body, `Zero hand ${armSide} (both views)`, () => { Object.assign(h, handAdjustDefault()); dirty(); render() })
+      btn(body, 'Zero both hands (both views)', () => { Object.assign(hands.R, handAdjustDefault()); Object.assign(hands.L, handAdjustDefault()); dirty(); render() })
+      btn(body, `Zero arm ${armSide} (${armView} only)`, () => { Object.assign(ab, armBodyDefault()); dirty(); render() })
     } else if (tab === 'Anchors') {
       for (const n of ['hand_r', 'hand_l', 'mag'] as const) {
         if (!w.anchors[n]) { getAnchor(id, n, _v); w.anchors[n] = [_v.x, _v.y, _v.z] }

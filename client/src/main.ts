@@ -72,6 +72,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true })
 if (IS_TOUCH) renderer.setPixelRatio(pixelRatioFor(window.devicePixelRatio, getQuality()))   // phones: cap the pixels drawn (the lobby's Graphics choice); desktop stays at ratio 1
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
+renderer.shadowMap.autoUpdate = false   // the shadow casters (map, dummies) never move: redraw the shadow map only when they change (refreshShadows)
+const refreshShadows = (): void => { renderer.shadowMap.needsUpdate = true }
 renderer.autoClear = false   // manual clear so the viewmodel pass can render separately
 document.body.style.margin = '0'
 document.body.appendChild(renderer.domElement)
@@ -88,7 +90,9 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.4)
 sun.position.set(20, 40, 20)
 sun.castShadow = true
 sun.shadow.camera.near = 0.5
-sun.shadow.mapSize.set(2048, 2048)
+sun.shadow.mapSize.set(IS_TOUCH ? 2048 : 4096, IS_TOUCH ? 2048 : 4096)   // drawn once per change (not per frame), so desktop can afford the finer map; phones keep 2048
+sun.shadow.normalBias = 0.04   // the model's materials are double-sided: push the lookup along the normal to stop acne/flicker
+sun.shadow.bias = -0.0003
 scene.add(sun, sun.target)
 function fitSunTo(map: LoadedMap): void {   // the shadow camera covers exactly this map: finer 2048 shadow map on small maps
   const fit = sunFitFor(map)
@@ -99,6 +103,7 @@ function fitSunTo(map: LoadedMap): void {   // the shadow camera covers exactly 
   cam.updateProjectionMatrix()
   sun.target.position.set(...fit.center)
   sun.position.set(fit.center[0] + SUN_OFFSET[0], fit.center[1] + SUN_OFFSET[1], fit.center[2] + SUN_OFFSET[2])
+  refreshShadows()
 }
 fitSunTo(loadedMap)
 const sky = createSky(scene, sun.position)
@@ -113,7 +118,7 @@ camera.rotation.order = 'YXZ'
 initInput(renderer.domElement)
 
 // ── Map mesh ──────────────────────────────────────────────────────────────────
-let mapMesh = buildMapMesh(loadedMap)
+let mapMesh = buildMapMesh(loadedMap, refreshShadows)
 scene.add(mapMesh)
 const night = createNight(scene, hemi, sun, sky, loadedMap.name)
 
@@ -137,7 +142,7 @@ function showMap(map: LoadedMap): void {
   loadedMap = map
   scene.remove(mapMesh)
   disposeMapMesh(mapMesh)
-  mapMesh = buildMapMesh(map)
+  mapMesh = buildMapMesh(map, refreshShadows)
   scene.add(mapMesh)
   fitSunTo(map)
   night.setMap(map.name)
@@ -761,7 +766,8 @@ sessionP.then(session => {
 
   // Bia + HUD
   const dummies = new URLSearchParams(location.search).has('dummies')
-  const targets = dummies ? createTargets(scene) : []   // shooting dummies: only with ?dummies=1
+  const targets = dummies ? createTargets(scene) : []
+  if (dummies) refreshShadows()   // shooting dummies: only with ?dummies=1
   const boards = dummies ? createBoards(scene) : []   // shooting-range boards 10/20/40m; Shift+R clears bullet marks
   if (dummies) document.addEventListener('keydown', e => { if (e.code === 'KeyR' && e.shiftKey) hudRef?.clearBulletHoles() })
   const hud     = initHUD(scene)

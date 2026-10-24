@@ -24,6 +24,7 @@ const TILE = 1.0  // metres per texture tile
 
 const RAMP_COLOR = 0x7a8a7a   // ramp colour (kept like the old grey-green checker tiles)
 const CRATE_MODEL = '/models/crate.glb'
+const MODEL_ANISOTROPY = 8
 
 function makeMat(tex: THREE.Texture, ru: number, rv: number, color: THREE.ColorRepresentation = 0xffffff): THREE.MeshLambertMaterial {
   const t = tex.clone()
@@ -68,7 +69,8 @@ function rampLen(r: MapRamp): number {
   return Math.sqrt(dx * dx + dy * dy + dz * dz)
 }
 
-export function buildMapMesh(map: LoadedMap): THREE.Group {
+/** `onChange` runs whenever a late-loading part (crate model, map glb) joins the group, so the caller can refresh the static shadow map */
+export function buildMapMesh(map: LoadedMap, onChange?: () => void): THREE.Group {
   const group = new THREE.Group()
   const baseTex = makeGridTexture()
 
@@ -102,6 +104,7 @@ export function buildMapMesh(map: LoadedMap): THREE.Group {
         group.remove(slot)
         slot.geometry.dispose()
       }
+      onChange?.()
     }).catch(err => console.warn(`mapMesh: cannot load ${CRATE_MODEL}, keeping the placeholder box`, err))
   }
 
@@ -131,25 +134,27 @@ export function buildMapMesh(map: LoadedMap): THREE.Group {
     group.add(mesh)
   }
 
-  if (map.model) addModel(group, map.model)
+  if (map.model) addModel(group, map.model, onChange)
 
   return group
 }
 
 /** A modelled map (plan/tools-model-import.md): the glb is already in game coordinates, so it is added as is. It arrives later than the boxes, once loaded. */
-function addModel(group: THREE.Group, url: string): void {
+function addModel(group: THREE.Group, url: string, onChange?: () => void): void {
   new GLTFLoader().loadAsync(url).then(gltf => {
     if (group.userData.disposed) { disposeMapMesh(gltf.scene as unknown as THREE.Group); return }   // the room's map replaced this one while it was loading
     gltf.scene.traverse(o => {
       if (!(o instanceof THREE.Mesh)) return
       // The game lights everything with Lambert materials (one look for all maps); keep only the picture of the model's PBR material
       const src = o.material as THREE.MeshStandardMaterial
+      if (src.map) src.map.anisotropy = MODEL_ANISOTROPY   // sharp floors at grazing angles (three clamps it to what the GPU supports)
       o.material = new THREE.MeshLambertMaterial({ map: src.map, side: src.side })
       src.dispose()
       o.castShadow = true
       o.receiveShadow = true
     })
     group.add(gltf.scene)
+    onChange?.()
   }).catch(err => console.warn(`mapMesh: cannot load ${url}`, err))
 }
 
