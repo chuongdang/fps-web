@@ -59,7 +59,12 @@ describe('NetPlayer', () => {
     expect(n.id).toBe(7)
     const back = decode(encode({ t: MsgType.Snapshot, tick: 1, serverTime: 2, ack: 0, players: [n] }))
     if (back.t !== MsgType.Snapshot) throw new Error('wrong type')
-    expect(netToState(back.players[0]!)).toEqual(s)
-    expect(netToState(n)).toEqual(s)
+    // on the wire the numbers are float32 (snapshotCodec.ts): the same state within float32 precision, flags exactly
+    const wire = netToState(back.players[0]!)
+    expect({ ...wire, pos: undefined, vel: undefined, yaw: undefined, pitch: undefined, slideTimer: undefined, slideCooldown: undefined })
+      .toEqual({ ...s, pos: undefined, vel: undefined, yaw: undefined, pitch: undefined, slideTimer: undefined, slideCooldown: undefined })
+    for (let i = 0; i < 3; i++) { expect(wire.pos[i]).toBeCloseTo(s.pos[i]!, 5); expect(wire.vel[i]).toBeCloseTo(s.vel[i]!, 5) }
+    for (const k of ['yaw', 'pitch', 'slideTimer', 'slideCooldown'] as const) expect(wire[k]).toBeCloseTo(s[k], 6)
+    expect(netToState(n)).toEqual(s)   // without the wire nothing is rounded
   })
 })

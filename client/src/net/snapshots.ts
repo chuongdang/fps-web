@@ -42,7 +42,7 @@ export function attachSnapshots(
     }
     const me = msg.players.find(p => p.id === yourId)
     store.self = me ? netToState(me) : null
-    store.wpn = msg.wpn ?? null
+    store.wpn = msg.wpn ?? store.wpn   // the server leaves out a weapon state that has not changed since the last snapshot
     store.money = msg.money ?? store.money
     store.loadout = msg.loadout ?? store.loadout
     store.hp = me?.hp ?? store.hp

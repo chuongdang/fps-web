@@ -8,7 +8,7 @@ import type { SkinId } from "./characterRig";
 import { GrenadeAnim, pathSegment, type LogicPhase } from "./grenadeAnim";
 import { GRENADE_ID, SMOKE_ID, isGrenadeId } from "@fps/shared";
 import { tintSmoke } from "./nadeTint";
-import { poses, weaponPose, getAnchor, scanModelAnchors, onPosesChange, colorOf, type Vec3 } from "./poses";
+import { poses, weaponPose, armsOf, getAnchor, scanModelAnchors, onPosesChange, colorOf, type Vec3 } from "./poses";
 
 // ── Constants ────────────────────────────────────────────────────────────────────
 const GUN_DEFAULT_POS = new THREE.Vector3(0.28, -0.3, -0.45);
@@ -19,12 +19,17 @@ const ANIM_HALF = 0.15; // 0.15 s each way
 const KICK_BACK = 0.04; // gun recoils 4cm
 const KICK_PITCH = (3 * Math.PI) / 180; // muzzle tilts up 3°
 const KICK_TAU = 0.03; // recovery time constant (~80ms to near 0)
-// Knife slash (melee only): wind up to the right, sweep diagonally across to the left, recover. Keys: [t 0..1, x, y, z (m, camera space), pitch, yaw, roll (deg)]
-const SWING_S = 0.32; // total slash time, shorter than the knife's fireIntervalMs so it is finished before the next one
+// Knife slash (melee only): the whole hold (knife + hand) swings about the right ELBOW (taken from the arm when the slash starts), so the hand sweeps an arc at a
+// nearly constant distance from the shoulder and the arm never has to stretch or flip: wind up (hand up and out, blade tilted back), sweep diagonally across to the
+// left and down, follow through, recover. Keys: [t 0..1, x, y, z (m, camera space: a small lunge), pitch, yaw, roll (deg, camera axes, rotation about the elbow)].
+// pitch + = hand up, yaw + = hand to the left. Interpolated with a Catmull-Rom spline so the hand does not stop at every key.
+const SWING_S = 0.34; // total slash time, shorter than the knife's fireIntervalMs so it is finished before the next one
 const SWING_KEYS: readonly (readonly number[])[] = [
   [0, 0, 0, 0, 0, 0, 0],
-  [0.3, 0.1, 0.06, 0.04, 15, 30, -35],
-  [0.6, -0.22, -0.08, -0.12, -20, -45, 40],
+  [0.28, 0, 0, 0.02, 9, -7, -10],
+  [0.46, 0, 0, -0.03, 2, 3, 2],
+  [0.64, 0, 0, -0.06, -8, 18, 12],
+  [0.82, 0, 0, -0.02, -3, 7, 4],
   [1, 0, 0, 0, 0, 0, 0],
 ];
 const BOB_FREQ = 1.3; // rad per metre travelled
@@ -298,7 +303,7 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
   // Hands from the character model (C.6): once available they replace the block arms; the block arms still solve IK (hidden) for the F9 panel and as a fallback when the glb fails to load
   const fp = new FpArms();
   scene.add(fp.root);
-  fp.setSkin('saber');   // default set; main.ts switches it to the room's character set
+  fp.setSkin('copsTerrorists');   // default set; main.ts switches it to the room's character set
   let blockArms = false;   // blocky character set (robot): the viewmodel arms are block arms too
   const fpActive = () => fp.ready && !blockArms;
   const shoulderR = new THREE.Vector3(), shoulderL = new THREE.Vector3();
@@ -389,6 +394,8 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
   let kick = 0; // 1 right after firing, recovers to 0
   let swingT = -1; // knife slash: seconds since it started, -1 = not swinging
   const swing = [0, 0, 0, 0, 0, 0]; // current slash offset: x, y, z (m), pitch, yaw, roll (deg)
+  const swingPivot = new THREE.Vector3(0.3, -0.3, -0.2); // the right elbow (camera space) when the slash started; the fallback is a typical hold
+  const _swingQ = new THREE.Quaternion(), _swingE = new THREE.Euler();
   let bobPhase = 0;
   let bobAmp = 0;
   let moveSpeed = 0;
@@ -461,7 +468,11 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
   }
 
   function onFire(melee = false) {
-    if (melee) { swingT = 0; return; }   // knife: a slash instead of the gun recoil
+    if (melee) {   // knife: a slash instead of the gun recoil
+      swingT = 0;
+      if (!(fpActive() && fp.elbowR(swingPivot))) swingPivot.copy(armR.elbowPos);
+      return;
+    }
     kick = 1;
     // Muzzle position in gunGroup coordinates
     const m = currentMesh.getObjectByName("muzzle");
@@ -530,8 +541,12 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
         let i = 0;
         while (i < SWING_KEYS.length - 2 && u >= SWING_KEYS[i + 1]![0]!) i++;
         const k0 = SWING_KEYS[i]!, k1 = SWING_KEYS[i + 1]!;
-        const w = smooth((u - k0[0]!) / (k1[0]! - k0[0]!));
-        for (let c = 0; c < 6; c++) swing[c] = k0[c + 1]! + (k1[c + 1]! - k0[c + 1]!) * w;
+        const km = SWING_KEYS[Math.max(i - 1, 0)]!, kn = SWING_KEYS[Math.min(i + 2, SWING_KEYS.length - 1)]!;
+        const w = (u - k0[0]!) / (k1[0]! - k0[0]!), w2 = w * w, w3 = w2 * w;
+        for (let c = 1; c < 7; c++) {   // Catmull-Rom
+          const p0 = km[c]!, p1 = k0[c]!, p2 = k1[c]!, p3 = kn[c]!;
+          swing[c - 1] = 0.5 * (2 * p1 + (p2 - p0) * w + (2 * p0 - 5 * p1 + 4 * p2 - p3) * w2 + (3 * p1 - p0 - 3 * p2 + p3) * w3);
+        }
       }
     }
 
@@ -588,11 +603,16 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
       );
       const hip = 1 - a;   // the poses.json gun angle fades out while aiming (gun body straight)
       gunGroup.rotation.set(
-        pose.gunRotDeg[0] * DEG * hip + (pose.adsRotDeg?.[0] ?? 0) * DEG * a + KICK_PITCH * kick * kickMul - RELOAD_TILT * r + tiltPitch + swing[3]! * DEG,
-        pose.gunRotDeg[1] * DEG * hip + (pose.adsRotDeg?.[1] ?? 0) * DEG * a + swing[4]! * DEG,
-        pose.gunRotDeg[2] * DEG * hip + (pose.adsRotDeg?.[2] ?? 0) * DEG * a + tiltRoll + swing[5]! * DEG,
+        pose.gunRotDeg[0] * DEG * hip + (pose.adsRotDeg?.[0] ?? 0) * DEG * a + KICK_PITCH * kick * kickMul - RELOAD_TILT * r + tiltPitch,
+        pose.gunRotDeg[1] * DEG * hip + (pose.adsRotDeg?.[1] ?? 0) * DEG * a,
+        pose.gunRotDeg[2] * DEG * hip + (pose.adsRotDeg?.[2] ?? 0) * DEG * a + tiltRoll,
       );
       gunGroup.scale.setScalar(pose.scale);
+      if (swingT >= 0) {   // knife slash: turn the whole hold (the hand anchor is part of it) about the elbow, in camera axes
+        _swingQ.setFromEuler(_swingE.set(swing[3]! * DEG, swing[4]! * DEG, swing[5]! * DEG));
+        gunGroup.position.sub(swingPivot).applyQuaternion(_swingQ).add(swingPivot);
+        gunGroup.quaternion.premultiply(_swingQ);
+      }
     }
 
     // Hands: solve IK AFTER all effects are applied to the gun (this order avoids the hand lagging the gun by one frame)
@@ -653,7 +673,7 @@ export function createViewmodel(aspect: number): ViewmodelHandle {
       fp.setVisible(showArms)
       fp.setLeftVisible(leftOn)
       fp.place()
-      fp.solve(targetR, leftOn ? targetL : null, gunGroup.quaternion, nadeRotR, nadeRotL)
+      fp.solve(targetR, leftOn ? targetL : null, gunGroup.quaternion, nadeRotR, nadeRotL, armsOf(currentWeapon, 'first'))
     }
     updateMag(rp);
     armR.setReachedColor(dbg.showReach);

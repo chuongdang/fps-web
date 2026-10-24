@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { solveTwoBone } from './blockArm'
-import { poses, type FingerName, type Vec3 } from './poses'
+import { poses, type ArmAdjust, type FingerName, type Vec3 } from './poses'
 
 // Arm using the model's real bones (plan 11, C.5): 2-joint IK rotating upper/fore, orients the hand to the gun,
 // curls the fingers per poses.json:grip. All coordinates/quaternions of solve() are in world space. No allocation in solve().
@@ -14,6 +14,7 @@ const _dirCur = new THREE.Vector3(), _dirNew = new THREE.Vector3(), _fing = new 
 const _qd = new THREE.Quaternion(), _wq = new THREE.Quaternion(), _pq = new THREE.Quaternion(), _tq = new THREE.Quaternion()
 const _hq = new THREE.Quaternion(), _off = new THREE.Quaternion(), _eul = new THREE.Euler(), _grip = new THREE.Quaternion()
 const _m = new THREE.Matrix4(), _axis = new THREE.Vector3()
+const _shift = new THREE.Vector3(), _adjQ = new THREE.Quaternion(), _spreadAxis = new THREE.Vector3(), _spreadQ = new THREE.Quaternion()
 const E1C = new THREE.Vector3(0, 0, -1)   // the gun's finger direction, pointing -Z
 
 /** New world quaternion of the bone such that the vector `from` (world) rotates onto `to`, returned in the bone's local form (blended by weight). */
@@ -23,6 +24,16 @@ function rotateBoneTo(bone: THREE.Object3D, from: THREE.Vector3, to: THREE.Vecto
   bone.parent!.getWorldQuaternion(_pq)
   _tq.copy(_pq).invert().multiply(_wq)
   if (weight < 1) bone.quaternion.slerp(_tq, weight); else bone.quaternion.copy(_tq)
+  bone.updateWorldMatrix(false, true)
+}
+
+/** Roll `bone` about the world axis (unit) by deg, keeping its position: only the bone's own orientation (and its children) turn. */
+function rollBone(bone: THREE.Object3D, axis: THREE.Vector3, deg: number): void {
+  if (deg === 0) return
+  _qd.setFromAxisAngle(axis, deg * DEG)
+  bone.getWorldQuaternion(_wq).premultiply(_qd)
+  bone.parent!.getWorldQuaternion(_pq)
+  bone.quaternion.copy(_tq.copy(_pq).invert().multiply(_wq))
   bone.updateWorldMatrix(false, true)
 }
 
@@ -116,17 +127,21 @@ export class SkeletonArm {
   /**
    * target = desired palm centre position (world); targetQuat = orientation of the anchor/gun; pole = the point the elbow bends toward.
    * weight 0..1 blends between the animation pose and IK. Call after the mixer/spine/gun have updated matrixWorld.
+   * adj = this gun's adjustment of this arm (poses ArmAdjust): palm offset / rotation, upper-arm and forearm twist, wrist. (adj.elbow is added to `pole` by the caller.)
    */
-  solve(target: THREE.Vector3, targetQuat: THREE.Quaternion, pole: THREE.Vector3, weight: number): { reached: boolean } {
+  solve(target: THREE.Vector3, targetQuat: THREE.Quaternion, pole: THREE.Vector3, weight: number, adj?: ArmAdjust): { reached: boolean } {
     if (weight <= 0) return { reached: true }
     const sc = this.upper.getWorldScale(_fing).x
     this.lenA = this.lenA0 * sc; this.lenB = this.lenB0 * sc
     this.palmLen = this.palm0 * sc * poses.character.palmCenterFrac
     const o = this.offsetDeg()
     _off.setFromEuler(_eul.set(o[0] * DEG, o[1] * DEG, o[2] * DEG, 'XYZ'))
+    if (adj) _off.multiply(_adjQ.setFromEuler(_eul.set(adj.palmRotDeg[0] * DEG, adj.palmRotDeg[1] * DEG, adj.palmRotDeg[2] * DEG, 'XYZ')))
     const gunHandQ = _hq.copy(targetQuat).multiply(_off)               // standard hand frame in world space
     _fing.copy(E1C).applyQuaternion(gunHandQ)                          // finger direction in world space
-    _wrist.copy(target).addScaledVector(_fing, -this.palmLen)          // wrist = palm centre moved back along the fingers
+    _wrist.copy(target)
+    if (adj) _wrist.add(_shift.set(adj.palmPos[0], adj.palmPos[1], adj.palmPos[2]).applyQuaternion(targetQuat))   // the palm sits off the anchor, in gun space
+    _wrist.addScaledVector(_fing, -this.palmLen)                       // wrist = palm centre moved back along the fingers
     // 1) upper: shoulder -> elbow
     this.upper.updateWorldMatrix(true, true)
     this.upper.getWorldPosition(_sh); this.fore.getWorldPosition(_el0)
@@ -134,32 +149,45 @@ export class SkeletonArm {
     _dirCur.subVectors(_el0, _sh).normalize()
     _dirNew.subVectors(_elN, _sh).normalize()
     rotateBoneTo(this.upper, _dirCur, _dirNew, weight)
+    if (adj) rollBone(this.upper, _dirNew, adj.upperTwistDeg * weight)
     // 2) fore: elbow -> wrist
     this.fore.getWorldPosition(_el0); this.hand.getWorldPosition(_wr0)
     _dirCur.subVectors(_wr0, _el0).normalize()
     _dirNew.subVectors(_wrist, _el0).normalize()
     rotateBoneTo(this.fore, _dirCur, _dirNew, weight)
+    if (adj) rollBone(this.fore, _dirNew, adj.foreTwistDeg * weight)
     // 3) hand: world orientation = standard frame x (standard frame -> hand bone)
     _wq.copy(gunHandQ).multiply(this.qCanon).multiply(this.basisInHandInv)
     this.fore.getWorldQuaternion(_pq)
     _tq.copy(_pq).invert().multiply(_wq)
     if (weight < 1) _tq.copy(this.hand.quaternion).slerp(_tq, weight)
     this.hand.quaternion.copy(_tq)
+    if (adj) this.hand.quaternion.multiply(_adjQ.setFromEuler(_eul.set(adj.wristDeg[0] * DEG, adj.wristDeg[1] * DEG, adj.wristDeg[2] * DEG, 'XYZ')))   // pivots the palm + fingers at the wrist
     this.hand.updateWorldMatrix(false, true)
     this.hand.getWorldPosition(_wr0)
     this.reached = _wr0.distanceTo(_wrist) < 0.03
     return { reached: this.reached }
   }
 
-  /** Curls the fingers per grip (degrees, 3 joints per finger) scaled by weight, added on top of the bones' current pose. */
-  applyGrip(weight: number): void {
+  /**
+   * Curls the fingers per grip (degrees, 3 joints per finger) scaled by weight, added on top of the bones' current pose.
+   * adj: this gun's extra curl per joint and knuckle spread per finger; a `manual` finger skips the shared grip and uses only its own numbers.
+   */
+  applyGrip(weight: number, adj?: ArmAdjust): void {
     if (weight <= 0) return
     const g = poses.grip, set = this.side === 'R' ? g.R : g.L
     _axis.set(g.axis === 'x' ? 1 : 0, g.axis === 'y' ? 1 : 0, g.axis === 'z' ? 1 : 0)
+    _spreadAxis.set(g.axis === 'x' ? 0 : 1, 0, g.axis === 'x' ? 1 : 0)       // the knuckle's sideways axis: the bone's z when the curl is about x (x otherwise)
     for (const name of FINGER_NAMES) {
-      const bones = this.fingers[name], deg = set[name]
+      const bones = this.fingers[name], deg = set[name], extra = adj?.fingers[name], shared = adj?.manual.includes(name) ? 0 : 1
+      const spread = adj?.spread[name]
+      // The left and right hand bones are not mirrored (both have z pointing down), so one sign would fan the fingers in on one hand and out on the other: normalise it
+      // so that positive always fans out (a finger away from the thumb side, the thumb away from the fingers). Measured on tr_guerilla.glb; see poseEditor / skeletonArm.test.
+      if (spread) bones[0]!.quaternion.multiply(_spreadQ.setFromAxisAngle(_spreadAxis, spread * DEG * weight * (this.side === 'L' ? -1 : 1) * (name === 'thumb' ? -1 : 1)))
       for (let i = 0; i < bones.length && i < 3; i++) {
-        _grip.setFromAxisAngle(_axis, deg[i]! * DEG * weight)
+        const a = deg[i]! * shared + (extra?.[i] ?? 0)
+        if (a === 0) continue
+        _grip.setFromAxisAngle(_axis, a * DEG * weight)
         bones[i]!.quaternion.multiply(_grip)
       }
     }

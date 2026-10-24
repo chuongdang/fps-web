@@ -9,7 +9,6 @@ export default {
   'renderB.zombie.screamer': 'Screamer zombie',
   'renderB.zombie.boss': 'Zombie Boss',
 
-  'renderB.charset.blocky': 'Cops & Terrorists',
   'renderB.charset.robot': 'Robot (blocky)',
-  'renderB.charset.saberDesert': 'Desert Sandstorm',
+  'renderB.charset.copsTerrorists': 'Cops & Terrorists',
 } as Record<string, string>

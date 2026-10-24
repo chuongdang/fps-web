@@ -21,10 +21,25 @@ export interface GrenadeFirst {
   pinAttachT?: number          // t of the pin-pull path when the pin switches to the left hand (default 0.75)
   handRotDegR?: Vec3; handRotDegL?: Vec3   // extra hand rotation (degrees) relative to the grenade orientation
 }
+// Per-gun, per-view, per-hand adjustment of the skinned arm (SkeletonArm.solve / applyGrip), on top of the shared settings (character.handRot*, first.armsPole*, grip).
+// Everything is 0 / empty by default. Edited in the F9 "Arms" tab; read through armsOf().
+export interface ArmAdjust {
+  elbow: Vec3                 // metres added to the elbow pole (same space as the shared pole: camera space in 1st person, character space in 3rd): swings the elbow
+  upperTwistDeg: number       // roll of the upper arm about its own axis (the elbow stays: only the skin twists)
+  foreTwistDeg: number        // roll of the forearm about its own axis (the hand keeps its orientation: the skin twists between elbow and wrist)
+  palmPos: Vec3               // metres, gun space (x right, y up, z towards the stock): moves the palm target away from the hand anchor
+  palmRotDeg: Vec3            // degrees [pitch, yaw, roll], gun space: turns the hand about the palm on top of character.handRotOffsetDeg
+  wristDeg: Vec3              // degrees, hand-bone axes (x = flex, y = twist, z = side deviation), applied after the hand is oriented: the palm and fingers pivot at the wrist
+  fingers: Partial<Record<FingerName, Vec3>>   // degrees per joint (knuckle out), added to the shared grip curl (or the whole curl of a manual finger)
+  spread: Partial<Record<FingerName, number>>  // degrees, the knuckle swings sideways; positive fans out (a finger away from the thumb side, the thumb away from the fingers)
+  manual: FingerName[]        // fingers that ignore the shared grip: only fingers[f] / spread[f] pose them
+}
+export interface ArmsCfg { R: ArmAdjust; L: ArmAdjust }
+export type ArmView = 'first' | 'third'
 export interface WeaponPose {
   anchors: Partial<Record<AnchorName, Vec3>>
-  third: { hold: Hold; gunPos: Vec3; gunRotDeg: Vec3; adsGunPos?: Vec3; adsGunRotDeg?: Vec3; throwStartS?: number; releaseS?: number; throwRate?: number }   // last 3 fields: throw clip (seconds into the clip at start / at release, playback rate)
-  first: { hold: Hold; gunPos?: Vec3; gunRotDeg: Vec3; scale: number; adsEyeDist?: number; adsRotDeg?: Vec3; grenade?: GrenadeFirst }   // adsEyeDist: the front sight is this many metres from the eye when aiming; adsRotDeg: extra rotation at full aim
+  third: { hold: Hold; gunPos: Vec3; gunRotDeg: Vec3; adsGunPos?: Vec3; adsGunRotDeg?: Vec3; throwStartS?: number; releaseS?: number; throwRate?: number; arms?: ArmsCfg }   // last 3 fields: throw clip (seconds into the clip at start / at release, playback rate)
+  first: { hold: Hold; gunPos?: Vec3; gunRotDeg: Vec3; scale: number; adsEyeDist?: number; adsRotDeg?: Vec3; grenade?: GrenadeFirst; arms?: ArmsCfg }   // adsEyeDist: the front sight is this many metres from the eye when aiming; adsRotDeg: extra rotation at full aim
 }
 export interface ReloadKey { t: number; to: 'hand_l' | 'mag'; offset?: Vec3 }
 export type FingerName = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky'
@@ -64,7 +79,7 @@ const DEFAULTS = {
     first: { upperLen: 0.45, foreLen: 0.47, thickness: 0.075, handSize: 0.085, sleeveToElbow: true },
   },
   third: { shoulderR: [0.25, 1.4, 0], shoulderL: [-0.25, 1.4, 0], aimPivot: [0, 1.35, 0], poleR: [0.35, -0.55, 0.25], poleL: [-0.35, -0.55, 0.05] },
-  first: { fov: 54, shoulderR: [0.22, -0.3, 0.12], shoulderL: [-0.2, -0.3, 0.1], poleR: [0.45, -0.5, 0.2], poleL: [-0.45, -0.5, 0.1], armsRootOffset: [0, -0.3, 0], armsRootRotDeg: [0, 0, 0], armsScale: 1.4, armsMaxExtension: 0.92, armsPoleR: [0.4, -0.5, 0.3], armsPoleL: [-0.4, -0.5, 0.3] },
+  first: { fov: 54, shoulderR: [0.22, -0.3, 0.12], shoulderL: [-0.2, -0.3, 0.1], poleR: [0.45, -0.5, 0.2], poleL: [-0.45, -0.5, 0.1], armsRootOffset: [0, -0.3, 0], armsRootRotDeg: [0, 0, 0], armsScale: 1, armsMaxExtension: 0.92, armsPoleR: [0.4, -0.5, 0.3], armsPoleL: [-0.4, -0.5, 0.3] },
   character: {
     crouchDrop: 0, crouchWalkDrop: 0.25, aimPivotBone: 'mixamorigSpine2', spinePitchBones: ['mixamorigSpine', 'mixamorigSpine1', 'mixamorigSpine2'],
     spinePitchLimitDeg: 60, headPitchShare: 0.3, aimPivotOffset: [0, 0.08, 0], poleR: [0.35, -0.6, 0.3], poleL: [-0.35, -0.6, 0.1],
@@ -129,6 +144,9 @@ export function loadPoses(json: unknown): Poses {
     const sw = (src && typeof src === 'object' ? src as Record<string, any> : {})
     wp.anchors = { ...(sw.anchors ?? {}) }
     if (sw.first?.gunPos) wp.first.gunPos = sw.first.gunPos
+    // own copies of the arm adjustments: the editor edits them in place, "Reset to file" must still see the file
+    if (sw.first?.arms) wp.first.arms = structuredClone(sw.first.arms) as ArmsCfg
+    if (sw.third?.arms) wp.third.arms = structuredClone(sw.third.arms) as ArmsCfg
     weapons[key] = wp
   }
   p.weapons = weapons
@@ -143,15 +161,35 @@ const listeners = new Set<() => void>()
 if (import.meta.env?.DEV) Object.assign(globalThis, { __poses: poses, __notifyPoses: () => notifyPosesChanged() })
 export function onPosesChange(fn: () => void): () => void { listeners.add(fn); return () => { listeners.delete(fn) } }
 export function notifyPosesChanged(): void { for (const fn of listeners) fn() }
+// Called after the whole `poses` content was swapped (file hot-reload, "Reset to file"): the F9 panel holds the old objects and must be drawn again
+const replacedListeners = new Set<() => void>()
+export function onPosesReplaced(fn: () => void): () => void { replacedListeners.add(fn); return () => { replacedListeners.delete(fn) } }
 export function replacePoses(json: unknown): void {
   fileJson = json
   const next = loadPoses(json)
   for (const k of Object.keys(next) as (keyof Poses)[]) (poses as any)[k] = next[k]
   notifyPosesChanged()
+  for (const fn of replacedListeners) fn()
 }
 /** Every grenade type (HE, smoke) shares the M67 model + pose */
 export function canonWeaponId(id: number): number { return isGrenadeId(id) ? GRENADE_ID : id }
 export function weaponPose(id: number): WeaponPose { return poses.weapons[WEAPON_KEYS[canonWeaponId(id)] ?? 'ak47']! }
+export const armAdjustDefault = (): ArmAdjust => ({
+  elbow: [0, 0, 0], upperTwistDeg: 0, foreTwistDeg: 0, palmPos: [0, 0, 0], palmRotDeg: [0, 0, 0], wristDeg: [0, 0, 0], fingers: {}, spread: {}, manual: [],
+})
+const armsComplete = new WeakSet<ArmsCfg>()   // already completed with defaults: armsOf runs every frame and must not allocate
+/** The gun's arm adjustments for a view, created / completed with zeros in place (so the editor can edit them and "Copy this gun" exports them). */
+export function armsOf(id: number, view: ArmView): ArmsCfg {
+  const w = weaponPose(id)[view]
+  const a = (w.arms ??= { R: armAdjustDefault(), L: armAdjustDefault() })
+  if (armsComplete.has(a)) return a
+  for (const side of ['R', 'L'] as const) {
+    const d = armAdjustDefault(), cur = (a[side] ??= d) as unknown as Record<string, unknown>
+    for (const k of Object.keys(d) as (keyof ArmAdjust)[]) if (cur[k] === undefined) cur[k] = d[k]
+  }
+  armsComplete.add(a)
+  return a
+}
 
 if (import.meta.hot) {
   import.meta.hot.accept('./poses.json', mod => { if (mod) replacePoses((mod as unknown as { default: unknown }).default) })

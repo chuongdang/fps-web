@@ -45,9 +45,14 @@ export function setOverlayDim(dim: boolean): void {
   _overlay.style.textShadow = dim ? '' : '0 0 6px #000, 0 0 3px #000'
 }
 
+let _overlayHidden = false
+function _syncOverlay(): void { _overlay.style.display = _locked || _overlayHidden ? 'none' : 'flex' }
+/** The pose editor (F9) hides the "Click to play" layer while it is open (it releases the pointer lock, which would bring it back) */
+export function setOverlayHidden(hide: boolean): void { _overlayHidden = hide; _syncOverlay() }
+
 function _setLocked(v: boolean) {
   _locked = v
-  _overlay.style.display = v ? 'none' : 'flex'
+  _syncOverlay()
 }
 
 // ── Touch start flow ──────────────────────────────────────────────────────────
@@ -85,7 +90,7 @@ function _refreshTouch(): void {
   _portrait = isPortrait(window.innerWidth, window.innerHeight)
   _locked = _touchStarted && !_portrait
   _overlay.textContent = t(_portrait ? 'hud.overlay.rotate' : 'hud.overlay.tapToPlay')
-  _overlay.style.display = _locked ? 'none' : 'flex'
+  _syncOverlay()
   _touchUi?.setActive(_locked)
   _syncCursor()
 }

@@ -21,12 +21,15 @@ export function connectWebSocket(url: string): Promise<Transport> {
   })
 }
 
-// Netsim is only enabled with ?lat= or ?jit= in the URL (dev)
+// Netsim is only enabled with ?lat=, ?jit= or ?stall= in the URL (dev). ?stall=300 freezes the connection for 300 ms every ?stallEvery= ms (default 5000),
+// like a lost packet on TCP: what is sent meanwhile arrives in one burst.
 export function maybeNetsim(t: Transport, search = location.search): Transport {
   const q = new URLSearchParams(search)
   const latencyMs = Number(q.get('lat') ?? 0) || 0
   const jitterMs = Number(q.get('jit') ?? 0) || 0
-  if (latencyMs <= 0 && jitterMs <= 0) return t
-  console.log(`[netsim] lat=${latencyMs}ms/direction jit=±${jitterMs}ms`)
-  return withNetsim(t, { latencyMs, jitterMs })
+  const stallMs = Number(q.get('stall') ?? 0) || 0
+  const stallEveryMs = stallMs > 0 ? Number(q.get('stallEvery') ?? 5000) || 5000 : 0
+  if (latencyMs <= 0 && jitterMs <= 0 && stallMs <= 0) return t
+  console.log(`[netsim] lat=${latencyMs}ms/direction jit=±${jitterMs}ms` + (stallMs > 0 ? ` stall=${stallMs}ms every ${stallEveryMs}ms` : ''))
+  return withNetsim(t, { latencyMs, jitterMs, stallMs, stallEveryMs })
 }

@@ -45,6 +45,9 @@ export function handleConnection(ctx: ServerContext, transport: Transport): void
       if (player && typeof msg.rtt === 'number' && Number.isFinite(msg.rtt)) player.pingMs = Math.min(999, Math.max(0, msg.rtt))
     } else if (msg.t === MsgType.Inputs) {
       if (player) enqueueCmds(player, msg.cmds, ctx.now())
+    } else if (msg.t === MsgType.RtcOffer) {
+      // This server has no WebRTC (a server that has it handles the offer one layer down, rtcTransport.ts): say so, the client then stays on the WebSocket without waiting
+      transport.send({ t: MsgType.RtcAnswer, error: 'disabled' })
     } else if (msg.t === MsgType.SetDebug) {
       if (player) player.debugShots = msg.shots === true
     } else if (msg.t === MsgType.Buy) {

@@ -47,10 +47,10 @@ describe('procedural animation', () => {
   }
 
   it('standing still: legs do not swing; running: legs swing in opposition, following distance travelled', () => {
-    const idle = getCharacterSet('copRobber').build('A')
+    const idle = getCharacterSet('copsTerrorists').build('A')
     run(idle, 0, 60)
     expect(Math.abs(idle.legL.rotation.x)).toBeLessThan(1e-6)
-    const moving = getCharacterSet('copRobber').build('A')
+    const moving = getCharacterSet('copsTerrorists').build('A')
     let peak = 0
     const st = makeAnimState()
     let z = 0
@@ -70,19 +70,19 @@ describe('procedural animation', () => {
       for (let i = 0; i < 240; i++) { z -= speed / 60; updateAnim(rig, st, { ...base, z }); peak = Math.max(peak, Math.abs(rig.legL.rotation.x)) }
       return peak
     }
-    expect(peakOf('copRobber', 8.5)).toBeGreaterThan(peakOf('copRobber', 2))
-    expect(peakOf('robot', 8.5)).toBeLessThan(peakOf('copRobber', 8.5))
+    expect(peakOf('copsTerrorists', 8.5)).toBeGreaterThan(peakOf('copsTerrorists', 2))
+    expect(peakOf('robot', 8.5)).toBeLessThan(peakOf('copsTerrorists', 8.5))
   })
 
   it('teleport (respawn) does not count as running', () => {
-    const rig = getCharacterSet('copRobber').build('A'); const st = makeAnimState()
+    const rig = getCharacterSet('copsTerrorists').build('A'); const st = makeAnimState()
     updateAnim(rig, st, base)
     updateAnim(rig, st, { ...base, x: 40 })
     expect(st.phase).toBe(0)
   })
 
   it('slide: leans back, legs stretched forward; jump: legs tucked; crouch: leans forward', () => {
-    const settle = (extra: Partial<AnimInput>) => { const rig = getCharacterSet('copRobber').build('A'); const st = makeAnimState(); for (let i = 0; i < 60; i++) updateAnim(rig, st, { ...base, ...extra }); return rig }
+    const settle = (extra: Partial<AnimInput>) => { const rig = getCharacterSet('copsTerrorists').build('A'); const st = makeAnimState(); for (let i = 0; i < 60; i++) updateAnim(rig, st, { ...base, ...extra }); return rig }
     const slide = settle({ sliding: true })
     expect(slide.upper.rotation.x).toBeGreaterThan(0.4)
     expect(slide.legL.rotation.x).toBeGreaterThan(0.8)

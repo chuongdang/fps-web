@@ -8,16 +8,15 @@ import { SkeletonArm, FINGER_NAMES, type FingerBones } from './skeletonArm'
 import { CLIP_NAMES, SLOTS, clipRate, locoTargets, makeSlotWeights, slotClip, type Slot } from './locomotion'
 import { Z_CLIPS, Z_DEATH, ZOMBIE_ATTACK, ZOMBIE_JUMP_HOLD, ZOMBIE_RUN_BLEND, ZOMBIE_RUN_START, fitRate, zombieClipRate, zombieSlotClip, type ZombieAttackKind } from './zombieAnim'
 
-// Skeletal characters (plan 11, C.4): cop.glb / robber.glb share the Mixamo animation set.
+// Skeletal characters (plan 11, C.4): ct_sas.glb / tr_guerilla.glb share the Mixamo animation set.
 // Clips are chosen from the interpolated velocity, the upper body aims by pitch (rotating the spine bones), and the gun lives in `aimPivot`.
 // The model faces +Z (glTF standard), so it is rotated by π to make yaw = 0 face −Z as per the project convention.
 // Each skeletal character set = one "skin" (same skeleton + animations, different model/texture); a set not listed here uses the blocky character.
-export type SkinId = 'classic' | 'saber'
+export type SkinId = 'copsTerrorists'
 const FILES: Record<SkinId, Record<TeamId, string>> = {
-  classic: { A: '/models/characters/cop.glb', B: '/models/characters/robber.glb' },
-  saber: { A: '/models/characters/saber_ct.glb', B: '/models/characters/saber_t.glb' },
+  copsTerrorists: { A: '/models/characters/ct_sas.glb', B: '/models/characters/tr_guerilla.glb' },   // both rigged with asset_tool rig-humanoid (CT sas, TR guerilla)
 }
-const SKIN_OF_SET: Record<string, SkinId> = { copRobber: 'classic', saberDesert: 'saber' }
+const SKIN_OF_SET: Record<string, SkinId> = { copsTerrorists: 'copsTerrorists' }
 export function skinOfSet(setId: string): SkinId | null { return SKIN_OF_SET[setId] ?? null }
 const DEG = Math.PI / 180
 const TELEPORT_M = 3

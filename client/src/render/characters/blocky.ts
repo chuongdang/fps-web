@@ -3,10 +3,10 @@ import { TEAMS } from '@fps/shared'
 import { createKit } from './kit'
 import type { CharacterSet } from './types'
 
-// Cops (blue, kepi cap) vs Terrorists (dark grey shirt, black trousers, grey mask, brown hair)
+// Cops & Terrorists fallback (the skinned models live in characterRig.ts). Blocky cops (blue, kepi cap) vs Terrorists (dark grey shirt, black trousers, grey mask, brown hair)
 export const blocky: CharacterSet = {
-  id: 'copRobber',
-  label: t('renderB.charset.blocky'),
+  id: 'copsTerrorists',
+  label: t('renderB.charset.copsTerrorists'),
   build(team) {
     const cop = team === 'A'
     const cloth = cop ? TEAMS.A.color : 0x3a3a3a

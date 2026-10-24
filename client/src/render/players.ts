@@ -5,7 +5,7 @@ import { defaultMovement, DEFENSE, ECONOMY, INFECTION, NetFlag, TEAMS, WEAPONS, 
 import { makeBlobShadow } from './blobShadow'
 import { MUZZLE_FALLBACK, makeFlashTexture, adjustModel } from './viewmodel'
 import { BlockArm } from './blockArm'
-import { poses, weaponPose, getAnchor, scanModelAnchors, colorOf, type Vec3, type WeaponPose } from './poses'
+import { poses, weaponPose, armsOf, getAnchor, scanModelAnchors, colorOf, type Vec3, type WeaponPose } from './poses'
 import { getCharacterSet, disposeRig, type CharacterRig } from './characters'
 import { makeSkeletalRig, requestCharacters, requestZombieModels, skeletalEnabled, skeletalReady, skinOfSet, zombieModelReady } from './characterRig'
 import { GRENADE_ID, SMOKE_ID, isGrenadeId } from '@fps/shared'
@@ -257,11 +257,11 @@ function solveSkelArms(a: Actor, weapon: number, adsT: number): void {
     getAnchor(weapon, side === 'R' ? 'hand_r' : 'hand_l', _anchor)
     _handTarget.copy(_anchor).applyMatrix4(a.holder.matrixWorld)
     arm.upper.getWorldPosition(_sh)
-    const pl = side === 'R' ? c.poleR : c.poleL
-    _pole.set(pl[0], pl[1], pl[2]).applyQuaternion(_rq).add(_sh)
+    const pl = side === 'R' ? c.poleR : c.poleL, adj = armsOf(weapon, 'third')[side]
+    _pole.set(pl[0] + adj.elbow[0], pl[1] + adj.elbow[1], pl[2] + adj.elbow[2]).applyQuaternion(_rq).add(_sh)
     ;(side === 'R' ? sk.lastTargetR : sk.lastTargetL).copy(_handTarget)
-    arm.solve(_handTarget, _gq, _pole, sk.ikWeight)
-    arm.applyGrip(sk.ikWeight)
+    arm.solve(_handTarget, _gq, _pole, sk.ikWeight, adj)
+    arm.applyGrip(sk.ikWeight, adj)
   }
 }
 
@@ -328,7 +328,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
   // Rebuild when the team changes (TeamAssigned arrives after the first snapshot) or the character set changes
   function ensure(p: RenderPlayer): Actor | null {
     const team = info?.modelTeam?.(p.id, p.flags) ?? info?.teamOf(p.id) ?? 'A'
-    const skin = skinOfSet(getCharacterSet(setId).id)   // skinned set (Desert Sandstorm, Cops & Terrorists) -> the matching skin
+    const skin = skinOfSet(getCharacterSet(setId).id)   // skinned set (Cops & Terrorists) -> the matching skin
     // Dedicated zombie model (Defense, mother zombie): until loaded, a normal zombie is not drawn, while an infected player still stands with the human model
     const zm = skeletalEnabled() ? zombieModelOf(p) : null
     const zReady = !!zm && zombieModelReady(zm.file)
@@ -340,7 +340,7 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     if (!a && zm && !zReady && ZOMBIE_TYPES[p.ztype ?? '']) return null   // Defense zombie: wait for the model
     if (a && (a.rig.team !== team || !!a.rig.skel !== wantSkel || a.zfile !== zfile)) { dropActor(p.id, a); a = undefined }
     if (!a) {
-      a = makeActor(wantSkel ? makeSkeletalRig(skin ?? 'saber', team, zfile || undefined) : getCharacterSet(setId).build(team), (p.flags & NetFlag.Dead) !== 0)
+      a = makeActor(wantSkel ? makeSkeletalRig(skin ?? 'copsTerrorists', team, zfile || undefined) : getCharacterSet(setId).build(team), (p.flags & NetFlag.Dead) !== 0)
       a.zfile = zfile
       scene.add(a.rig.root)
       actors.set(p.id, a)
@@ -392,13 +392,18 @@ export function createPlayersRenderer(scene: THREE.Scene, info?: TeamInfo) {
     a.gunId = weapon
     a.pinOff = false; a.pulling = false; a.thrown = false
     if (weapon === SMOKE_ID) tintSmoke(a.gun)   // smoke: the M67 model tinted grey
-    if (isGrenadeId(weapon)) {   // grenade: palm centre (anchor hand_r) coincides with the gunAnchor origin
+    // Grenade and one-handed gun on a skinned character: the grip (anchor hand_r) coincides with the gunAnchor origin (the palm centre),
+    // otherwise the gun hangs by its model origin, e.g. the knife handle floats above the fist
+    const byGrip = isGrenadeId(weapon) || (!!a.rig.skel && weaponPose(weapon).third.hold === 'oneHand')
+    if (byGrip) {
       getAnchor(weapon, 'hand_r', _anchor)
-      a.gun.position.set(-_anchor.x, -_anchor.y, -_anchor.z)
+      // anchors live in the model's parent space, so keep the model root's own offset (MODEL_ADJUST, e.g. the knife) and subtract the anchor from it
+      a.gun.position.sub(_anchor)
     }
     parent.add(a.gun)
     // Muzzle coordinates pre-measured in gunGroup space (the 'muzzle' node is inside the scaled GunRoot so it cannot be used directly)
     a.flash.position.copy(MUZZLE_FALLBACK[weapon] ?? MUZZLE_FALLBACK[0]!)
+    if (byGrip) a.flash.position.add(a.gun.position)
   }
 
   function hideGun(a: Actor): void {

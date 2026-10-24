@@ -9,7 +9,6 @@ export default {
   'renderB.zombie.screamer': 'Zombie gào',
   'renderB.zombie.boss': 'Đại Ca Zombie',
 
-  'renderB.charset.blocky': 'Cớm & Khủng bố',
   'renderB.charset.robot': 'Robot (khối hộp)',
-  'renderB.charset.saberDesert': 'Bão Cát Sa Mạc',
+  'renderB.charset.copsTerrorists': 'Cớm & Khủng bố',
 } as Record<string, string>

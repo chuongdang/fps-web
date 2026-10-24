@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { Btn, INPUT_STARVE_GRACE_TICKS, MsgType, defaultMovement, loadMap, type AnyMsg, type InputCmd, type MapFile, type Transport } from '@fps/shared'
+import { Btn, INPUT_GAP_WAIT_TICKS, INPUT_STARVE_GRACE_TICKS, MAX_INPUTS_PER_TICK, MAX_INPUT_QUEUE, MsgType, defaultMovement, loadMap, type AnyMsg, type InputCmd, type MapFile, type Transport } from '@fps/shared'
 import type { CollisionWorld } from '@fps/shared/physics/world'
 import { RoomManager } from './room'
 import { enqueueCmds, stepPlayer, sendSnapshots } from './simulation'
@@ -21,9 +21,9 @@ const map = loadMap({ name: 't', mirrorX: true, boxes: [], ramps: [], spawnsA: [
 const cmd = (seq: number, buttons = 0, extra: Partial<InputCmd> = {}): InputCmd =>
   ({ seq, buttons, yaw: 0, pitch: 0, weapon: 3, ...extra })
 
-function setup() {
+function setup(unreliable = false) {
   const got: AnyMsg[] = []
-  const t: Transport = { send: m => { got.push(m) }, onMessage: () => {}, onClose: () => {} }
+  const t: Transport = { send: m => { got.push(m) }, onMessage: () => {}, onClose: () => {}, ...(unreliable ? { unreliableActive: () => true } : null) }
   const rm = new RoomManager(map, () => 0)
   const { room, player } = rm.join('r', 'A', t, 0, 'A')
   player.world = flatWorld
@@ -36,16 +36,16 @@ describe('stepPlayer', () => {
     const { p } = setup()
     enqueueCmds(p, [cmd(0, Btn.Forward), cmd(1, Btn.Forward)])
     stepPlayer(p, defaultMovement)
-    expect(p.lastProcessedSeq).toBe(1)    // MAX_INPUTS_PER_TICK = 2
+    expect(p.lastProcessedSeq).toBe(1)    // both fit in one tick (MAX_INPUTS_PER_TICK = 3)
     expect(p.inputQueue.length).toBe(0)
   })
 
-  it('at most 2 cmds per tick', () => {
+  it('at most MAX_INPUTS_PER_TICK cmds per tick', () => {
     const { p } = setup()
-    enqueueCmds(p, [cmd(0), cmd(1), cmd(2), cmd(3)])
+    enqueueCmds(p, [cmd(0), cmd(1), cmd(2), cmd(3), cmd(4)])
     stepPlayer(p, defaultMovement)
-    expect(p.lastProcessedSeq).toBe(1)
-    expect(p.inputQueue.length).toBe(2)
+    expect(p.lastProcessedSeq).toBe(MAX_INPUTS_PER_TICK - 1)
+    expect(p.inputQueue.length).toBe(5 - MAX_INPUTS_PER_TICK)
   })
 
   it('a cmd with a duplicate seq does not run twice', () => {
@@ -62,9 +62,40 @@ describe('stepPlayer', () => {
 
   it('drops the oldest cmd when the queue exceeds MAX_INPUT_QUEUE', () => {
     const { p } = setup()
-    enqueueCmds(p, Array.from({ length: 15 }, (_, i) => cmd(i)))
-    expect(p.inputQueue.length).toBe(10)
+    for (let i = 0; i < MAX_INPUT_QUEUE + 5; i++) enqueueCmds(p, [cmd(i)])   // one cmd per message, like the client
+    expect(p.inputQueue.length).toBe(MAX_INPUT_QUEUE)
     expect(p.inputQueue[0]!.seq).toBe(5)
+  })
+
+  // A TCP stall holds the cmds back and delivers them in one burst: every one must still be simulated, so the server ends where the client predicted
+  describe('a stalled connection', () => {
+    const run = (stallStartTick: number, stallTicks: number, total = 240) => {
+      const { p } = setup()
+      const buttons = (seq: number) => Btn.Forward | (seq % 50 === 20 ? Btn.Jump : 0) | (seq % 70 < 35 ? Btn.Left : Btn.Right)
+      const sent: InputCmd[] = []
+      for (let tick = 0; tick < total; tick++) {
+        const c = cmd(tick, buttons(tick), { yaw: tick * 0.01 })
+        sent.push(c)
+        const now = 5000 + tick * 1000 / 60   // simulated clock: cmds are rejected if their seq runs ahead of real time
+        const stalled = tick >= stallStartTick && tick < stallStartTick + stallTicks
+        if (tick === stallStartTick + stallTicks) for (const held of sent.slice(stallStartTick, tick)) enqueueCmds(p, [held], now)   // the stall ends: the held messages arrive at once
+        if (!stalled) enqueueCmds(p, [c], now)
+        if (stalled || tick > 0) stepPlayer(p, defaultMovement)
+      }
+      for (let i = 0; i < 12; i++) stepPlayer(p, defaultMovement)   // let the server catch up (few enough ticks that no idle step starts: that one is the starvation rule, tested below)
+      return { p, sent }
+    }
+    const reference = (sent: InputCmd[]) => {
+      const { p } = setup()
+      for (const c of sent) { enqueueCmds(p, [c], 5000 + c.seq * 1000 / 60); stepPlayer(p, defaultMovement) }
+      return p
+    }
+
+    it.each([[15, '250 ms'], [30, '500 ms']])('%i ticks (%s): no cmd is dropped, the server ends in the state the client predicted', (stallTicks) => {
+      const { p, sent } = run(60, stallTicks)
+      expect(p.lastProcessedSeq).toBe(sent[sent.length - 1]!.seq)
+      expect(p.state.pos).toEqual(reference(sent).state.pos)
+    })
   })
 
   it('invalid cmds are dropped', () => {
@@ -294,5 +325,119 @@ describe('fall damage', () => {
     enqueueCmds(p, [cmd(0, Btn.Jump)])
     for (let i = 0; i < 120; i++) stepPlayer(p, defaultMovement, room)
     expect(p.hp).toBe(100)
+  })
+})
+
+describe('cmds arriving out of order (an unreliable channel)', () => {
+  const seqs = (p: ReturnType<typeof setup>['p']) => p.inputQueue.map(c => c.seq)
+  const NOW = 5000
+
+  it('the queue is kept sorted by seq, without duplicates, and without cmds already simulated', () => {
+    const { p } = setup(true)
+    enqueueCmds(p, [cmd(3), cmd(1)], NOW); enqueueCmds(p, [cmd(2), cmd(2), cmd(3)], NOW)
+    expect(seqs(p)).toEqual([1, 2, 3])
+    for (let i = 0; i < 3; i++) stepPlayer(p, defaultMovement)
+    expect(p.lastProcessedSeq).toBe(3)
+    enqueueCmds(p, [cmd(2), cmd(3), cmd(4)], NOW)   // the redundancy repeats 2 and 3
+    expect(seqs(p)).toEqual([4])
+  })
+
+  it('a missing cmd is waited for: later ones are held until the late packet brings it, then all run in order', () => {
+    const { p } = setup(true)
+    enqueueCmds(p, [cmd(0), cmd(1)], NOW); stepPlayer(p, defaultMovement)
+    enqueueCmds(p, [cmd(4), cmd(5), cmd(6), cmd(7)], NOW)   // the packet with 2 and 3 is late
+    for (let i = 0; i < INPUT_GAP_WAIT_TICKS; i++) stepPlayer(p, defaultMovement)
+    expect(p.lastProcessedSeq).toBe(1)                       // still waiting
+    enqueueCmds(p, [cmd(2), cmd(3), cmd(4), cmd(5)], NOW)    // it arrives
+    stepPlayer(p, defaultMovement); stepPlayer(p, defaultMovement)
+    expect(p.lastProcessedSeq).toBe(7)
+  })
+
+  it('on a reliable transport there is no waiting: a gap is final, the next cmd runs at once', () => {
+    const { p } = setup(false)
+    enqueueCmds(p, [cmd(0), cmd(1)], NOW); stepPlayer(p, defaultMovement)
+    enqueueCmds(p, [cmd(5)], NOW); stepPlayer(p, defaultMovement)
+    expect(p.lastProcessedSeq).toBe(5)
+  })
+
+  it('a cmd that never comes is given up after INPUT_GAP_WAIT_TICKS, then the queue moves on', () => {
+    const { p } = setup(true)
+    enqueueCmds(p, [cmd(0), cmd(1)], NOW); stepPlayer(p, defaultMovement)
+    enqueueCmds(p, [cmd(4), cmd(5)], NOW)
+    for (let i = 0; i < INPUT_GAP_WAIT_TICKS; i++) { stepPlayer(p, defaultMovement); expect(p.lastProcessedSeq).toBe(1) }
+    stepPlayer(p, defaultMovement)
+    expect(p.lastProcessedSeq).toBe(5)
+  })
+
+  it('a stream of redundant packets with random delay (0-6 ticks), reordering and 5% loss ends exactly where an in-order stream does', () => {
+    let seed = 99
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 }
+    const buttons = (seq: number) => Btn.Forward | (seq % 45 === 7 ? Btn.Jump : 0) | (seq % 80 < 40 ? Btn.Left : Btn.Right)
+    const make = (seq: number) => cmd(seq, buttons(seq), { yaw: seq * 0.013 })
+    const TICKS = 400
+    const { p } = setup(true)
+    stepPlayer(p, defaultMovement)   // both players start grounded (the first step of a new player is an idle one)
+    const inflight: { at: number; cmds: InputCmd[] }[] = []
+    for (let tick = 0; tick < TICKS + 30; tick++) {   // (the last 30 ticks only deliver what is still in flight)
+      if (tick < TICKS && rnd() >= 0.05) inflight.push({ at: tick + Math.floor(rnd() * 7), cmds: [Math.max(0, tick - 3), Math.max(0, tick - 2), Math.max(0, tick - 1), tick].filter((x, i, a) => a.indexOf(x) === i).map(make) })
+      for (const m of inflight.filter(f => f.at === tick)) enqueueCmds(p, m.cmds, 5000 + tick * 1000 / 60)
+      stepPlayer(p, defaultMovement)
+    }
+    const ref = setup(true).p
+    stepPlayer(ref, defaultMovement)
+    for (let seq = 0; seq < TICKS; seq++) { enqueueCmds(ref, [make(seq)], 5000 + seq * 1000 / 60); stepPlayer(ref, defaultMovement) }
+    expect(p.lastProcessedSeq).toBe(TICKS - 1)
+    expect(p.state.pos[0]).toBeCloseTo(ref.state.pos[0], 9); expect(p.state.pos[2]).toBeCloseTo(ref.state.pos[2], 9)
+  })
+})
+
+describe('sendSnapshots: wpn and loadout only when they changed', () => {
+  const snaps = (got: AnyMsg[]) => got.filter((m): m is Extract<AnyMsg, { t: typeof MsgType.Snapshot }> => m.t === MsgType.Snapshot)
+  const SNAP_TICK = 0   // tick % SNAPSHOT_EVERY_TICKS === 0
+
+  it('the first snapshot carries both, an unchanged one carries neither (money always)', () => {
+    const { room, got } = setup()
+    sendSnapshots(room, SNAP_TICK, 100); sendSnapshots(room, SNAP_TICK, 150)
+    const [a, b] = snaps(got)
+    expect(a!.wpn).toBeDefined(); expect(a!.loadout).toBeDefined()
+    expect(b!.wpn).toBeUndefined(); expect(b!.loadout).toBeUndefined()
+    expect(b!.money).toBeDefined()
+  })
+
+  it('a changed weapon state (a shot, a reload, ammo) is sent again, once', () => {
+    const { room, p, got } = setup()
+    sendSnapshots(room, SNAP_TICK, 100)
+    p.weapon.ammo[0] = (p.weapon.ammo[0] ?? 0) - 1; p.weapon.nextFireMs += 100
+    sendSnapshots(room, SNAP_TICK, 150); sendSnapshots(room, SNAP_TICK, 200)
+    const s = snaps(got)
+    expect(s[1]!.wpn).toBeDefined()
+    expect(s[1]!.wpn!.ammo[0]).toBe(p.weapon.ammo[0])
+    expect(s[1]!.loadout).toBeUndefined()
+    expect(s[2]!.wpn).toBeUndefined()
+  })
+
+  it('a changed loadout (bought a weapon) is sent again; so is a changed magazine multiplier', () => {
+    const { room, p, got } = setup()
+    sendSnapshots(room, SNAP_TICK, 100)
+    p.loadout.slots[1] = { key: 'colt', paid: 500 }
+    sendSnapshots(room, SNAP_TICK, 150)
+    p.weapon.magMult = 2
+    sendSnapshots(room, SNAP_TICK, 200)
+    const s = snaps(got)
+    expect(s[1]!.loadout).toEqual(p.loadout.slots); expect(s[1]!.wpn).toBeUndefined()
+    expect(s[2]!.wpn!.magMult).toBe(2); expect(s[2]!.loadout).toBeUndefined()
+  })
+
+  it('every player is tracked on its own: a player who joins later gets the full state even though the first one already holds it', () => {
+    const rm = new RoomManager(map, () => 0)
+    const gotA: AnyMsg[] = [], gotB: AnyMsg[] = []
+    const tr = (got: AnyMsg[]): Transport => ({ send: m => { got.push(m) }, onMessage: () => {}, onClose: () => {} })
+    const { room } = rm.join('r', 'A', tr(gotA), 0, 'A')
+    sendSnapshots(room, SNAP_TICK, 100)
+    rm.join('r', 'B', tr(gotB), 0, 'B')
+    sendSnapshots(room, SNAP_TICK, 150)
+    expect(snaps(gotA)[1]!.wpn).toBeUndefined()
+    expect(snaps(gotB)).toHaveLength(1)
+    expect(snaps(gotB)[0]!.wpn).toBeDefined(); expect(snaps(gotB)[0]!.loadout).toBeDefined()
   })
 })

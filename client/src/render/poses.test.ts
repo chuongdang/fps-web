@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import raw from './poses.json'
-import { loadPoses, WEAPON_KEYS } from './poses'
+import { loadPoses, armsOf, armAdjustDefault, weaponPose, WEAPON_KEYS } from './poses'
 
 describe('loadPoses', () => {
   it('poses.json is valid: all 8 guns present, long guns held with 2 hands, pistols/knife with 1 hand in the 3rd-person view', () => {
@@ -22,5 +22,35 @@ describe('loadPoses', () => {
     expect(() => loadPoses(null)).not.toThrow()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe('arm adjustments (armsOf)', () => {
+  it('are created with zeros for both hands, the same object every call (no per-frame allocation)', () => {
+    const w = weaponPose(0), keepFirst = w.first.arms, keepThird = w.third.arms   // the gun's tuned values must not matter here
+    w.first.arms = undefined; w.third.arms = undefined
+    const a = armsOf(0, 'first')
+    expect(a.R).toEqual(armAdjustDefault()); expect(a.L).toEqual(armAdjustDefault())
+    expect(armsOf(0, 'first')).toBe(a)
+    expect(armsOf(0, 'third')).not.toBe(a)
+    w.first.arms = keepFirst; w.third.arms = keepThird
+  })
+  it('a partial block from the file is completed with zeros, keeping what it has', () => {
+    const w = weaponPose(0)
+    const keep = w.first.arms
+    w.first.arms = { R: { upperTwistDeg: 12 } } as never
+    const a = armsOf(0, 'first')
+    expect(a.R.upperTwistDeg).toBe(12); expect(a.R.wristDeg).toEqual([0, 0, 0]); expect(a.R.manual).toEqual([]); expect(a.L).toEqual(armAdjustDefault())
+    w.first.arms = keep
+  })
+  it('loadPoses keeps the file untouched when the live copy is edited', () => {
+    const file = { weapons: { ak47: { first: { arms: { R: { upperTwistDeg: 5, fingers: { index: [1, 2, 3] } } } } } } }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const p = loadPoses(file)
+    warn.mockRestore()
+    p.weapons.ak47!.first.arms!.R.upperTwistDeg = 99
+    ;(p.weapons.ak47!.first.arms!.R.fingers.index as number[])[0] = 77
+    expect(file.weapons.ak47.first.arms.R.upperTwistDeg).toBe(5)
+    expect(file.weapons.ak47.first.arms.R.fingers.index).toEqual([1, 2, 3])
   })
 })

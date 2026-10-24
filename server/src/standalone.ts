@@ -9,6 +9,7 @@ import type { AddressInfo } from 'net'
 import { WebSocketServer } from 'ws'
 import { MAPS } from '../../assets/maps'
 import { createGameServer } from './gameServer'
+import { rtcConfigFromEnv } from './rtcTransport'
 import { createStaticHandler } from './staticServer'
 import { lanAddresses } from './lan'
 import { APP_VERSION } from './version'
@@ -115,7 +116,7 @@ async function main(): Promise<void> {
   if (args.port) config.port = args.port
   if (args.noOpen) config.openBrowser = false
 
-  const game = createGameServer({ maps: MAPS, allowDebugCmds: false, maxRooms: config.maxRooms, version: APP_VERSION })
+  const game = createGameServer({ maps: MAPS, allowDebugCmds: false, maxRooms: config.maxRooms, version: APP_VERSION, rtc: rtcConfigFromEnv(process.env) })
   const server = createServer(createStaticHandler(gameDir))
   const wss = new WebSocketServer({ noServer: true })
   game.attach(wss)

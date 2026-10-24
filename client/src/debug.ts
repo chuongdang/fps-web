@@ -5,6 +5,14 @@ import { interp } from './net/interpolation'
 import type { SnapshotStore } from './net/snapshots'
 import type { Prediction } from './net/prediction'
 import { weaponSyncStats } from './net/weaponSync'
+import { rtcDebug } from './net/rtc'
+
+function rtcLine(): string {
+  const t = rtcDebug.transport!
+  const st = t.stats
+  const path = t.unreliableActive?.() ? 'WebRTC (unreliable)' : 'WebSocket'
+  return `net path  ${path}   [rtc ${rtcDebug.state}]  sent ${st.sentUnreliable} udp / ${st.sentReliable} ws   recv ${st.recvUnreliable} udp / ${st.recvReliable} ws   fallbacks ${st.fallbacks}`
+}
 
 export function initDebugOverlay(
   net?: PingStats,
@@ -38,6 +46,7 @@ export function initDebugOverlay(
       ...(pred?.() ? [`weapon: server mismatches ${weaponSyncStats.mismatches}/${weaponSyncStats.checks}`] : []),
       ...(snap?.() ? [`snapshot/s ${snap()!.perSec.toFixed(1)}   ghost(F5) server ghosts`] : []),
       ...(snap?.()?.serverTime ? [`snapshot: serverNow − serverTime = ${(clock.serverNow() - snap()!.serverTime).toFixed(0)} ms   #${snap()!.count}`] : []),
+      ...(rtcDebug.transport ? [rtcLine()] : []),
       ...(net ? [`RTT  ${net.rttMs.toFixed(0)} ms   out-of-order pongs ${net.outOfOrder}`, `interp delay ${interp.delayMs.toFixed(0)} ms (one-way ${clock.oneWayMs.toFixed(0)})`, `serverNow ${clock.serverNow().toFixed(0)}   offset ${clock.offset.toFixed(1)}${clock.synced ? '' : ' (not synced)'}`] : []),
     ].join('\n')
   }

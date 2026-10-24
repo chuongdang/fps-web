@@ -1,5 +1,6 @@
 import { encode as mpEncode, decode as mpDecode } from '@msgpack/msgpack'
 import { Btn, type InputCmd, type PlayerState } from './movement'
+import { SNAPSHOT_MARKER, encodeSnapshotFrame, decodeSnapshotFrame } from './snapshotCodec'
 import type { HitBox } from './hitbox'
 import { SLOT_COUNT, type WeaponState } from './weapons'
 import type { OwnedWeapon } from './economy'
@@ -22,6 +23,8 @@ export const MsgType = {
   OfflineCmd: 9,     // plan 15: control an offline room (add/remove bots, switch side, infinite money); only offline rooms accept it
   DropWeapon: 10,    // G: drop the held gun (shared/weaponDrop.ts)
   PickupWeapon: 11,  // E: pick up the nearest dropped gun in reach
+  RtcOffer: 12,      // WebRTC upgrade (net/rtc.ts, shared/unreliable.ts): the client's SDP offer for an unreliable DataChannel, over the WebSocket
+  RtcCandidate: 13,  // ICE candidate, either direction, over the WebSocket
   // Server → Client
   Welcome: 101,
   Pong: 102,
@@ -62,6 +65,7 @@ export const MsgType = {
   WeaponDropSpawn: 150,   // a gun was dropped (or: a gun already lying here when you joined)
   WeaponDropRemove: 151,  // a dropped gun was picked up / expired (id -1 = every dropped gun)
   HoldSlot: 152,          // the server changed which slot you hold (after a drop / pickup): the next cmd must carry it
+  RtcAnswer: 160,         // reply to RtcOffer: the SDP answer, or `error` when the server has no WebRTC (the client stays on the WebSocket)
 } as const
 
 export type MsgTypeValue = (typeof MsgType)[keyof typeof MsgType]
@@ -76,7 +80,13 @@ export interface PingMsg {
   t: typeof MsgType.Ping
   clientTime: number
   rtt?: number   // latest RTT measured by the client (ms), used by the server for the ping column on the scoreboard
+  ka?: true      // keepalive on the unreliable channel (shared/unreliable.ts): only says "this path works", never reaches the game code
 }
+
+// WebRTC upgrade signalling (over the WebSocket, never over the unreliable channel itself)
+export interface RtcOfferMsg { t: typeof MsgType.RtcOffer; sdp: string }
+export interface RtcCandidateMsg { t: typeof MsgType.RtcCandidate; candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null }
+export interface RtcAnswerMsg { t: typeof MsgType.RtcAnswer; sdp?: string; error?: string }
 
 export interface JoinMsg {
   t: typeof MsgType.Join
@@ -428,10 +438,12 @@ export interface PongMsg {
   t: typeof MsgType.Pong
   clientTime: number
   serverTime: number
+  ka?: true      // keepalive on the unreliable channel (see PingMsg.ka)
 }
 
 export type AnyMsg =
   | JoinMsg | InputsMsg | PingMsg | SetDebugMsg | ChooseTeamMsg | BuyMsg | DropWeaponMsg | PickupWeaponMsg | ListRoomsMsg | OfflineCmdMsg
+  | RtcOfferMsg | RtcCandidateMsg | RtcAnswerMsg
   | WelcomeMsg | PongMsg | SnapshotMsg | PlayerJoinedMsg | PlayerLeftMsg | HitConfirmMsg | ShotFxMsg | DebugShotMsg | KillMsg | RespawnMsg | HurtMsg | MatchStateMsg | TeamAssignedMsg | ScoreboardMsg | BuyResultMsg | MoneyEventMsg | GrenadeSpawnMsg | GrenadeExplodeMsg | GrenadeAnimMsg | WeaponDropSpawnMsg | WeaponDropRemoveMsg | HoldSlotMsg | RoomListMsg | JoinRejectedMsg | DebugCmdMsg | RoundEndMsg | RoundResetMsg | MatchEndMsg | OfflineStateMsg | BotDebugMsg | NavDebugMsg | InfectedMsg | HeroChosenMsg | InfectionCountMsg | SniffedMsg | DefenseStateMsg | WaveStartMsg | WaveClearMsg | DefenseEndMsg | TelegraphMsg
 
 export const MAX_PITCH = 1.56
@@ -480,9 +492,12 @@ export function netToState(n: NetPlayer): PlayerState {
 }
 
 export function encode(msg: AnyMsg): Uint8Array {
+  if (msg.t === MsgType.Snapshot) return encodeSnapshotFrame(msg)   // the one hot message has its own compact format (snapshotCodec.ts)
   return mpEncode(msg)
 }
 
 export function decode(buf: Uint8Array | ArrayBuffer): AnyMsg {
-  return mpDecode(buf) as AnyMsg
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+  if (bytes[0] === SNAPSHOT_MARKER) return { t: MsgType.Snapshot, ...decodeSnapshotFrame(bytes) }
+  return mpDecode(bytes) as AnyMsg
 }

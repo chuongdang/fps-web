@@ -86,15 +86,15 @@ describe('character set per room', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake(), b = fake()
     const first = rm.join('r', 'A', a.t, 0, 'auto', 'robot')
-    const second = rm.join('r', 'B', b.t, 0, 'auto', 'copRobber')   // asks for copRobber but the room is already robot
+    const second = rm.join('r', 'B', b.t, 0, 'auto', 'copsTerrorists')   // asks for copsTerrorists but the room is already robot
     expect(first.room.characterSet).toBe('robot')
     expect(second.room.characterSet).toBe('robot')
     expect(b.got[0]).toMatchObject({ t: MsgType.Welcome, characterSet: 'robot' })
   })
-  it('defaults to saberDesert (Desert Sandstorm)', () => {
+  it('defaults to copsTerrorists (Cops & Terrorists)', () => {
     const rm = new RoomManager(map, () => 0)
     const a = fake()
     rm.join('x', 'A', a.t)
-    expect(a.got[0]).toMatchObject({ characterSet: 'saberDesert' })
+    expect(a.got[0]).toMatchObject({ characterSet: 'copsTerrorists' })
   })
 })

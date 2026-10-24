@@ -77,60 +77,32 @@
     "url": ""
   },
   {
-    "file": "models/characters/cop.glb",
-    "author": "UNVERIFIED",
-    "source": "Character model taken from a community library (plan 11: \"Dust2\" CT/T version), rigged with Mixamo, renamed cop/robber",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
+    "file": "models/characters/tr_guerilla.glb",
+    "source": "\"TR guerilla\" – no skeleton in the source: rigged with the 65-bone Mixamo skeleton, converted to a T-pose, skinned and given the shared Mixamo animations by tools/blender/asset_tool.py rig-humanoid",
+    "author": "3axap (https://sketchfab.com/3axapV)",
+    "license": "CC-BY 4.0",
+    "url": "https://sketchfab.com/3d-models/tr-guerilla-c3ccfd867f2a489b96c64c0300cf911b"
   },
   {
-    "file": "models/characters/cop_fparms.glb",
-    "author": "UNVERIFIED",
-    "source": "Character model taken from a community library (plan 11: \"Dust2\" CT/T version), rigged with Mixamo, renamed cop/robber",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
+    "file": "models/characters/tr_guerilla_fparms.glb",
+    "source": "\"TR guerilla\" – the two arms of the rigged body (tr_guerilla.glb) as the first-person arms, by tools/blender/asset_tool.py rig-humanoid --fparms",
+    "author": "3axap (https://sketchfab.com/3axapV)",
+    "license": "CC-BY 4.0",
+    "url": "https://sketchfab.com/3d-models/tr-guerilla-c3ccfd867f2a489b96c64c0300cf911b"
   },
   {
-    "file": "models/characters/robber.glb",
-    "author": "UNVERIFIED",
-    "source": "Character model taken from a community library (plan 11: \"Dust2\" CT/T version), rigged with Mixamo, renamed cop/robber",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
+    "file": "models/characters/ct_sas.glb",
+    "source": "\"CT sas\" – no skeleton in the source: rigged with the 65-bone Mixamo skeleton, converted to a T-pose, skinned and given the shared Mixamo animations by tools/blender/asset_tool.py rig-humanoid --preset=ct_sas",
+    "author": "3axap (https://sketchfab.com/3axapV)",
+    "license": "CC-BY 4.0",
+    "url": "https://sketchfab.com/3d-models/ct-sas-7c73c0f836f146bfaaa4c310e3e141f9"
   },
   {
-    "file": "models/characters/robber_fparms.glb",
-    "author": "UNVERIFIED",
-    "source": "Character model taken from a community library (plan 11: \"Dust2\" CT/T version), rigged with Mixamo, renamed cop/robber",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
-  },
-  {
-    "file": "models/characters/saber_ct.glb",
-    "author": "UNVERIFIED",
-    "source": "Saber character model (assets/source/characters/mixamo_in/saber-*.fbx), rigged with Mixamo",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
-  },
-  {
-    "file": "models/characters/saber_ct_fparms.glb",
-    "author": "UNVERIFIED",
-    "source": "Saber character model (assets/source/characters/mixamo_in/saber-*.fbx), rigged with Mixamo",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
-  },
-  {
-    "file": "models/characters/saber_t.glb",
-    "author": "UNVERIFIED",
-    "source": "Saber character model (assets/source/characters/mixamo_in/saber-*.fbx), rigged with Mixamo",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
-  },
-  {
-    "file": "models/characters/saber_t_fparms.glb",
-    "author": "UNVERIFIED",
-    "source": "Saber character model (assets/source/characters/mixamo_in/saber-*.fbx), rigged with Mixamo",
-    "license": "Model: UNVERIFIED; rig/animation from Mixamo: Adobe Mixamo terms",
-    "url": ""
+    "file": "models/characters/ct_sas_fparms.glb",
+    "source": "\"CT sas\" – the two arms of the rigged body (ct_sas.glb) as the first-person arms, by tools/blender/asset_tool.py rig-humanoid --fparms",
+    "author": "3axap (https://sketchfab.com/3axapV)",
+    "license": "CC-BY 4.0",
+    "url": "https://sketchfab.com/3d-models/ct-sas-7c73c0f836f146bfaaa4c310e3e141f9"
   },
   {
     "file": "models/colt.glb",

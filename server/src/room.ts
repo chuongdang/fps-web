@@ -24,7 +24,9 @@ export interface Player {
   world: CollisionWorld | null   // separate Rapier world per player (kinematic capsule); loaded asynchronously after join
   idleCmd: InputCmd              // reusable scratch for when the queue is empty
   starvedTicks: number           // consecutive ticks with an empty queue
+  gapTicks?: number              // consecutive ticks the next cmd has been missing while later ones wait in the queue (INPUT_GAP_WAIT_TICKS)
   weapon: WeaponState            // ammo/reload/fire rate held by the server (4.1)
+  snapSent?: { wpn: WeaponState; loadout: string }   // what this client already holds from earlier snapshots: unchanged wpn / loadout are not sent again (sendSnapshots)
   recoil: RecoilState            // accumulated recoil used to compute shot direction (same formula as the client)
   alive: boolean                 // dead players have no hitbox, do not shoot and accept no movement input
   hp: number                     // hp <= 0 while still alive = waiting for end-of-tick settlement (so two players killing each other in the same tick both die)

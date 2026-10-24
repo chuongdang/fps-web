@@ -1,5 +1,6 @@
 import { isZombieMode, MsgType, CHARACTER_SETS, DEFAULT_CHARACTER_SET, DEFAULT_SETTINGS, GAME_MODES, SETTINGS_LIMITS, MAX_PLAYERS_LIMITS, type GameMode, type JoinRejectReason, type MapInfo, type RoomConfig, type RoomInfo, type RoomOptions, type TeamId, type Transport } from '@fps/shared'
 import { connectWebSocket, maybeNetsim } from './transport'
+import { enableRtc } from './rtc'
 import { getCharacterSet } from '../render/characters'
 import { createLocalTransport, startOfflineWorker } from './localTransport'
 import { APP_VERSION } from '../version'
@@ -190,7 +191,7 @@ export function showLobby(): Promise<Session | null> {
         saved.name = name
         err.textContent = t('lobby.connecting')
         connectWebSocket(WS_URL).then(raw => {
-          const transport = maybeNetsim(raw)
+          const transport = enableRtc(maybeNetsim(raw))   // snapshots / inputs over WebRTC when it works, WebSocket otherwise
           const direct = new URLSearchParams(location.search).get('room')
           if (direct) {   // ?room=xxx: join directly (dev / two-tab testing), skipping the list
             joinRoom(transport, { name, room: direct, team: saved.team as TeamId | 'auto' }).then(done, e2 => { err.textContent = String(e2.message) })
@@ -275,7 +276,7 @@ export function showLobby(): Promise<Session | null> {
       const mapSel = mk('select', INPUT)
       const charSel = mk('select', INPUT)
       charSel.innerHTML = CHARACTER_SETS.map(id => `<option value="${id}">${t('lobby.room.character', { name: getCharacterSet(id).label })}</option>`).join('')
-      charSel.value = DEFAULT_CHARACTER_SET   // always default to the Desert Sandstorm set
+      charSel.value = DEFAULT_CHARACTER_SET   // always default to the Cops & Terrorists set
       const teamSel = teamSelect(saved.team)
       const maxSel = mk('select', INPUT)
       for (let n = MAX_PLAYERS_LIMITS[1]; n >= MAX_PLAYERS_LIMITS[0]; n -= 2) maxSel.add(new Option(t('lobby.room.maxPlayers', { n }), String(n)))

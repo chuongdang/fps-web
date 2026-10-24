@@ -1,15 +1,14 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { TeamId } from '@fps/shared'
-import { poses, type Vec3 } from './poses'
+import { poses, type ArmsCfg, type Vec3 } from './poses'
 import { forcedTeam, type SkinId } from './characterRig'
 import { SkeletonArm, type FingerBones } from './skeletonArm'
 
 // Viewmodel arms built from the character model's own two arms (plan 11, C.6): <team>_fparms.glb only has upper arm -> hand,
 // but still has the full Mixamo bones, so SkeletonArm (IK + fingers) is reused exactly as in third person. All coordinates are in the viewmodel camera space.
 const FILES: Record<SkinId, Record<TeamId, string>> = {
-  classic: { A: '/models/characters/cop_fparms.glb', B: '/models/characters/robber_fparms.glb' },
-  saber: { A: '/models/characters/saber_ct_fparms.glb', B: '/models/characters/saber_t_fparms.glb' },
+  copsTerrorists: { A: '/models/characters/ct_sas_fparms.glb', B: '/models/characters/tr_guerilla_fparms.glb' },
 }
 const DEG = Math.PI / 180
 
@@ -23,7 +22,7 @@ export class FpArms {
   readonly root = new THREE.Group()
   sets = new Map<string, Set>()   // key `${skin}:${team}`
   private team: TeamId = forcedTeam() ?? 'A'
-  private skin: SkinId = 'saber'
+  private skin: SkinId = 'copsTerrorists'
   private requested = new Set<SkinId>()
   private failed = false
 
@@ -116,13 +115,13 @@ export class FpArms {
 
   /**
    * Solve IK after the gun has been placed. gunQuat = gun orientation in camera space; targetL null = left arm is not solved
-   * (one-handed gun): that arm stays in T-pose, so it is hidden.
+   * (one-handed gun): that arm stays in T-pose, so it is hidden. arms = this gun's first-person arm adjustments (poses.ts armsOf).
    */
-  solve(targetR: THREE.Vector3, targetL: THREE.Vector3 | null, gunQuat: THREE.Quaternion, rotDegR?: Vec3, rotDegL?: Vec3): void {
+  solve(targetR: THREE.Vector3, targetL: THREE.Vector3 | null, gunQuat: THREE.Quaternion, rotDegR?: Vec3, rotDegL?: Vec3, arms?: ArmsCfg): void {
     const s = this.sets.get(this.key)
     if (!s) return
     const f = poses.first
-    for (const [arm, target, pole, rot] of [[s.armR, targetR, f.armsPoleR, rotDegR], [s.armL, targetL, f.armsPoleL, rotDegL]] as const) {
+    for (const [arm, target, pole, rot, adj] of [[s.armR, targetR, f.armsPoleR, rotDegR, arms?.R], [s.armL, targetL, f.armsPoleL, rotDegL, arms?.L]] as const) {
       if (!target) continue
       // grenade: each hand can rotate independently relative to the grenade direction (poses: first.grenade.handRotDegR/L)
       const q = rot ? _hq.copy(gunQuat).multiply(_hq2.setFromEuler(_he.set(rot[0] * DEG, rot[1] * DEG, rot[2] * DEG, 'XYZ'))) : gunQuat
@@ -130,9 +129,18 @@ export class FpArms {
       arm.slideToReach(target, f.armsMaxExtension)
       arm.upper.getWorldPosition(_sh)
       _pole.set(pole[0], pole[1], pole[2]).add(_sh)
-      arm.solve(target, q, _pole, 1)
-      arm.applyGrip(1)
+      if (adj) _pole.x += adj.elbow[0], _pole.y += adj.elbow[1], _pole.z += adj.elbow[2]
+      arm.solve(target, q, _pole, 1, adj)
+      arm.applyGrip(1, adj)
     }
+  }
+
+  /** The right elbow in the viewmodel scene (camera) space, as of the last solve: the knife slash swings the hold about it. False while the arms are not shown. */
+  elbowR(out: THREE.Vector3): boolean {
+    const s = this.sets.get(this.key)
+    if (!s || !this.root.visible) return false
+    s.armR.fore.getWorldPosition(out)
+    return true
   }
 
   /** Left hand (so the magazine follows it while reloading) */

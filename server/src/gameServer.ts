@@ -3,6 +3,7 @@ import { createWorld } from '@fps/shared/physics/world'
 import { WebSocketServer } from 'ws'
 import { buildNav } from './bots/nav'
 import { wrapWebSocket } from './transport'
+import { withServerRtc, type RtcConfig } from './rtcTransport'
 import { startHeartbeat } from './heartbeat'
 import { TickLoop } from './tickLoop'
 import { stepRoom, sendSnapshots } from './simulation'
@@ -21,6 +22,8 @@ export interface GameServerOptions {
   version?: string
   /** Log ticks/second every 10 seconds while players are connected (dev server) */
   logTicks?: boolean
+  /** WebRTC upgrade for snapshots / inputs (see rtcTransport.ts); undefined = off, everything stays on the WebSocket */
+  rtc?: RtcConfig
 }
 
 export interface GameServer {
@@ -76,7 +79,10 @@ export function createGameServer(opts: GameServerOptions): GameServer {
   let stopHeartbeat: (() => void) | null = null
   const attach = (wss: WebSocketServer): void => {
     stopHeartbeat = startHeartbeat(wss)
-    wss.on('connection', ws => handleConnection(ctx, wrapWebSocket(ws)))
+    wss.on('connection', ws => {
+      const base = wrapWebSocket(ws)
+      handleConnection(ctx, opts.rtc ? withServerRtc(base, { log: ctx.log, ...opts.rtc }) : base)
+    })
   }
 
   // Rapier initialises wasm on the first createWorld; several concurrent createWorld calls while cold corrupt memory

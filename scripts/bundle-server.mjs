@@ -15,7 +15,7 @@ const result = await build({
   format: 'cjs',
   target: 'node24',                                  // matches .nvmrc
   outfile: join(root, 'build/server.cjs'),
-  external: ['bufferutil', 'utf-8-validate'],        // optional ws packages, ws skips them if missing
+  external: ['bufferutil', 'utf-8-validate', 'supports-color'],   // optional packages (ws, and debug used by werift): they skip them if missing
   define: { 'process.env.APP_VERSION': JSON.stringify(version) },
   metafile: true,
   logLevel: 'warning',
@@ -25,7 +25,7 @@ const result = await build({
 const bad = []
 for (const out of Object.values(result.metafile.outputs)) {
   for (const imp of out.imports) {
-    if (imp.external && !imp.path.startsWith('node:') && !builtinModules.includes(imp.path) && !['bufferutil', 'utf-8-validate'].includes(imp.path)) bad.push(imp.path)
+    if (imp.external && !imp.path.startsWith('node:') && !builtinModules.includes(imp.path) && !['bufferutil', 'utf-8-validate', 'supports-color'].includes(imp.path)) bad.push(imp.path)
   }
 }
 if (bad.length) {

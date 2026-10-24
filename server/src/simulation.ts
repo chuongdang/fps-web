@@ -1,6 +1,6 @@
 import {
-  Btn, DT, MatchPhase, NetFlag, INPUT_STARVE_GRACE_TICKS, MAX_INPUTS_PER_TICK, MAX_INPUT_QUEUE, MsgType, SEQ_AHEAD_SLACK_MS, SNAPSHOT_EVERY_TICKS, TICK_RATE, VOID_Y,
-  WEAPONS, ZOMBIE, CLAW_HEAVY_ID, DEFENSE, fallDamage, DOWNED_BUTTON_MASK, DOWNED_WEAPON_SLOT, isValidCmd, movementFor, phaseButtonMask, moveSpeedMul, adsMoveFor, adsWanted, recoverRecoil, stateToNet, stepMovement, stepWeaponCmd,
+  Btn, DT, MatchPhase, NetFlag, INPUT_STARVE_GRACE_TICKS, INPUT_GAP_WAIT_TICKS, MAX_INPUTS_PER_TICK, MAX_INPUT_QUEUE, MsgType, SEQ_AHEAD_SLACK_MS, SNAPSHOT_EVERY_TICKS, TICK_RATE, VOID_Y,
+  WEAPONS, ZOMBIE, CLAW_HEAVY_ID, DEFENSE, fallDamage, DOWNED_BUTTON_MASK, DOWNED_WEAPON_SLOT, isValidCmd, movementFor, phaseButtonMask, moveSpeedMul, adsMoveFor, adsWanted, recoverRecoil, stateToNet, stepMovement, stepWeaponCmd, weaponStatesEqual, copyWeaponState, makeWeaponState,
   type MovementConfig, type NetPlayer,
 } from '@fps/shared'
 import type { Player, Room } from './room'
@@ -15,6 +15,7 @@ const HELD_MASK = ~(Btn.Jump | Btn.Fire | Btn.Reload | Btn.Ability | Btn.Sniff)
 const MAX_CMDS_PER_MSG = 16
 
 // Client cmds are untrusted: drop invalid ones; if the queue gets too long, drop the oldest cmd.
+// The queue is kept sorted by seq without duplicates: an unreliable channel delivers packets late, out of order and with repeats of the same cmds.
 // seq drives weapon timing (fire rate/reload), so it must not run faster than real time:
 // a cmd whose seq exceeds SEQ_AHEAD_SLACK_MS relative to the first cmd's reference is dropped (seq jumps, bursts).
 export function enqueueCmds(p: Player, cmds: unknown, nowMs: number = performance.now()): void {
@@ -25,8 +26,13 @@ export function enqueueCmds(p: Player, cmds: unknown, nowMs: number = performanc
     const offset = nowMs - c.seq * 1000 / TICK_RATE
     if (p.seqOffset === null) p.seqOffset = offset
     else if (offset < p.seqOffset - SEQ_AHEAD_SLACK_MS) continue
-    p.inputQueue.push(c)
-    if (p.inputQueue.length > MAX_INPUT_QUEUE) p.inputQueue.shift()
+    if (c.seq <= p.lastProcessedSeq) continue   // already simulated: a repeat of a cmd that was sent redundantly
+    const q = p.inputQueue
+    let at = q.length
+    while (at > 0 && q[at - 1]!.seq > c.seq) at--
+    if (at > 0 && q[at - 1]!.seq === c.seq) continue   // already queued
+    q.splice(at, 0, c)
+    if (q.length > MAX_INPUT_QUEUE) q.shift()
   }
 }
 
@@ -56,6 +62,15 @@ export function stepPlayer(p: Player, baseCfg: MovementConfig, room: Room | null
   const cfg = movementFor(baseCfg, p.zstats, p.speedMult)
   let ran = 0
   while (ran < MAX_INPUTS_PER_TICK && p.inputQueue.length > 0) {
+    const head = p.inputQueue[0]!
+    if (p.lastProcessedSeq >= 0 && head.seq > p.lastProcessedSeq + 1 && p.transport.unreliableActive?.()) {
+      // Only over an unreliable channel (a WebSocket delivers in order, so a gap there is final): a cmd is missing before the head because its packet is late
+      // or was lost. Wait for it a few ticks; after that the step is given up and the queue moves on.
+      if (ran > 0) break
+      p.gapTicks = (p.gapTicks ?? 0) + 1
+      if (p.gapTicks <= INPUT_GAP_WAIT_TICKS) break
+    }
+    p.gapTicks = 0
     const cmd = p.inputQueue.shift()!
     if (cmd.seq <= p.lastProcessedSeq) continue   // duplicate or old
     // Forbidden buttons (dead / countdown / match over): strip the buttons, still step so the player falls to the ground, turns and keeps being acked.
@@ -170,6 +185,20 @@ export function sendSnapshots(room: Room, tick: number, serverTime: number): voi
   }
   for (const p of room.players.values()) {
     if (p.npc) continue   // NPC zombies have no connection
-    p.transport.send({ t: MsgType.Snapshot, tick, serverTime, ack: p.lastProcessedSeq, players, wpn: p.weapon, money: p.money, loadout: p.loadout.slots })
+    // The weapon state (~300 bytes) and the loadout (~60) are the receiver's own and rarely change: send them only when they differ from what this client
+    // already holds (the connection is ordered and reliable; the client keeps the last one, net/snapshots.ts). The first snapshot always carries both.
+    // Not over an unreliable channel though: a lost snapshot would leave the client with a stale weapon state until the next change. Then everything is sent
+    // every time, and the first snapshot after going back to the WebSocket is a full one again.
+    if (p.transport.unreliableActive?.()) p.snapSent = undefined
+    const sent = p.snapSent
+    const loadoutKey = JSON.stringify(p.loadout.slots)
+    const wpnChanged = !sent || !weaponStatesEqual(sent.wpn, p.weapon) || sent.wpn.magMult !== p.weapon.magMult
+    const loadoutChanged = !sent || sent.loadout !== loadoutKey
+    if ((wpnChanged || loadoutChanged) && !p.transport.unreliableActive?.()) {
+      const ss = p.snapSent ??= { wpn: makeWeaponState(p.weapon.slots, p.weapon.magMult), loadout: loadoutKey }
+      if (wpnChanged) { ss.wpn.magMult = p.weapon.magMult; copyWeaponState(ss.wpn, p.weapon) }
+      ss.loadout = loadoutKey
+    }
+    p.transport.send({ t: MsgType.Snapshot, tick, serverTime, ack: p.lastProcessedSeq, players, ...(wpnChanged ? { wpn: p.weapon } : null), money: p.money, ...(loadoutChanged ? { loadout: p.loadout.slots } : null) })
   }
 }

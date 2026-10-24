@@ -859,7 +859,7 @@ sessionP.then(session => {
     updateTargets(targets, dt)
     const myTeamNow = sessionRef?.teams.get(sessionRef.yourId) ?? 'A'
     vm.setBlockArms(sessionRef?.characterSet === 'robot')
-    vm.setSkin(skinOfSet(sessionRef?.characterSet || DEFAULT_CHARACTER_SET) ?? 'saber')
+    vm.setSkin(skinOfSet(sessionRef?.characterSet || DEFAULT_CHARACTER_SET) ?? 'copsTerrorists')
     if (myTeamNow !== vmTeam) { vmTeam = myTeamNow; vm.setTeam(myTeamNow) }
     poseEditor.tick(dt)
     vm.update(dt)

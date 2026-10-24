@@ -1,11 +1,12 @@
 import * as THREE from 'three'
-import { poses, WEAPON_KEYS, type FingerName, weaponPose, getAnchor, notifyPosesChanged, exportPoses, exportWeapon, resetPosesToFile, type Vec3 } from './poses'
+import { poses, WEAPON_KEYS, type FingerName, weaponPose, armsOf, armAdjustDefault, getAnchor, notifyPosesChanged, onPosesReplaced, exportPoses, exportWeapon, resetPosesToFile, type ArmView, type Vec3 } from './poses'
 import type { ViewmodelHandle } from './viewmodel'
+import { setOverlayHidden } from '../input'
 
 // Debug (plan 10, P.6): F9 = pose editor panel (hands + gun, writes straight into the running `poses`), F10 = orbit camera
 // looking at your own model. Tuning only; when done, "Copy JSON" and paste into render/poses.json.
-type Tab = 'First' | 'Third' | 'Character' | 'Grip' | 'Anchors' | 'Style' | 'Reload'
-const TABS: Tab[] = ['First', 'Third', 'Character', 'Grip', 'Anchors', 'Style', 'Reload']
+type Tab = 'First' | 'Third' | 'Character' | 'Grip' | 'Arms' | 'Anchors' | 'Style' | 'Reload'
+const TABS: Tab[] = ['First', 'Third', 'Character', 'Grip', 'Arms', 'Anchors', 'Style', 'Reload']
 const FINGERS: FingerName[] = ['thumb', 'index', 'middle', 'ring', 'pinky']
 const AXES = ['x', 'y', 'z']
 
@@ -21,6 +22,7 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
   let open = false
   let orbit = false
   let tab: Tab = 'First'
+  let armView: ArmView = 'first', armSide: 'R' | 'L' = 'R'   // Arms tab: which view's adjustments / which hand
   let selWeapon = -1   // -1 = follow the held gun
   let orbitYaw = 0.6, orbitPitch = 0.25, orbitDist = 3
   let playT = -1       // reload preview: elapsed time (seconds)
@@ -57,8 +59,8 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
     num.onchange = () => { rng.value = num.value; apply(parseFloat(num.value)) }
     row.append(rng, num); parent.append(row)
   }
-  function vecRows(parent: HTMLElement, label: string, v: () => Vec3, min: number, max: number, step?: number): void {
-    AXES.forEach((ax, i) => numRow(parent, `${label}.${ax}`, () => v()[i]!, n => { v()[i] = n }, min, max, step))
+  function vecRows(parent: HTMLElement, label: string, v: () => Vec3, min: number, max: number, step?: number, names: readonly string[] = AXES): void {
+    names.forEach((ax, i) => numRow(parent, label ? `${label}.${ax}` : ax, () => v()[i]!, n => { v()[i] = n }, min, max, step))
   }
   function selectRow(parent: HTMLElement, label: string, opts: string[], get: () => string, set: (v: string) => void): void {
     const row = el('div', 'margin:3px 0'); row.append(el('span', 'display:inline-block;width:84px', label))
@@ -70,6 +72,12 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
   function btn(parent: HTMLElement, text: string, fn: () => void): void {
     const b = el('button', 'margin:2px 3px 2px 0;background:#223;color:#dde;border:1px solid #556;cursor:pointer', text)
     b.onclick = fn; parent.append(b)
+  }
+  function checkRow(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void): HTMLElement {
+    const row = el('label', 'display:inline-flex;align-items:center;gap:3px;margin:2px 8px 2px 0;cursor:pointer')
+    const c = el('input'); c.type = 'checkbox'; c.checked = get()
+    c.onchange = () => { set(c.checked); dirty(); render() }
+    row.append(c, el('span', '', label)); parent.append(row); return row
   }
   function copy(obj: unknown): void {
     const text = JSON.stringify(obj, null, 2)
@@ -153,6 +161,38 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
           for (let i = 0; i < 3; i++) numRow(body, `${f}${i + 1}`, () => v[i]!, n => { v[i] = n }, -120, 120, 1)
         }
       }
+    } else if (tab === 'Arms') {
+      const arms = armsOf(id, armView), a = arms[armSide]
+      body.append(el('div', 'color:#999', 'Per gun, per view, per hand. Added on top of the shared settings (First / Character poles + hand rotation, Grip curls). All zero = unchanged. "Copy this gun" exports it.'))
+      selectRow(body, 'view', ['first', 'third'], () => armView, v => { armView = v as ArmView; render() })
+      selectRow(body, 'hand', ['R', 'L'], () => armSide, v => { armSide = v as 'R' | 'L'; render() })
+      if (armView === 'first' && armSide === 'L' && w.first.hold === 'oneHand') body.append(el('div', 'color:#fa6', 'This gun is held one-handed in first person: the left arm is hidden.'))
+      if (armView === 'third') body.append(el('div', 'color:#999', 'Third person: look at it with the F10 orbit camera.'))
+      const head2 = (s: string) => body.append(el('div', 'margin-top:8px;padding-top:4px;border-top:1px solid #445;color:#8af;font-weight:bold', s))
+      head2('Arm and forearm')
+      body.append(el('div', 'color:#999', 'Elbow: metres added to the elbow pole (swings the elbow). Twists: the skin rolls, the elbow / hand stay.'))
+      vecRows(body, 'elbow', () => a.elbow, -1, 1, 0.01)
+      numRow(body, 'upperTwist°', () => a.upperTwistDeg, v => { a.upperTwistDeg = v }, -180, 180, 1)
+      numRow(body, 'foreTwist°', () => a.foreTwistDeg, v => { a.foreTwistDeg = v }, -180, 180, 1)
+      head2('Hand')
+      body.append(el('div', 'color:#999', 'Palm move (m, gun space: x right, y up, z towards the stock)'))
+      vecRows(body, '', () => a.palmPos, -0.2, 0.2, 0.002, ['right +', 'up +', 'back +'])
+      body.append(el('div', 'color:#999', 'Palm rotate about the palm (degrees, gun space)'))
+      vecRows(body, '', () => a.palmRotDeg, -180, 180, 0.5, ['pitch', 'yaw', 'roll'])
+      body.append(el('div', 'color:#999', 'Wrist (degrees, hand-bone axes): the palm and fingers pivot at the wrist, the forearm stays'))
+      vecRows(body, '', () => a.wristDeg, -90, 90, 1, ['flex', 'twist', 'side'])
+      head2('Fingers')
+      body.append(el('div', 'color:#999', 'Degrees per joint (knuckle out) added to the shared Grip curl. manual = ignore the shared curl, only these numbers. spread: + fans out (a finger away from the thumb side, the thumb away from the fingers).'))
+      for (const f of FINGERS) {
+        checkRow(body, `${f} manual`, () => a.manual.includes(f), on => { const i = a.manual.indexOf(f); if (on && i < 0) a.manual.push(f); else if (!on && i >= 0) a.manual.splice(i, 1) })
+        for (let j = 0; j < 3; j++) numRow(body, `${f}${j + 1}`, () => a.fingers[f]?.[j] ?? 0, v => { (a.fingers[f] ??= [0, 0, 0])[j] = v }, -60, 120, 1)
+        numRow(body, `${f} spread`, () => a.spread[f] ?? 0, v => { a.spread[f] = v }, -45, 45, 1)
+      }
+      head2('Tools')
+      const other = armSide === 'R' ? 'L' : 'R'
+      btn(body, `Copy fingers ${armSide} → ${other}`, () => { const o = arms[other]; o.fingers = structuredClone(a.fingers); o.spread = structuredClone(a.spread); o.manual = [...a.manual]; dirty() })
+      btn(body, `Zero hand ${armSide}`, () => { Object.assign(a, armAdjustDefault()); dirty(); render() })
+      btn(body, 'Zero both hands', () => { Object.assign(arms.R, armAdjustDefault()); Object.assign(arms.L, armAdjustDefault()); dirty(); render() })
     } else if (tab === 'Anchors') {
       for (const n of ['hand_r', 'hand_l', 'mag'] as const) {
         if (!w.anchors[n]) { getAnchor(id, n, _v); w.anchors[n] = [_v.x, _v.y, _v.z] }
@@ -189,15 +229,21 @@ export function createPoseEditor(vm: ViewmodelHandle, weaponId: () => number, eq
     panel.append(body)
     const foot = el('div', 'margin-top:8px;border-top:1px solid #445;padding-top:6px')
     btn(foot, 'Copy JSON', () => copy(exportPoses()))
-    btn(foot, 'Copy this gun', () => copy({ [WEAPON_KEYS[id]!]: exportWeapon(id) }))
+    // poses.json shape, but only this gun under `weapons`: the shared tabs (First, Third, Character, Grip, Style, Reload: fov, armsScale, poles, shoulders...) come along,
+    // so nothing edited in them is missed (they are not part of any gun's own block)
+    btn(foot, 'Copy this gun + shared', () => { const { weapons: _all, ...shared } = exportPoses() as Record<string, unknown>; copy({ ...shared, weapons: { [WEAPON_KEYS[id]!]: exportWeapon(id) } }) })
     btn(foot, 'Reset to file', () => { resetPosesToFile(); render() })
     panel.append(foot)
   }
+
+  // poses.json changed on disk: the panel's sliders point at the replaced objects, draw them again (else edits go nowhere until a tab switch)
+  onPosesReplaced(() => { if (open) render() })
 
   function setOpen(v: boolean): void {
     open = v
     panel.style.display = v ? 'block' : 'none'
     vm.debug.showReach = v
+    setOverlayHidden(v)
     if (v) { document.exitPointerLock?.(); render() } else { vm.debug.freezeReload = -1; playT = -1 }
     for (const d of dots.values()) d.visible = v
   }

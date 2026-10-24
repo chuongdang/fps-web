@@ -30,7 +30,7 @@ Principle: nail the gameplay feel first, make it pretty later.
 | Client build | Vite |
 | Rendering | `three` |
 | Physics / collision | `@dimforge/rapier3d-compat` (client **and** server) |
-| Networking | `ws` (server), browser WebSocket (client) |
+| Networking | `ws` (server), browser WebSocket (client); `werift` (server, pure-JS WebRTC) + the browser's RTCDataChannel for the optional unreliable path for snapshots / inputs (off by default, `FPS_RTC=1`) |
 | Message encoding | `@msgpack/msgpack` |
 | Testing | `vitest` |
 | Running the dev server | `tsx` |

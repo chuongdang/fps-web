@@ -47,6 +47,9 @@ This file lives at the repo root. Claude Code reads it every session. **Follow i
 3. If two fixes did not solve it: stop, summarise what you tried, propose a different direction. Do not keep patching in circles.
 4. Never "fix" by nudging constants up and down until it seems to work.
 
+## Verifying in the browser
+- When you check the game by screenshot (headless Chrome, dev server), skip the "Click to play" overlay: hide it before taking the shot, so it does not dim the view or cover the middle of the screen. It is the full-screen `position:fixed; inset:0; z-index:10` div created in `client/src/input.ts` (text `hud.overlay.clickToPlay` / `tapToPlay`), e.g. `[...document.body.children].find(e => e.style.zIndex === '10' && e.style.inset === '0px')?.remove()`.
+
 ## After every task
 1. Run `npm run typecheck` and `npm test`; both must pass.
 2. Update `plan/PROGRESS.md` (tick the task, add a short note).

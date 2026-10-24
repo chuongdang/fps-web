@@ -4,6 +4,7 @@ import { TICK_RATE, MATCH } from '@fps/shared'
 import { MAPS } from '../../assets/maps'
 import { lanAddresses } from './lan'
 import { createGameServer } from './gameServer'
+import { rtcConfigFromEnv } from './rtcTransport'
 import { APP_VERSION } from './version'
 
 const PORT = Number(process.env.FPS_PORT) || 8081   // npm run play uses 8082 so it can run alongside npm run dev
@@ -15,7 +16,7 @@ if (Number(process.env.FPS_KILL_LIMIT) > 0) rules.killLimit = Number(process.env
 if (Number(process.env.FPS_END_MS) > 0) rules.endScreenMs = Number(process.env.FPS_END_MS)
 
 // Every map in the registry (assets/maps/index.ts) can be chosen when creating a room
-const game = createGameServer({ maps: MAPS, rules, allowDebugCmds: process.env.NODE_ENV !== 'production', logTicks: true, version: APP_VERSION })
+const game = createGameServer({ maps: MAPS, rules, allowDebugCmds: process.env.NODE_ENV !== 'production', logTicks: true, version: APP_VERSION, rtc: rtcConfigFromEnv(process.env) })
 
 const server = createServer((_req, res) => {
   res.writeHead(200)

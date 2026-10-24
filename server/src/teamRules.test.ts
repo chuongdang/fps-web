@@ -87,7 +87,7 @@ describe('room list', () => {
     const rm = new RoomManager(map, () => 0, rules, 'dm')
     rm.registerMap('m2', 'Map 2', map)
     add(rm, 'a', 'A'); add(rm, 'b', 'B')
-    rm.tryJoin('x', 'c', { send: () => {}, onMessage: () => {}, onClose: () => {} }, 0, 'auto', 'copRobber', 'm2')
+    rm.tryJoin('x', 'c', { send: () => {}, onMessage: () => {}, onClose: () => {} }, 0, 'auto', 'copsTerrorists', 'm2')
     const list = rm.list()
     expect(list.find(r => r.id === 'r')).toMatchObject({ mapId: 'dm', players: 2, teamA: 1, teamB: 1, maxPlayers: 10 })
     expect(list.find(r => r.id === 'x')).toMatchObject({ mapId: 'm2', players: 1 })

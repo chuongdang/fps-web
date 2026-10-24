@@ -79,7 +79,7 @@
       0,
       0
     ],
-    "armsScale": 1.4,
+    "armsScale": 1,
     "armsMaxExtension": 0.92,
     "armsPoleR": [
       0.4,
@@ -293,7 +293,63 @@
           0,
           1.5,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0,
+              0,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0,
+              0,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       },
       "first": {
         "hold": "twoHand",
@@ -312,7 +368,64 @@
           0,
           0,
           0
-        ]
+        ],
+        "adsEyeDist": 0.29,
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.018,
+              -0.006,
+              -0.014
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0.014,
+              0.002,
+              0.036
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "m16": {
@@ -363,7 +476,63 @@
           0,
           0,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.03,
+              0,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.006,
+              0.036,
+              0.032
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "colt": {
@@ -414,7 +583,63 @@
           0,
           0,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.036,
+              0.018,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0,
+              0,
+              0.2
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "rulo": {
@@ -465,7 +690,63 @@
           0,
           0,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.018,
+              0.022,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0,
+              0,
+              0.082
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "sniper": {
@@ -516,7 +797,63 @@
           0,
           0,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.062,
+              -0.004,
+              -0.02
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.004,
+              0.026,
+              0.034
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "shotgun": {
@@ -567,7 +904,63 @@
           0,
           0,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.042,
+              -0.008,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.008,
+              0.044,
+              0.196
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "knife": {
@@ -613,7 +1006,90 @@
           0.17,
           -0.305,
           -0.545
-        ]
+        ],
+        "adsRotDeg": [
+          0,
+          0,
+          0
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0.008,
+              0.004,
+              0.066
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {
+              "middle": [
+                13,
+                0,
+                80
+              ],
+              "thumb": [
+                31,
+                0,
+                0
+              ],
+              "index": [
+                37,
+                -30,
+                0
+              ]
+            },
+            "spread": {},
+            "manual": [
+              "thumb",
+              "index",
+              "middle",
+              "ring",
+              "pinky"
+            ]
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0,
+              0,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "smg": {
@@ -665,7 +1141,63 @@
           0,
           0,
           0
-        ]
+        ],
+        "arms": {
+          "R": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              -0.018,
+              -0.038,
+              -0.034
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          },
+          "L": {
+            "elbow": [
+              0,
+              0,
+              0
+            ],
+            "upperTwistDeg": 0,
+            "foreTwistDeg": 0,
+            "palmPos": [
+              0.012,
+              0,
+              0
+            ],
+            "palmRotDeg": [
+              0,
+              0,
+              0
+            ],
+            "wristDeg": [
+              0,
+              0,
+              0
+            ],
+            "fingers": {},
+            "spread": {},
+            "manual": []
+          }
+        }
       }
     },
     "m67": {
